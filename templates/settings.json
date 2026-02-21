@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git *)",
+      "Bash(ls *)",
+      "Bash(mv *)",
+      "Bash(echo *)"
+    ],
+    "defaultMode": "acceptEdits"
+  }
+}

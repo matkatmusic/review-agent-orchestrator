@@ -77,10 +77,27 @@ else
     fi
 fi
 
-# ---------- Step 4: Make scripts executable ----------
+# ---------- Step 4: Install .claude/settings.json ----------
+
+CLAUDE_DIR="$PROJECT_ROOT/.claude"
+SETTINGS_FILE="$CLAUDE_DIR/settings.json"
+
+log "Configuring Claude Code permissions..."
+mkdir -p "$CLAUDE_DIR"
+
+if [[ ! -f "$SETTINGS_FILE" ]]; then
+    cp "$SCRIPT_DIR/templates/settings.json" "$SETTINGS_FILE"
+    log "  Created: .claude/settings.json (agent permissions)"
+else
+    log "  .claude/settings.json already exists — skipping"
+    log "  Ensure it includes permissions for: Bash(git *), Bash(ls *), Bash(mv *), Bash(echo *)"
+fi
+
+# ---------- Step 5: Make scripts executable ----------
 
 chmod +x "$SCRIPT_DIR/scripts/review-questions-daemon.sh"
 chmod +x "$SCRIPT_DIR/scripts/review-questions.sh"
+chmod +x "$SCRIPT_DIR/scripts/launch-agent.sh"
 log "  Made scripts executable"
 
 # ---------- Done ----------

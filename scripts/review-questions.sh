@@ -129,7 +129,7 @@ spawn_agent_pane() {
     local launcher="$SUBMODULE_DIR/scripts/launch-agent.sh"
     local agent_cmd
     if [[ -f "$PROMPT_FILE" ]]; then
-        agent_cmd="unset CLAUDECODE; '${launcher}' '${PROMPT_FILE}' --worktree ${q_num} --add-dir '${PROJECT_ROOT}' --permission-mode acceptEdits --allowedTools 'Bash(git *)' 'Bash(ls *)' 'Bash(mv *)' 'Bash(echo *)' -- '${initial_msg}'; echo '[agent] ${q_num} finished. Press enter to close.'; read; rm -f '${lockfile}'"
+        agent_cmd="unset CLAUDECODE; '${launcher}' '${PROMPT_FILE}' --worktree ${q_num} --add-dir '${PROJECT_ROOT}' -- '${initial_msg}'; echo '[agent] ${q_num} finished. Press enter to close.'; read; rm -f '${lockfile}'"
     else
         echo "[review]   WARNING: Prompt file not found ($PROMPT_FILE). Launching bare claude."
         agent_cmd="unset CLAUDECODE; claude --worktree ${q_num}; echo '[agent] ${q_num} finished. Press enter to close.'; read; rm -f '${lockfile}'"
