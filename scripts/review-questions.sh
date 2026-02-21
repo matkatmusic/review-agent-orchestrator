@@ -11,6 +11,7 @@ source "$SCRIPT_DIR/../config.sh"
 
 PROJECT_ROOT="${1:?Usage: review-questions.sh <project_root>}"
 AWAITING_PATH="$PROJECT_ROOT/$AWAITING_DIR"
+LOCKS_DIR="$PROJECT_ROOT/.question-review-locks"
 
 # ---------- Helper functions ----------
 
@@ -18,14 +19,6 @@ AWAITING_PATH="$PROJECT_ROOT/$AWAITING_DIR"
 # with non-empty <text> content.
 has_pending_user_response() {
     local file="$1"
-
-    # Strategy: find the last <user_response><text>...</text></user_response> block
-    # and check if the <text> content is non-empty (not just whitespace).
-    #
-    # We check that:
-    # 1. The file contains at least one <user_response> block
-    # 2. The LAST such block has non-empty <text>
-    # 3. There is no <response_ block after the last <user_response>
 
     # Get line numbers of key tags
     local last_user_response last_response_agent
@@ -42,7 +35,6 @@ has_pending_user_response() {
     fi
 
     # Check if the <text> in the last user_response has non-whitespace content
-    # Extract text between the last <user_response> and its closing </user_response>
     local text_content
     text_content=$(sed -n "${last_user_response},\$p" "$file" \
         | sed -n '/<text>/,/<\/text>/p' \
@@ -59,51 +51,83 @@ extract_q_number() {
     echo "$filename" | grep -oE '^Q[0-9]+' || true
 }
 
-# Count active agent panes in the tmux session
-count_agent_panes() {
-    if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-        echo 0
-        return
+# ---------- Lockfile-based dedup ----------
+# Pane titles are unreliable (shells override them). Use lockfiles instead.
+# Each lockfile contains the tmux pane_id. If the pane still exists, the agent is active.
+
+ensure_locks_dir() {
+    mkdir -p "$LOCKS_DIR"
+    # Add to .gitignore if not already there
+    local gitignore="$PROJECT_ROOT/.gitignore"
+    if [[ -f "$gitignore" ]]; then
+        grep -qF '.question-review-locks' "$gitignore" 2>/dev/null || echo '.question-review-locks/' >> "$gitignore"
+    else
+        echo '.question-review-locks/' > "$gitignore"
     fi
-    # Count panes with titles starting with "Q" (agent panes)
-    # Exclude the default first pane
-    local count
-    count=$(tmux list-panes -t "$TMUX_SESSION" -F '#{pane_title}' 2>/dev/null \
-        | grep -cE '^Q[0-9]+' || true)
-    echo "$count"
 }
 
-# Check if a specific Q number has an active pane
-has_active_pane() {
+# Check if a specific Q number has an active agent (lockfile + pane still alive)
+has_active_agent() {
     local q_num="$1"
-    if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    local lockfile="$LOCKS_DIR/${q_num}.lock"
+
+    [[ ! -f "$lockfile" ]] && return 1
+
+    # Lockfile exists — check if the pane is still alive
+    local pane_id
+    pane_id=$(cat "$lockfile")
+
+    if tmux has-session -t "$TMUX_SESSION" 2>/dev/null \
+       && tmux list-panes -t "$TMUX_SESSION" -F '#{pane_id}' 2>/dev/null | grep -qF "$pane_id"; then
+        return 0  # pane alive, agent active
+    else
+        # Stale lockfile — pane is gone
+        rm -f "$lockfile"
         return 1
     fi
-    tmux list-panes -t "$TMUX_SESSION" -F '#{pane_title}' 2>/dev/null \
-        | grep -qE "^${q_num}$"
+}
+
+# Count active agent lockfiles (with live panes)
+count_active_agents() {
+    local count=0
+    if [[ -d "$LOCKS_DIR" ]]; then
+        for lockfile in "$LOCKS_DIR"/*.lock; do
+            [[ ! -f "$lockfile" ]] && continue
+            local pane_id
+            pane_id=$(cat "$lockfile")
+            if tmux has-session -t "$TMUX_SESSION" 2>/dev/null \
+               && tmux list-panes -t "$TMUX_SESSION" -F '#{pane_id}' 2>/dev/null | grep -qF "$pane_id"; then
+                count=$((count + 1))
+            else
+                rm -f "$lockfile"  # clean stale lock
+            fi
+        done
+    fi
+    echo "$count"
 }
 
 # Spawn a tmux pane for a question
 spawn_agent_pane() {
     local q_num="$1"
     local question_file="$2"
+    local lockfile="$LOCKS_DIR/${q_num}.lock"
 
     # Phase 1: bare claude --worktree, no prompt
     # Phase 2 will add: --permission-mode acceptEdits --allowedTools "..." 'prompt...'
-    # The wrapper ensures the pane stays open if claude exits unexpectedly
+    # On exit (success or failure), the lockfile is removed so dedup knows the pane is gone
     local pane_id
     pane_id=$(tmux split-window -t "$TMUX_SESSION" \
         -c "$PROJECT_ROOT" \
         -P -F '#{pane_id}' \
-        "claude --worktree $q_num || { echo '[agent] Claude exited with code \$?. Press enter to close.'; read; }")
+        "claude --worktree $q_num; rm -f '$lockfile'; echo '[agent] $q_num finished. Press enter to close.'; read")
 
-    # Set pane title on the newly created pane (for dedup tracking)
-    tmux select-pane -t "$pane_id" -T "$q_num"
+    # Write lockfile with pane_id for dedup tracking
+    echo "$pane_id" > "$lockfile"
 
     # Rebalance layout
     tmux select-layout -t "$TMUX_SESSION" tiled
 
-    echo "[review]   Spawned agent pane: $q_num"
+    echo "[review]   Spawned agent pane: $q_num (pane $pane_id)"
 }
 
 # ---------- Ensure tmux session exists ----------
@@ -128,6 +152,8 @@ if [[ ${#question_files[@]} -eq 0 ]]; then
     exit 0
 fi
 
+ensure_locks_dir
+
 spawned=0
 skipped_active=0
 skipped_no_response=0
@@ -143,14 +169,14 @@ for file in "${question_files[@]}"; do
         continue
     fi
 
-    # Check for active pane
-    if has_active_pane "$q_num"; then
+    # Check for active agent (lockfile + live pane)
+    if has_active_agent "$q_num"; then
         skipped_active=$((skipped_active + 1))
         continue
     fi
 
     # Check MAX_AGENTS
-    active=$(count_agent_panes)
+    active=$(count_active_agents)
     if [[ "$active" -ge "$MAX_AGENTS" ]]; then
         skipped_max=$((skipped_max + 1))
         echo "[review]   $q_num queued (max $MAX_AGENTS agents active)"
