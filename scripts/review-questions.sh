@@ -206,9 +206,10 @@ for file in "${question_files[@]}"; do
         continue
     fi
 
-    # Spawn agent
+    # Spawn agent (stagger to avoid git worktree lock contention)
     spawn_agent_pane "$q_num" "$file"
     spawned=$((spawned + 1))
+    sleep 3
 done
 
 # Only log if something happened
