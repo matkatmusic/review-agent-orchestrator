@@ -90,11 +90,12 @@ spawn_agent_pane() {
 
     # Phase 1: bare claude --worktree, no prompt
     # Phase 2 will add: --permission-mode acceptEdits --allowedTools "..." 'prompt...'
+    # The wrapper ensures the pane stays open if claude exits unexpectedly
     local pane_id
     pane_id=$(tmux split-window -t "$TMUX_SESSION" \
         -c "$PROJECT_ROOT" \
         -P -F '#{pane_id}' \
-        "claude --worktree $q_num")
+        "claude --worktree $q_num || { echo '[agent] Claude exited with code \$?. Press enter to close.'; read; }")
 
     # Set pane title on the newly created pane (for dedup tracking)
     tmux select-pane -t "$pane_id" -T "$q_num"
