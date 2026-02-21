@@ -7,11 +7,14 @@ set -euo pipefail
 # Usage: review-questions.sh <project_root>
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../config.sh"
+SUBMODULE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SUBMODULE_DIR/config.sh"
 
 PROJECT_ROOT="${1:?Usage: review-questions.sh <project_root>}"
 AWAITING_PATH="$PROJECT_ROOT/$AWAITING_DIR"
+RESOLVED_PATH="$PROJECT_ROOT/$RESOLVED_DIR"
 LOCKS_DIR="$PROJECT_ROOT/.question-review-locks"
+PROMPT_FILE="$SUBMODULE_DIR/$AGENT_PROMPT"
 
 # ---------- Helper functions ----------
 
@@ -115,10 +118,21 @@ spawn_agent_pane() {
     local question_file="$2"
     local lockfile="$LOCKS_DIR/${q_num}.lock"
 
-    # Phase 1: bare claude --worktree, no prompt
-    # Phase 2 will add: --permission-mode acceptEdits --allowedTools "..." 'prompt...'
+    # Relative path to question file (from project root)
+    local q_relpath="${question_file#"$PROJECT_ROOT"/}"
+
+    # Build the initial message with all context the agent needs
+    local initial_msg="Process question file: ${q_relpath} (Q number: ${q_num}). Main tree: ${PROJECT_ROOT}. Resolved dir: ${RESOLVED_DIR}. Awaiting dir: ${AWAITING_DIR}."
+
+    # Build claude command with prompt (Phase 2) or bare (Phase 1 fallback)
     # Lockfile is removed AFTER 'read' so it persists while the pane is open
-    local agent_cmd="claude --worktree $q_num; echo '[agent] $q_num finished. Press enter to close.'; read; rm -f '$lockfile'"
+    local agent_cmd
+    if [[ -f "$PROMPT_FILE" ]]; then
+        agent_cmd="claude --worktree ${q_num} --append-system-prompt \"\$(cat '${PROMPT_FILE}')\" --add-dir '${PROJECT_ROOT}' --permission-mode acceptEdits '${initial_msg}'; echo '[agent] ${q_num} finished. Press enter to close.'; read; rm -f '${lockfile}'"
+    else
+        echo "[review]   WARNING: Prompt file not found ($PROMPT_FILE). Launching bare claude."
+        agent_cmd="claude --worktree ${q_num}; echo '[agent] ${q_num} finished. Press enter to close.'; read; rm -f '${lockfile}'"
+    fi
 
     local pane_id
     if [[ "$SESSION_CREATED" == false ]] && ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then

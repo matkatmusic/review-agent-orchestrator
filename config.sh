@@ -24,3 +24,6 @@ TERMINAL_APP="Terminal"
 # Terminal window size (columns x rows)
 TERMINAL_COLS=220
 TERMINAL_ROWS=60
+
+# Agent prompt file (relative to submodule root)
+AGENT_PROMPT="prompts/review-agent.md"
