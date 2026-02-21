@@ -126,9 +126,10 @@ spawn_agent_pane() {
 
     # Build claude command with prompt (Phase 2) or bare (Phase 1 fallback)
     # Lockfile is removed AFTER 'read' so it persists while the pane is open
+    local launcher="$SUBMODULE_DIR/scripts/launch-agent.sh"
     local agent_cmd
     if [[ -f "$PROMPT_FILE" ]]; then
-        agent_cmd="unset CLAUDECODE; claude --worktree ${q_num} --append-system-prompt \"\$(cat '${PROMPT_FILE}')\" --add-dir '${PROJECT_ROOT}' --permission-mode acceptEdits --allowedTools 'Bash(git mv *)' 'Bash(git add *)' 'Bash(git commit *)' 'Bash(git diff *)' 'Bash(git -C *)' 'Bash(ls *)' 'Bash(mv *)' 'Bash(echo *)' -- '${initial_msg}'; echo '[agent] ${q_num} finished. Press enter to close.'; read; rm -f '${lockfile}'"
+        agent_cmd="unset CLAUDECODE; '${launcher}' '${PROMPT_FILE}' --worktree ${q_num} --add-dir '${PROJECT_ROOT}' --permission-mode acceptEdits --allowedTools 'Bash(git mv *)' 'Bash(git add *)' 'Bash(git commit *)' 'Bash(git diff *)' 'Bash(git -C *)' 'Bash(ls *)' 'Bash(mv *)' 'Bash(echo *)' -- '${initial_msg}'; echo '[agent] ${q_num} finished. Press enter to close.'; read; rm -f '${lockfile}'"
     else
         echo "[review]   WARNING: Prompt file not found ($PROMPT_FILE). Launching bare claude."
         agent_cmd="unset CLAUDECODE; claude --worktree ${q_num}; echo '[agent] ${q_num} finished. Press enter to close.'; read; rm -f '${lockfile}'"
