@@ -103,6 +103,12 @@ spawn_agent_pane() {
     echo "[review]   Spawned agent pane: $q_num"
 }
 
+# ---------- Ensure tmux session exists ----------
+
+if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    tmux new-session -d -s "$TMUX_SESSION" -x 200 -y 50 2>/dev/null || true
+fi
+
 # ---------- Main scan ----------
 
 # Bail early if Awaiting/ doesn't exist or is empty
