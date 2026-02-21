@@ -37,13 +37,14 @@ You are running inside a git worktree (created by `claude --worktree`). Your wor
 1. Read the question file.
 2. Add `**RESOLVED**` as the very first line, followed by a blank line.
 3. Move the file: `git mv <AWAITING_DIR>/Q<num>_*.md <RESOLVED_DIR>/`
-4. Commit: `git add -A && git commit -m "Resolve Q<num>"`
-5. **Apply to main tree:**
+4. Stage: `git add -A`
+5. Commit: `git commit -m "Resolved Q<num>"`
+6. **Apply to main tree:**
    - Run: `git -C <MAIN_TREE> mv <AWAITING_DIR>/Q<num>_<name>.md <RESOLVED_DIR>/Q<num>_<name>.md`
    - Then edit the file at its new absolute path in the main tree (`<MAIN_TREE>/<RESOLVED_DIR>/Q<num>_<name>.md`) to add the `**RESOLVED**` header.
    - Do NOT commit in the main tree.
-6. Print: "Resolved Q<num>. File moved to <RESOLVED_DIR>/."
-7. Exit the conversation with `/exit`.
+7. Print: "Resolved Q<num>. File moved to <RESOLVED_DIR>/."
+8. Exit the conversation with `/exit`.
 
 ### RESPOND
 
@@ -61,12 +62,13 @@ You are running inside a git worktree (created by `claude --worktree`). Your wor
 </user_response>
 ```
 3. Your response must directly address what the user said. Be specific, technical, and concise.
-4. Commit: `git add -A && git commit -m "Respond to Q<num>"`
-5. **Apply to main tree:**
+4. Stage: `git add -A`
+5. Commit: `git commit -m "Responded to Q<num>"`
+6. **Apply to main tree:**
    - Edit the same question file at its absolute path in the main tree (`<MAIN_TREE>/<AWAITING_DIR>/Q<num>_<name>.md`) with the identical changes.
    - Do NOT commit in the main tree.
-6. Print: "Responded to Q<num>."
-7. Exit the conversation with `/exit`.
+7. Print: "Responded to Q<num>."
+8. Exit the conversation with `/exit`.
 
 ### IMPLEMENT
 
@@ -91,22 +93,23 @@ Files changed:
     </text>
 </user_response>
 ```
-6. Commit: `git add -A && git commit -m "Implement Q<num>: <brief description>"`
-7. Send notification: run `echo $'\a'` (terminal bell).
-8. Print a summary of what was implemented.
-9. Use the `AskUserQuestion` tool to ask: "Ready to apply changes to main tree?" with options:
-   - "Yes (apply to main unstaged)"
-   - "No (reject and discard)"
-10. **Wait for user selection.**
-11. On **Yes**:
+6. Stage: `git add -A`
+7. Commit: `git commit -m "Implemented Q<num>: <brief description>"`
+8. Send notification: run `echo $'\a'` (terminal bell).
+9. Print a summary of what was implemented.
+10. Use the `AskUserQuestion` tool to ask: "Ready to apply changes to main tree?" with options:
+    - "Yes (apply to main unstaged)"
+    - "No (reject and discard)"
+11. **Wait for user selection.**
+12. On **Yes**:
     - Generate patch: `git diff HEAD~1..HEAD`
     - Apply to main tree: `git -C <MAIN_TREE> apply` (pipe the diff)
     - If apply fails, report the conflicting files. The user can fix conflicts in their editor and tell you "try again", or say "reject" to discard.
     - Do NOT commit in the main tree.
     - Print: "Applied Q<num> changes to main tree (unstaged)."
-12. On **No**:
+13. On **No**:
     - Print: "Discarded Q<num> implementation."
-13. Exit the conversation with `/exit`.
+14. Exit the conversation with `/exit`.
 
 ## Constraints
 
@@ -116,6 +119,7 @@ Files changed:
 - Do NOT amend commits or force-push.
 - If the question file format is unexpected or classification is truly ambiguous, explain what you see and ask the user which action to take.
 - Keep all output concise and technical.
+- Run each shell command separately — do NOT chain commands with `&&` or `;` or `|`. One command per Bash call.
 
 ## Question File Format Reference
 
