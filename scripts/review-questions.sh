@@ -114,12 +114,12 @@ spawn_agent_pane() {
 
     # Phase 1: bare claude --worktree, no prompt
     # Phase 2 will add: --permission-mode acceptEdits --allowedTools "..." 'prompt...'
-    # On exit (success or failure), the lockfile is removed so dedup knows the pane is gone
+    # Lockfile is removed AFTER 'read' so it persists while the pane is open
     local pane_id
     pane_id=$(tmux split-window -t "$TMUX_SESSION" \
         -c "$PROJECT_ROOT" \
         -P -F '#{pane_id}' \
-        "claude --worktree $q_num; rm -f '$lockfile'; echo '[agent] $q_num finished. Press enter to close.'; read")
+        "claude --worktree $q_num; echo '[agent] $q_num finished. Press enter to close.'; read; rm -f '$lockfile'")
 
     # Write lockfile with pane_id for dedup tracking
     echo "$pane_id" > "$lockfile"
