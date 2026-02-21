@@ -16,3 +16,7 @@ DEFERRED_DIR="$QUESTIONS_DIR/Deferred"
 
 # Scan interval in seconds (used by daemon)
 SCAN_INTERVAL=30
+
+# Terminal app to open for the tmux session
+# Options: "Terminal" (macOS default), "iTerm" (iTerm2)
+TERMINAL_APP="Terminal"

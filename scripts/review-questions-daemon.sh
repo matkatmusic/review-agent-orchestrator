@@ -22,11 +22,19 @@ if [[ ! -d "$PROJECT_ROOT/$QUESTIONS_DIR" ]]; then
     echo ""
 fi
 
-# ---------- Create or attach to tmux session ----------
+# ---------- Create tmux session and open visible window ----------
 
 if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     tmux new-session -d -s "$TMUX_SESSION" -x 200 -y 50
     echo "[daemon] Created tmux session: $TMUX_SESSION"
+
+    # Open a terminal window attached to the session so the user can see agent panes
+    if [[ "$TERMINAL_APP" == "iTerm" ]]; then
+        osascript -e "tell application \"iTerm2\" to create window with default profile command \"tmux attach -t $TMUX_SESSION\"" 2>/dev/null || true
+    else
+        osascript -e "tell application \"Terminal\" to do script \"tmux attach -t $TMUX_SESSION\"" 2>/dev/null || true
+    fi
+    echo "[daemon] Opened $TERMINAL_APP window attached to tmux session '$TMUX_SESSION'"
 else
     echo "[daemon] Tmux session '$TMUX_SESSION' already exists."
 fi
