@@ -20,3 +20,7 @@ SCAN_INTERVAL=30
 # Terminal app to open for the tmux session
 # Options: "Terminal" (macOS default), "iTerm" (iTerm2)
 TERMINAL_APP="Terminal"
+
+# Terminal window size (columns x rows)
+TERMINAL_COLS=220
+TERMINAL_ROWS=60

@@ -123,7 +123,7 @@ spawn_agent_pane() {
     local pane_id
     if [[ "$SESSION_CREATED" == false ]] && ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
         # Create session with this agent as pane 0 — no blank shell
-        pane_id=$(tmux new-session -d -s "$TMUX_SESSION" -x 200 -y 50 \
+        pane_id=$(tmux new-session -d -s "$TMUX_SESSION" -x "$TERMINAL_COLS" -y "$TERMINAL_ROWS" \
             -c "$PROJECT_ROOT" \
             -P -F '#{pane_id}' \
             "$agent_cmd")
