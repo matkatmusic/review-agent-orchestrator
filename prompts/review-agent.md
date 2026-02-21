@@ -92,7 +92,7 @@ Files changed:
 </user_response>
 ```
 6. Commit: `git add -A && git commit -m "Implement Q<num>: <brief description>"`
-7. Send notification: run `printf '\a'` (terminal bell).
+7. Send notification: run `echo $'\a'` (terminal bell).
 8. Print a summary of what was implemented.
 9. Use the `AskUserQuestion` tool to ask: "Ready to apply changes to main tree?" with options:
    - "Yes (apply to main unstaged)"
