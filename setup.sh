@@ -17,8 +17,9 @@ if [[ -z "$PROJECT_ROOT" ]]; then
     PROJECT_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 fi
 
-# Determine the submodule path relative to project root
-SUBMODULE_REL="$(realpath --relative-to="$PROJECT_ROOT" "$SCRIPT_DIR")"
+# Determine the submodule path relative to project root (macOS-compatible)
+SUBMODULE_ABS="$(cd "$SCRIPT_DIR" && pwd)"
+SUBMODULE_REL="${SUBMODULE_ABS#"$PROJECT_ROOT"/}"
 
 log() {
     echo "[setup] $*"
