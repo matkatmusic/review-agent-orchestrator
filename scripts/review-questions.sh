@@ -106,6 +106,9 @@ count_active_agents() {
     echo "$count"
 }
 
+# Track whether session was just created (first agent uses new-session, not split-window)
+SESSION_CREATED=false
+
 # Spawn a tmux pane for a question
 spawn_agent_pane() {
     local q_num="$1"
@@ -115,11 +118,22 @@ spawn_agent_pane() {
     # Phase 1: bare claude --worktree, no prompt
     # Phase 2 will add: --permission-mode acceptEdits --allowedTools "..." 'prompt...'
     # Lockfile is removed AFTER 'read' so it persists while the pane is open
+    local agent_cmd="claude --worktree $q_num; echo '[agent] $q_num finished. Press enter to close.'; read; rm -f '$lockfile'"
+
     local pane_id
-    pane_id=$(tmux split-window -t "$TMUX_SESSION" \
-        -c "$PROJECT_ROOT" \
-        -P -F '#{pane_id}' \
-        "claude --worktree $q_num; echo '[agent] $q_num finished. Press enter to close.'; read; rm -f '$lockfile'")
+    if [[ "$SESSION_CREATED" == false ]] && ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+        # Create session with this agent as pane 0 — no blank shell
+        pane_id=$(tmux new-session -d -s "$TMUX_SESSION" -x 200 -y 50 \
+            -c "$PROJECT_ROOT" \
+            -P -F '#{pane_id}' \
+            "$agent_cmd")
+        SESSION_CREATED=true
+    else
+        pane_id=$(tmux split-window -t "$TMUX_SESSION" \
+            -c "$PROJECT_ROOT" \
+            -P -F '#{pane_id}' \
+            "$agent_cmd")
+    fi
 
     # Write lockfile with pane_id for dedup tracking
     echo "$pane_id" > "$lockfile"
@@ -129,12 +143,6 @@ spawn_agent_pane() {
 
     echo "[review]   Spawned agent pane: $q_num (pane $pane_id)"
 }
-
-# ---------- Ensure tmux session exists ----------
-
-if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-    tmux new-session -d -s "$TMUX_SESSION" -x 200 -y 50 2>/dev/null || true
-fi
 
 # ---------- Main scan ----------
 
