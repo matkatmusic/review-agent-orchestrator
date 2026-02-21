@@ -90,12 +90,14 @@ spawn_agent_pane() {
 
     # Phase 1: bare claude --worktree, no prompt
     # Phase 2 will add: --permission-mode acceptEdits --allowedTools "..." 'prompt...'
-    tmux split-window -t "$TMUX_SESSION" \
+    local pane_id
+    pane_id=$(tmux split-window -t "$TMUX_SESSION" \
         -c "$PROJECT_ROOT" \
-        "claude --worktree $q_num"
+        -P -F '#{pane_id}' \
+        "claude --worktree $q_num")
 
-    # Set pane title for dedup tracking
-    tmux select-pane -t "$TMUX_SESSION" -T "$q_num"
+    # Set pane title on the newly created pane (for dedup tracking)
+    tmux select-pane -t "$pane_id" -T "$q_num"
 
     # Rebalance layout
     tmux select-layout -t "$TMUX_SESSION" tiled
