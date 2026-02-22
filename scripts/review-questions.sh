@@ -71,6 +71,23 @@ reprompt_agent() {
         return 1  # file unchanged since last re-prompt, skip
     fi
 
+    # Cancel any in-progress work before re-prompting.
+    # Send Ctrl-C until Claude shows "Press Ctrl-C again to exit" (meaning it's idle).
+    local attempt=0
+    while [[ $attempt -lt 5 ]]; do
+        tmux send-keys -t "$pane_id" C-c
+        sleep 0.2
+        local pane_tail
+        pane_tail=$(tmux capture-pane -t "$pane_id" -p -S -5 2>/dev/null || true)
+        if echo "$pane_tail" | grep -qF 'Ctrl-C'; then
+            break
+        fi
+        attempt=$((attempt + 1))
+    done
+    if [[ $attempt -gt 0 ]]; then
+        echo "[review]   Cancelled in-progress work: $q_num ($((attempt + 1)) Ctrl-C's)"
+    fi
+
     tmux send-keys -t "$pane_id" "re-read ${question_file} (the main tree copy, not the worktree copy). process the new response." Enter
     sleep 0.5
     tmux send-keys -t "$pane_id" Enter
@@ -118,6 +135,25 @@ cleanup_stale_locks() {
             git -C "$PROJECT_ROOT" worktree prune 2>/dev/null || true
             git -C "$PROJECT_ROOT" branch -D "worktree-$q_num" 2>/dev/null || true
             echo "[review]   Cleaned up: $q_num (pane, lock, worktree, branch)"
+        fi
+    done
+}
+
+# Dismiss finished agent panes waiting for user to press Enter
+cleanup_finished_panes() {
+    [[ ! -d "$LOCKS_DIR" ]] && return
+    for lockfile in "$LOCKS_DIR"/*.lock; do
+        [[ ! -f "$lockfile" ]] && continue
+        local pane_id
+        pane_id=$(head -1 "$lockfile")
+        # Check if pane is alive and showing the "finished" message
+        local pane_tail
+        pane_tail=$(tmux capture-pane -t "$pane_id" -p -S -5 2>/dev/null || true)
+        if echo "$pane_tail" | grep -qF 'Press enter to close'; then
+            local q_num
+            q_num=$(basename "$lockfile" .lock)
+            tmux send-keys -t "$pane_id" Enter
+            echo "[review]   Dismissed finished pane: $q_num"
         fi
     done
 }
@@ -239,6 +275,7 @@ if [[ ${#question_files[@]} -eq 0 ]]; then
 fi
 
 ensure_locks_dir
+cleanup_finished_panes
 cleanup_stale_locks
 
 spawned=0
