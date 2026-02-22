@@ -15,5 +15,19 @@
       "Bash(tmux *)"
     ],
     "defaultMode": "acceptEdits"
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.question-review/scripts/set-pane-title.sh",
+            "async": true
+          }
+        ]
+      }
+    ]
   }
 }
