@@ -79,7 +79,20 @@ else
     fi
 fi
 
-# ---------- Step 4: Install .claude/settings.json ----------
+# ---------- Step 4: Create logs directory ----------
+
+LOGS_DIR="$PROJECT_ROOT/.question-review-logs"
+mkdir -p "$LOGS_DIR"
+
+GITIGNORE="$PROJECT_ROOT/.gitignore"
+if [[ -f "$GITIGNORE" ]]; then
+    grep -qF '.question-review-logs' "$GITIGNORE" 2>/dev/null || echo '.question-review-logs/' >> "$GITIGNORE"
+else
+    echo '.question-review-logs/' > "$GITIGNORE"
+fi
+log "  Created: .question-review-logs/ (added to .gitignore)"
+
+# ---------- Step 5: Install .claude/settings.json ----------
 
 CLAUDE_DIR="$PROJECT_ROOT/.claude"
 SETTINGS_FILE="$CLAUDE_DIR/settings.json"
@@ -95,7 +108,7 @@ else
     log "  Ensure it includes permissions for: Bash(git *), Bash(ls *), Bash(mv *), Bash(echo *)"
 fi
 
-# ---------- Step 5: Make scripts executable ----------
+# ---------- Step 6: Make scripts executable ----------
 
 chmod +x "$SCRIPT_DIR/scripts/review-questions-daemon.sh"
 chmod +x "$SCRIPT_DIR/scripts/review-questions.sh"

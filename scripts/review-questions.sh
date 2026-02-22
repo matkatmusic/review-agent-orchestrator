@@ -54,6 +54,22 @@ extract_q_number() {
     echo "$filename" | grep -oE '^Q[0-9]+' || true
 }
 
+# ---------- Re-prompt existing agent ----------
+
+reprompt_agent() {
+    local q_num="$1"
+    local question_file="$2"
+    local lockfile="$LOCKS_DIR/${q_num}.lock"
+    local pane_id
+    pane_id=$(cat "$lockfile")
+    local q_relpath="${question_file#"$PROJECT_ROOT"/}"
+
+    tmux send-keys -t "$pane_id" \
+        "re-read ${q_relpath}. process the new response." Enter
+
+    echo "[review]   Re-prompted agent: $q_num (pane $pane_id)"
+}
+
 # ---------- Lockfile-based dedup ----------
 # Pane titles are unreliable (shells override them). Use lockfiles instead.
 # Each lockfile contains the tmux pane_id. If the pane still exists, the agent is active.
@@ -67,6 +83,26 @@ ensure_locks_dir() {
     else
         echo '.question-review-locks/' > "$gitignore"
     fi
+}
+
+# Clean up lockfiles for questions no longer in Awaiting/ (resolved/moved)
+cleanup_stale_locks() {
+    [[ ! -d "$LOCKS_DIR" ]] && return
+    for lockfile in "$LOCKS_DIR"/*.lock; do
+        [[ ! -f "$lockfile" ]] && continue
+        local q_num
+        q_num=$(basename "$lockfile" .lock)
+        shopt -s nullglob
+        local matches=("$AWAITING_PATH"/${q_num}_*.md)
+        shopt -u nullglob
+        if [[ ${#matches[@]} -eq 0 ]]; then
+            local pane_id
+            pane_id=$(cat "$lockfile")
+            tmux kill-pane -t "$pane_id" 2>/dev/null || true
+            rm -f "$lockfile"
+            echo "[review]   Cleaned stale lock + killed pane: $q_num (file no longer in Awaiting/)"
+        fi
+    done
 }
 
 # Check if a specific Q number has an active agent (lockfile + pane still alive)
@@ -176,9 +212,10 @@ if [[ ${#question_files[@]} -eq 0 ]]; then
 fi
 
 ensure_locks_dir
+cleanup_stale_locks
 
 spawned=0
-skipped_active=0
+reprompted=0
 skipped_no_response=0
 skipped_max=0
 
@@ -192,9 +229,10 @@ for file in "${question_files[@]}"; do
         continue
     fi
 
-    # Check for active agent (lockfile + live pane)
+    # Re-prompt existing agent if it has a pending response
     if has_active_agent "$q_num"; then
-        skipped_active=$((skipped_active + 1))
+        reprompt_agent "$q_num" "$file"
+        reprompted=$((reprompted + 1))
         continue
     fi
 
@@ -213,6 +251,6 @@ for file in "${question_files[@]}"; do
 done
 
 # Only log if something happened
-if [[ $spawned -gt 0 || $skipped_max -gt 0 ]]; then
-    echo "[review] Scan complete: $spawned spawned, $skipped_active active, $skipped_max queued, $skipped_no_response no response"
+if [[ $spawned -gt 0 || $reprompted -gt 0 || $skipped_max -gt 0 ]]; then
+    echo "[review] Scan complete: $spawned spawned, $reprompted re-prompted, $skipped_max queued, $skipped_no_response no response"
 fi

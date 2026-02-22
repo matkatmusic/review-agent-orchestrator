@@ -6,4 +6,7 @@
 
 PROMPT_FILE="$1"; shift
 PROMPT_CONTENT="$(cat "$PROMPT_FILE")"
+
+export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=0.15
+
 exec claude --append-system-prompt "$PROMPT_CONTENT" "$@"
