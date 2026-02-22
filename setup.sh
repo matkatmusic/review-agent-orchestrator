@@ -31,7 +31,9 @@ log "Creating Questions folder structure..."
 mkdir -p "$PROJECT_ROOT/$AWAITING_DIR"
 mkdir -p "$PROJECT_ROOT/$RESOLVED_DIR"
 mkdir -p "$PROJECT_ROOT/$DEFERRED_DIR"
-log "  Created: $AWAITING_DIR/, $RESOLVED_DIR/, $DEFERRED_DIR/"
+touch "$PROJECT_ROOT/$RESOLVED_DIR/.gitkeep"
+touch "$PROJECT_ROOT/$DEFERRED_DIR/.gitkeep"
+log "  Created: $AWAITING_DIR/, $RESOLVED_DIR/, $DEFERRED_DIR/ (with .gitkeep)"
 
 # ---------- Step 2: Copy template files ----------
 
