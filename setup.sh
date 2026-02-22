@@ -39,8 +39,9 @@ log "  Created: $AWAITING_DIR/, $RESOLVED_DIR/, $DEFERRED_DIR/ (with .gitkeep)"
 
 log "Copying template files..."
 cp -n "$SCRIPT_DIR/templates/agent_question_template.md" "$PROJECT_ROOT/$QUESTIONS_DIR/" 2>/dev/null || true
+cp -n "$SCRIPT_DIR/templates/user_question_template.md" "$PROJECT_ROOT/$QUESTIONS_DIR/" 2>/dev/null || true
 cp -n "$SCRIPT_DIR/templates/questions_guidelines.md" "$PROJECT_ROOT/$QUESTIONS_DIR/" 2>/dev/null || true
-log "  Copied: agent_question_template.md, questions_guidelines.md"
+log "  Copied: agent_question_template.md, user_question_template.md, questions_guidelines.md"
 
 # ---------- Step 3: Merge tasks.json ----------
 
@@ -113,6 +114,7 @@ fi
 chmod +x "$SCRIPT_DIR/scripts/review-questions-daemon.sh"
 chmod +x "$SCRIPT_DIR/scripts/review-questions.sh"
 chmod +x "$SCRIPT_DIR/scripts/launch-agent.sh"
+chmod +x "$SCRIPT_DIR/scripts/followup.sh"
 log "  Made scripts executable"
 
 # ---------- Done ----------
