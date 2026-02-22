@@ -2,6 +2,8 @@
   "permissions": {
     "allow": [
       "Read(*)",
+      "Glob(*)",
+      "Grep(*)",
       "Bash(git *)",
       "Bash(git commit *)",
       "Bash(ls *)",
