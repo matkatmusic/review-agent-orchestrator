@@ -3,6 +3,7 @@
     "allow": [
       "Read(*)",
       "Bash(git *)",
+      "Bash(git commit *)",
       "Bash(ls *)",
       "Bash(mv *)",
       "Bash(echo *)"
