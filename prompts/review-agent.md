@@ -13,7 +13,7 @@ You are running inside a git worktree (created by `claude --worktree`). Your wor
 
 ## Step 1: Read and Classify
 
-1. Read the assigned question file (use the relative path — it exists in your worktree).
+1. Read the assigned question file using the **main tree absolute path** (provided in your initial message). The worktree copy may be stale — always read from the main tree first.
 2. Find the **last** `<user_response>` block that has non-empty `<text>` content and no `<response_*>` block after it. This is the pending response you must process.
 3. Classify the user's response into one of three actions:
 
