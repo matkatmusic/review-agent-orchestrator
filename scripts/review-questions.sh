@@ -178,9 +178,10 @@ spawn_agent_pane() {
             -P -F '#{pane_id}' \
             "$agent_cmd")
         SESSION_CREATED=true
-        # Enable pane titles in border
+        # Enable pane titles in border; block apps from overriding titles
         tmux set-option -t "$TMUX_SESSION" pane-border-status top
         tmux set-option -t "$TMUX_SESSION" pane-border-format " #{pane_title} "
+        tmux set-window-option -t "$TMUX_SESSION" allow-rename off
     else
         pane_id=$(tmux split-window -t "$TMUX_SESSION" \
             -c "$PROJECT_ROOT" \
