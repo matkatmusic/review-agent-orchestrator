@@ -178,6 +178,9 @@ spawn_agent_pane() {
             -P -F '#{pane_id}' \
             "$agent_cmd")
         SESSION_CREATED=true
+        # Enable pane titles in border
+        tmux set-option -t "$TMUX_SESSION" pane-border-status top
+        tmux set-option -t "$TMUX_SESSION" pane-border-format " #{pane_title} "
     else
         pane_id=$(tmux split-window -t "$TMUX_SESSION" \
             -c "$PROJECT_ROOT" \
@@ -187,6 +190,9 @@ spawn_agent_pane() {
 
     # Write lockfile with pane_id for dedup tracking
     echo "$pane_id" > "$lockfile"
+
+    # Set pane title
+    tmux select-pane -t "$pane_id" -T "$q_num"
 
     # Rebalance layout
     tmux select-layout -t "$TMUX_SESSION" tiled
