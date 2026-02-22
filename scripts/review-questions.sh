@@ -64,7 +64,7 @@ reprompt_agent() {
     pane_id=$(cat "$lockfile")
     local q_relpath="${question_file#"$PROJECT_ROOT"/}"
 
-    tmux send-keys -t "$pane_id" "re-read ${q_relpath}. process the new response." Enter
+    tmux send-keys -t "$pane_id" "re-read ${question_file} (the main tree copy, not the worktree copy). process the new response." Enter
     sleep 0.5
     tmux send-keys -t "$pane_id" Enter
 
