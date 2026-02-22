@@ -211,7 +211,7 @@ spawn_agent_pane() {
     local q_relpath="${question_file#"$PROJECT_ROOT"/}"
 
     # Build the initial message with all context the agent needs
-    local initial_msg="Process question file: ${q_relpath} (Q number: ${q_num}). Main tree: ${PROJECT_ROOT}. Resolved dir: ${RESOLVED_DIR}. Awaiting dir: ${AWAITING_DIR}. IMPORTANT: Always read the main tree copy of the question file first (${question_file}), not the worktree copy, because the worktree may be stale."
+    local initial_msg="Process question file: ${q_relpath} (Q number: ${q_num}). Main tree: ${PROJECT_ROOT}. Resolved dir: ${RESOLVED_DIR}. Deferred dir: ${DEFERRED_DIR}. Awaiting dir: ${AWAITING_DIR}. IMPORTANT: Always read the main tree copy of the question file first (${question_file}), not the worktree copy, because the worktree may be stale."
 
     # Build claude command with prompt (Phase 2) or bare (Phase 1 fallback)
     # Lockfile is removed AFTER 'read' so it persists while the pane is open
