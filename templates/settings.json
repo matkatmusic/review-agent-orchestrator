@@ -23,7 +23,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.question-review/scripts/set-pane-title.sh",
+            "command": "Q=$(git branch --show-current 2>/dev/null); Q=${Q#worktree-}; [ -n \"$Q\" ] && { T=$(tmux display-message -p '#{pane_title}' 2>/dev/null); T=\"${T#$Q - }\"; tmux select-pane -T \"$Q - $T\" 2>/dev/null; }; exit 0",
             "async": true
           }
         ]
