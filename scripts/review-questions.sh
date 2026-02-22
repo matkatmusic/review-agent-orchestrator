@@ -101,7 +101,13 @@ cleanup_stale_locks() {
             pane_id=$(cat "$lockfile")
             tmux kill-pane -t "$pane_id" 2>/dev/null || true
             rm -f "$lockfile"
-            echo "[review]   Cleaned stale lock + killed pane: $q_num (file no longer in Awaiting/)"
+            # Clean up worktree and branch
+            if [[ -d "$PROJECT_ROOT/.claude/worktrees/$q_num" ]]; then
+                git -C "$PROJECT_ROOT" worktree remove --force ".claude/worktrees/$q_num" 2>/dev/null || true
+            fi
+            git -C "$PROJECT_ROOT" worktree prune 2>/dev/null || true
+            git -C "$PROJECT_ROOT" branch -D "worktree-$q_num" 2>/dev/null || true
+            echo "[review]   Cleaned up: $q_num (pane, lock, worktree, branch)"
         fi
     done
 }
