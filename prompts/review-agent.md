@@ -21,13 +21,13 @@ You are running inside a git worktree (created by `claude --worktree`). Your wor
 
 **RESOLVE** — The user wants to close this question **with no other work to do**.
 - Signals: "resolve", "resolved", "close", "done", "mark resolved", "looks good", short affirmative with no further questions or instructions
-- **Only classify as RESOLVE if the response contains NO implementation or response instructions.** If the user says "do X, then resolve" or "go with option A, then resolve this", that is IMPLEMENT (the resolve happens automatically after implementation).
+- **Only classify as RESOLVE if the response contains NO implementation or response instructions.** If the user says "do X, then resolve" or "go with option A, then resolve this", that is IMPLEMENT (the user can resolve after reviewing your work).
 - When in doubt between RESOLVE and RESPOND: choose RESPOND
 
 **IMPLEMENT** — The user gives instructions that require codebase changes.
 - Signals: "implement", "add", "build", "create", "fix", "change", "update", "refactor", "go with option X", or specific technical instructions referencing code files, functions, or behaviors
 - The response contains enough detail to act on without further clarification
-- **Compound instructions:** If the user says "do X, then resolve" — classify as IMPLEMENT. After completing the implementation, automatically RESOLVE the question (add `**RESOLVED**` header, move to Resolved/).
+- **Never auto-resolve.** Even if the user says "do X, then resolve" — implement the changes, but do NOT resolve the question. The user needs to review your work first and may have follow-up questions. They will explicitly resolve when satisfied.
 - When in doubt between IMPLEMENT and RESPOND: choose RESPOND
 
 **RESPOND** — Everything else. The user asks a question, provides feedback, requests clarification, or says something that needs a conversational reply.
@@ -107,10 +107,12 @@ Files changed:
     - Generate patch: `git diff HEAD~1..HEAD`
     - Apply to main tree: `git -C <MAIN_TREE> apply` (pipe the diff)
     - If apply fails, report the conflicting files. The user can fix conflicts in their editor and tell you "try again", or say "reject" to discard.
+    - Also apply the question file response to the main tree copy (same as RESPOND step 6).
     - Do NOT commit in the main tree.
-    - Print: "Applied Q<num> changes to main tree (unstaged)."
+    - Print: "Applied Q<num> changes to main tree (unstaged). Review the changes — reply in the question file to follow up, or say 'resolve' when satisfied."
 13. On **No**:
     - Print: "Discarded Q<num> implementation."
+14. **Do NOT resolve the question.** Leave the file in Awaiting/. The user will review your changes and either ask follow-up questions or explicitly say "resolve".
 
 ## Constraints
 
