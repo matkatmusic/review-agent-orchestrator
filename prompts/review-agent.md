@@ -7,6 +7,7 @@ You have been assigned exactly ONE question file to process. Your initial messag
 - **Q number** (e.g., Q1, Q42, Q174)
 - **Main tree path** (absolute path to the host project's main working tree)
 - **Resolved dir** (relative path, e.g., Questions/Resolved)
+- **Deferred dir** (relative path, e.g., Questions/Deferred)
 - **Awaiting dir** (relative path, e.g., Questions/Awaiting)
 
 You are running inside a git worktree (created by `claude --worktree`). Your working directory is an isolated copy of the project. The main tree is accessible via absolute paths (granted by `--add-dir`).
@@ -15,7 +16,7 @@ You are running inside a git worktree (created by `claude --worktree`). Your wor
 
 1. Read the assigned question file using the **main tree absolute path** (provided in your initial message). The worktree copy may be stale — always read from the main tree first.
 2. Find the **last** `<user_response>` block that has non-empty `<text>` content and no `<response_*>` block after it. This is the pending response you must process.
-3. Classify the user's response into one of three actions:
+3. Classify the user's response into one of four actions:
 
 ### Classification Rules
 
@@ -30,6 +31,10 @@ You are running inside a git worktree (created by `claude --worktree`). Your wor
 - **Never auto-resolve.** Even if the user says "do X, then resolve" — implement the changes, but do NOT resolve the question. The user needs to review your work first and may have follow-up questions. They will explicitly resolve when satisfied.
 - When in doubt between IMPLEMENT and RESPOND: choose RESPOND
 
+**DEFER** — The user wants to postpone this question to a later phase.
+- Signals: "defer", "deferred", "move to deferred", "postpone", "later", "not now", "skip for now"
+- Moves the file to the Deferred/ folder. No response is written.
+
 **RESPOND** — Everything else. The user asks a question, provides feedback, requests clarification, or says something that needs a conversational reply.
 - Signals: contains "?", "what", "why", "how", "explain", "clarify", or is feedback/commentary
 - This is the **default** when ambiguous — it is always safer to ask for clarification than to make unwanted changes
@@ -43,11 +48,26 @@ You are running inside a git worktree (created by `claude --worktree`). Your wor
 3. Move the file: `git mv <AWAITING_DIR>/Q<num>_*.md <RESOLVED_DIR>/`
 4. Stage: `git add -A`
 5. Commit: `git commit -m "Resolved Q<num>"`
-6. **Apply to main tree:**
+6. **Apply to main tree — move file:**
    - Run: `git -C <MAIN_TREE> mv <AWAITING_DIR>/Q<num>_<name>.md <RESOLVED_DIR>/Q<num>_<name>.md`
-   - Then edit the file at its new absolute path in the main tree (`<MAIN_TREE>/<RESOLVED_DIR>/Q<num>_<name>.md`) to add the `**RESOLVED**` header.
+7. **Apply to main tree — add header:**
+   - Edit the file at its new absolute path (`<MAIN_TREE>/<RESOLVED_DIR>/Q<num>_<name>.md`) to add `**RESOLVED**` as the very first line, followed by a blank line. This step is REQUIRED — do not skip it.
    - Do NOT commit in the main tree.
-7. Print: "Resolved Q<num>. File moved to <RESOLVED_DIR>/."
+8. Print: "Resolved Q<num>. File moved to <RESOLVED_DIR>/."
+
+### DEFER
+
+1. Read the question file.
+2. Add `**DEFERRED**` as the very first line, followed by a blank line.
+3. Move the file: `git mv <AWAITING_DIR>/Q<num>_*.md <DEFERRED_DIR>/`
+4. Stage: `git add -A`
+5. Commit: `git commit -m "Deferred Q<num>"`
+6. **Apply to main tree — move file:**
+   - Run: `git -C <MAIN_TREE> mv <AWAITING_DIR>/Q<num>_<name>.md <DEFERRED_DIR>/Q<num>_<name>.md`
+7. **Apply to main tree — add header:**
+   - Edit the file at its new absolute path (`<MAIN_TREE>/<DEFERRED_DIR>/Q<num>_<name>.md`) to add `**DEFERRED**` as the very first line, followed by a blank line. This step is REQUIRED — do not skip it.
+   - Do NOT commit in the main tree.
+8. Print: "Deferred Q<num>. File moved to <DEFERRED_DIR>/."
 
 ### RESPOND
 
