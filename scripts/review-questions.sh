@@ -61,12 +61,22 @@ reprompt_agent() {
     local question_file="$2"
     local lockfile="$LOCKS_DIR/${q_num}.lock"
     local pane_id
-    pane_id=$(cat "$lockfile")
-    local q_relpath="${question_file#"$PROJECT_ROOT"/}"
+    pane_id=$(head -1 "$lockfile")
+
+    # Check if file has changed since last re-prompt (mtime stored on line 2)
+    local current_mtime last_mtime
+    current_mtime=$(stat -f '%m' "$question_file" 2>/dev/null)
+    last_mtime=$(sed -n '2p' "$lockfile" 2>/dev/null)
+    if [[ -n "$last_mtime" && "$current_mtime" == "$last_mtime" ]]; then
+        return 1  # file unchanged since last re-prompt, skip
+    fi
 
     tmux send-keys -t "$pane_id" "re-read ${question_file} (the main tree copy, not the worktree copy). process the new response." Enter
     sleep 0.5
     tmux send-keys -t "$pane_id" Enter
+
+    # Store mtime so we don't re-prompt again until the file changes
+    echo -e "${pane_id}\n${current_mtime}" > "$lockfile"
 
     echo "[review]   Re-prompted agent: $q_num (pane $pane_id)"
 }
@@ -98,7 +108,7 @@ cleanup_stale_locks() {
         shopt -u nullglob
         if [[ ${#matches[@]} -eq 0 ]]; then
             local pane_id
-            pane_id=$(cat "$lockfile")
+            pane_id=$(head -1 "$lockfile")
             tmux kill-pane -t "$pane_id" 2>/dev/null || true
             rm -f "$lockfile"
             # Clean up worktree and branch
@@ -121,7 +131,7 @@ has_active_agent() {
 
     # Lockfile exists — check if the pane is still alive
     local pane_id
-    pane_id=$(cat "$lockfile")
+    pane_id=$(head -1 "$lockfile")
 
     if tmux has-session -t "$TMUX_SESSION" 2>/dev/null \
        && tmux list-panes -t "$TMUX_SESSION" -F '#{pane_id}' 2>/dev/null | grep -qF "$pane_id"; then
@@ -140,7 +150,7 @@ count_active_agents() {
         for lockfile in "$LOCKS_DIR"/*.lock; do
             [[ ! -f "$lockfile" ]] && continue
             local pane_id
-            pane_id=$(cat "$lockfile")
+            pane_id=$(head -1 "$lockfile")
             if tmux has-session -t "$TMUX_SESSION" 2>/dev/null \
                && tmux list-panes -t "$TMUX_SESSION" -F '#{pane_id}' 2>/dev/null | grep -qF "$pane_id"; then
                 count=$((count + 1))
@@ -246,8 +256,9 @@ for file in "${question_files[@]}"; do
 
     # Re-prompt existing agent if it has a pending response
     if has_active_agent "$q_num"; then
-        reprompt_agent "$q_num" "$file"
-        reprompted=$((reprompted + 1))
+        if reprompt_agent "$q_num" "$file"; then
+            reprompted=$((reprompted + 1))
+        fi
         continue
     fi
 
