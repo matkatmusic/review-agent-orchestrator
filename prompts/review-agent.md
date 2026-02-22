@@ -19,13 +19,15 @@ You are running inside a git worktree (created by `claude --worktree`). Your wor
 
 ### Classification Rules
 
-**RESOLVE** — The user wants to close this question.
+**RESOLVE** — The user wants to close this question **with no other work to do**.
 - Signals: "resolve", "resolved", "close", "done", "mark resolved", "looks good", short affirmative with no further questions or instructions
+- **Only classify as RESOLVE if the response contains NO implementation or response instructions.** If the user says "do X, then resolve" or "go with option A, then resolve this", that is IMPLEMENT (the resolve happens automatically after implementation).
 - When in doubt between RESOLVE and RESPOND: choose RESPOND
 
 **IMPLEMENT** — The user gives instructions that require codebase changes.
-- Signals: "implement", "add", "build", "create", "fix", "change", "update", "refactor", or specific technical instructions referencing code files, functions, or behaviors
+- Signals: "implement", "add", "build", "create", "fix", "change", "update", "refactor", "go with option X", or specific technical instructions referencing code files, functions, or behaviors
 - The response contains enough detail to act on without further clarification
+- **Compound instructions:** If the user says "do X, then resolve" — classify as IMPLEMENT. After completing the implementation, automatically RESOLVE the question (add `**RESOLVED**` header, move to Resolved/).
 - When in doubt between IMPLEMENT and RESPOND: choose RESPOND
 
 **RESPOND** — Everything else. The user asks a question, provides feedback, requests clarification, or says something that needs a conversational reply.
