@@ -208,8 +208,10 @@ spawn_agent_pane() {
             "$agent_cmd")
     fi
 
-    # Write lockfile with pane_id for dedup tracking
-    echo "$pane_id" > "$lockfile"
+    # Write lockfile with pane_id and file mtime for dedup tracking
+    local spawn_mtime
+    spawn_mtime=$(stat -f '%m' "$question_file" 2>/dev/null)
+    echo -e "${pane_id}\n${spawn_mtime}" > "$lockfile"
 
     # Set pane title
     tmux select-pane -t "$pane_id" -T "$q_num"
