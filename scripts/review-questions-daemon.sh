@@ -24,13 +24,7 @@ fi
 
 # ---------- Create tmux session and open visible window ----------
 
-if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-    # Create session with the initial pane showing a status message (not a bare shell)
-    tmux new-session -d -s "$TMUX_SESSION" -x "$TERMINAL_COLS" -y "$TERMINAL_ROWS" \
-        "echo '=== Question Review System ==='; echo 'Agent panes will appear here as questions are processed.'; echo 'This pane closes when all agents are done.'; echo ''; watch -n 5 'ls $PROJECT_ROOT/.question-review-locks/*.lock 2>/dev/null | while read f; do q=\$(basename \$f .lock); echo \"\$q: active\"; done; echo \"---\"; echo \"Awaiting: \$(ls $PROJECT_ROOT/$AWAITING_DIR/Q*.md 2>/dev/null | wc -l | tr -d \" \") questions\"'"
-    echo "[daemon] Created tmux session: $TMUX_SESSION"
-
-    # Open a terminal window attached to the session so the user can see agent panes
+open_terminal_window() {
     if [[ "$TERMINAL_APP" == "iTerm" ]]; then
         osascript -e "tell application \"iTerm2\" to create window with default profile command \"tmux attach -t $TMUX_SESSION\"" 2>/dev/null || true
     else
@@ -44,9 +38,15 @@ end tell
 APPLESCRIPT
     fi
     echo "[daemon] Opened $TERMINAL_APP window attached to tmux session '$TMUX_SESSION'"
-else
-    echo "[daemon] Tmux session '$TMUX_SESSION' already exists."
+}
+
+if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    tmux new-session -d -s "$TMUX_SESSION" -x "$TERMINAL_COLS" -y "$TERMINAL_ROWS" \
+        "echo '=== Question Review System ==='; echo 'Waiting for agents...'; exec bash"
+    echo "[daemon] Created tmux session: $TMUX_SESSION"
 fi
+
+open_terminal_window
 
 # ---------- Main loop ----------
 
