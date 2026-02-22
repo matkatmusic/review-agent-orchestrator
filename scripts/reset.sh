@@ -4,14 +4,18 @@ set -euo pipefail
 # reset.sh — Reset a question-review project for a fresh run
 # Kills tmux, prunes worktrees, clears locks, updates submodule, reinstalls settings, runs scanner
 #
-# Usage: reset.sh <project_root>
-#   Or from a wrapper script that sets PROJECT_ROOT before sourcing.
+# Usage: reset.sh [--no-scan] <project_root>
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUBMODULE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SUBMODULE_DIR/config.sh"
 
-PROJECT_ROOT="${1:?Usage: reset.sh <project_root>}"
+NO_SCAN=false
+if [[ "${1:-}" == "--no-scan" ]]; then
+    NO_SCAN=true
+    shift
+fi
+PROJECT_ROOT="${1:?Usage: reset.sh [--no-scan] <project_root>}"
 SUBMODULE_NAME="$(basename "$SUBMODULE_DIR")"
 
 echo "[reset] Killing tmux session..."
@@ -49,5 +53,9 @@ echo "[reset] Committing reset state..."
 git -C "$PROJECT_ROOT" add -A
 git -C "$PROJECT_ROOT" commit -m "Reset project for testing" --allow-empty 2>/dev/null || true
 
-echo "[reset] Running scanner..."
-"$SUBMODULE_DIR/scripts/review-questions.sh" "$PROJECT_ROOT"
+if [[ "$NO_SCAN" == false ]]; then
+    echo "[reset] Running scanner..."
+    "$SUBMODULE_DIR/scripts/review-questions.sh" "$PROJECT_ROOT"
+else
+    echo "[reset] Done (scanner skipped)."
+fi
