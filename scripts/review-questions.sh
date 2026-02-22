@@ -16,6 +16,24 @@ RESOLVED_PATH="$PROJECT_ROOT/$RESOLVED_DIR"
 LOCKS_DIR="$PROJECT_ROOT/.question-review-locks"
 PROMPT_FILE="$SUBMODULE_DIR/$AGENT_PROMPT"
 
+# ---------- Terminal window ----------
+
+open_terminal_window() {
+    if [[ "$TERMINAL_APP" == "iTerm" ]]; then
+        osascript -e "tell application \"iTerm2\" to create window with default profile command \"tmux attach -t $TMUX_SESSION\"" 2>/dev/null || true
+    else
+        osascript <<APPLESCRIPT 2>/dev/null || true
+tell application "Terminal"
+    do script "tmux attach -t $TMUX_SESSION"
+    set bounds of front window to {0, 0, ${TERMINAL_COLS} * 7, ${TERMINAL_ROWS} * 14}
+    set number of columns of front window to ${TERMINAL_COLS}
+    set number of rows of front window to ${TERMINAL_ROWS}
+end tell
+APPLESCRIPT
+    fi
+    echo "[review]   Opened $TERMINAL_APP window for tmux session '$TMUX_SESSION'"
+}
+
 # ---------- Helper functions ----------
 
 # Check if the last substantive block in a question file is a <user_response>
@@ -318,4 +336,11 @@ done
 # Only log if something happened
 if [[ $spawned -gt 0 || $reprompted -gt 0 || $skipped_max -gt 0 ]]; then
     echo "[review] Scan complete: $spawned spawned, $reprompted re-prompted, $skipped_max queued, $skipped_no_response no response"
+fi
+
+# If tmux session exists but no terminal is attached, open one
+if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    if [[ -z "$(tmux list-clients -t "$TMUX_SESSION" 2>/dev/null)" ]]; then
+        open_terminal_window
+    fi
 fi
