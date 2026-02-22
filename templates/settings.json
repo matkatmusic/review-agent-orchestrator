@@ -15,19 +15,5 @@
       "Bash(tmux *)"
     ],
     "defaultMode": "acceptEdits"
-  },
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "[ -n \"$TMUX_PANE\" ] || exit 0; Q=$(git branch --show-current 2>/dev/null); Q=${Q#worktree-}; [ -n \"$Q\" ] && { T=$(tmux display-message -p -t \"$TMUX_PANE\" '#{pane_title}' 2>/dev/null); T=\"${T#$Q - }\"; tmux select-pane -t \"$TMUX_PANE\" -T \"$Q - $T\" 2>/dev/null; }; exit 0",
-            "async": true
-          }
-        ]
-      }
-    ]
   }
 }
