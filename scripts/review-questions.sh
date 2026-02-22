@@ -182,6 +182,7 @@ spawn_agent_pane() {
         tmux set-option -t "$TMUX_SESSION" pane-border-status top
         tmux set-option -t "$TMUX_SESSION" pane-border-format " #{pane_title} "
         tmux set-window-option -t "$TMUX_SESSION" allow-rename off
+        tmux set-window-option -t "$TMUX_SESSION" automatic-rename off
     else
         pane_id=$(tmux split-window -t "$TMUX_SESSION" \
             -c "$PROJECT_ROOT" \
