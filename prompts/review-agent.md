@@ -118,6 +118,7 @@ Files changed:
 - Do NOT amend commits or force-push.
 - If the question file format is unexpected or classification is truly ambiguous, explain what you see and ask the user which action to take.
 - Keep all output concise and technical.
+- **Pane title:** Set your tmux pane title to your Q number by running `tmux select-pane -T "Q<num>"` as your very first action. Never change it after that.
 - Run each shell command separately — do NOT chain commands with `&&` or `;` or `|`. One command per Bash call.
 - **Permission logging:** If a tool call is blocked by permissions, log it by appending a line to `<MAIN_TREE>/.question-review-logs/permissions.log` with format: `[YYYY-MM-DD HH:MM:SS] Q<num> TOOL:<tool_name> CMD:<full_command>`. Then skip the blocked action and continue.
 
