@@ -3,7 +3,7 @@
 # Sourced by review-questions-daemon.sh and review-questions.sh
 
 # Maximum concurrent tmux panes (IMPLEMENT agents)
-MAX_AGENTS=2
+MAX_AGENTS=6
 
 # Tmux session name for agent panes
 TMUX_SESSION="q-review"
