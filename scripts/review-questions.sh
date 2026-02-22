@@ -64,7 +64,9 @@ reprompt_agent() {
     pane_id=$(cat "$lockfile")
     local q_relpath="${question_file#"$PROJECT_ROOT"/}"
 
-    tmux send-keys -t "$pane_id" "re-read ${q_relpath}. process the new response." C-Enter
+    tmux send-keys -t "$pane_id" "re-read ${q_relpath}. process the new response." Enter
+    sleep 0.5
+    tmux send-keys -t "$pane_id" Enter
 
     echo "[review]   Re-prompted agent: $q_num (pane $pane_id)"
 }
