@@ -44,30 +44,24 @@ You are running inside a git worktree (created by `claude --worktree`). Your wor
 ### RESOLVE
 
 1. Read the question file.
-2. Add `**RESOLVED**` as the very first line, followed by a blank line.
-3. Move the file: `git mv <AWAITING_DIR>/Q<num>_*.md <RESOLVED_DIR>/`
-4. Stage: `git add -A`
-5. Commit: `git commit -m "Resolved Q<num>"`
-6. **Apply to main tree — move file:**
+2. Move the file: `git mv <AWAITING_DIR>/Q<num>_*.md <RESOLVED_DIR>/`
+3. Stage: `git add -A`
+4. Commit: `git commit -m "Resolved Q<num>"`
+5. **Apply to main tree — move file:**
    - Run: `git -C <MAIN_TREE> mv <AWAITING_DIR>/Q<num>_<name>.md <RESOLVED_DIR>/Q<num>_<name>.md`
-7. **Apply to main tree — add header:**
-   - Edit the file at its new absolute path (`<MAIN_TREE>/<RESOLVED_DIR>/Q<num>_<name>.md`) to add `**RESOLVED**` as the very first line, followed by a blank line. This step is REQUIRED — do not skip it.
-   - Do NOT commit in the main tree.
-8. Print: "Resolved Q<num>. File moved to <RESOLVED_DIR>/."
+   - Do NOT commit in the main tree. The `**RESOLVED**` header is added automatically by the daemon.
+6. Print: "Resolved Q<num>. File moved to <RESOLVED_DIR>/."
 
 ### DEFER
 
 1. Read the question file.
-2. Add `**DEFERRED**` as the very first line, followed by a blank line.
-3. Move the file: `git mv <AWAITING_DIR>/Q<num>_*.md <DEFERRED_DIR>/`
-4. Stage: `git add -A`
-5. Commit: `git commit -m "Deferred Q<num>"`
-6. **Apply to main tree — move file:**
+2. Move the file: `git mv <AWAITING_DIR>/Q<num>_*.md <DEFERRED_DIR>/`
+3. Stage: `git add -A`
+4. Commit: `git commit -m "Deferred Q<num>"`
+5. **Apply to main tree — move file:**
    - Run: `git -C <MAIN_TREE> mv <AWAITING_DIR>/Q<num>_<name>.md <DEFERRED_DIR>/Q<num>_<name>.md`
-7. **Apply to main tree — add header:**
-   - Edit the file at its new absolute path (`<MAIN_TREE>/<DEFERRED_DIR>/Q<num>_<name>.md`) to add `**DEFERRED**` as the very first line, followed by a blank line. This step is REQUIRED — do not skip it.
-   - Do NOT commit in the main tree.
-8. Print: "Deferred Q<num>. File moved to <DEFERRED_DIR>/."
+   - Do NOT commit in the main tree. The `**DEFERRED**` header is added automatically by the daemon.
+6. Print: "Deferred Q<num>. File moved to <DEFERRED_DIR>/."
 
 ### RESPOND
 
@@ -143,6 +137,7 @@ Files changed:
 - If the question file format is unexpected or classification is truly ambiguous, explain what you see and ask the user which action to take.
 - Keep all output concise and technical.
 - Run each shell command separately — do NOT chain commands with `&&` or `;` or `|`. One command per Bash call.
+- **New question numbering:** If you need to create a new question file, first check the highest Q number across ALL folders in the main tree: `<MAIN_TREE>/<AWAITING_DIR>/`, `<MAIN_TREE>/<RESOLVED_DIR>/`, and `<MAIN_TREE>/<DEFERRED_DIR>/`. Use the next number after the highest found.
 - **Permission logging:** If a tool call is blocked by permissions, log it by appending a line to `<MAIN_TREE>/.question-review-logs/permissions.log` with format: `[YYYY-MM-DD HH:MM:SS] Q<num> TOOL:<tool_name> CMD:<full_command>`. Then skip the blocked action and continue.
 
 ## Question File Format Reference

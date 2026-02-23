@@ -296,6 +296,31 @@ ensure_locks_dir
 cleanup_finished_panes
 cleanup_stale_locks
 
+# Ensure all Resolved/ files have **RESOLVED** header
+shopt -s nullglob
+for resolved_file in "$RESOLVED_PATH"/Q*.md; do
+    first_line=$(head -1 "$resolved_file")
+    if [[ "$first_line" != "**RESOLVED**" ]]; then
+        printf '%s\n\n' '**RESOLVED**' | cat - "$resolved_file" > "$resolved_file.tmp"
+        mv "$resolved_file.tmp" "$resolved_file"
+        echo "[review]   Added **RESOLVED** header: $(basename "$resolved_file")"
+    fi
+done
+shopt -u nullglob
+
+# Ensure all Deferred/ files have **DEFERRED** header
+DEFERRED_PATH="$PROJECT_ROOT/$DEFERRED_DIR"
+shopt -s nullglob
+for deferred_file in "$DEFERRED_PATH"/Q*.md; do
+    first_line=$(head -1 "$deferred_file")
+    if [[ "$first_line" != "**DEFERRED**" ]]; then
+        printf '%s\n\n' '**DEFERRED**' | cat - "$deferred_file" > "$deferred_file.tmp"
+        mv "$deferred_file.tmp" "$deferred_file"
+        echo "[review]   Added **DEFERRED** header: $(basename "$deferred_file")"
+    fi
+done
+shopt -u nullglob
+
 spawned=0
 reprompted=0
 skipped_no_response=0
