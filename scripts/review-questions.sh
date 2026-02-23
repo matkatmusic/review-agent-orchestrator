@@ -381,6 +381,12 @@ spawn_agent_pane() {
 
 # ---------- Main scan ----------
 
+# Always run cleanup — even when Awaiting/ is empty, stale panes may need killing
+ensure_locks_dir
+cleanup_finished_panes
+cleanup_stale_locks
+notify_main_changed
+
 # Bail early if Awaiting/ doesn't exist or is empty
 if [[ ! -d "$AWAITING_PATH" ]]; then
     exit 0
@@ -394,11 +400,6 @@ shopt -u nullglob
 if [[ ${#question_files[@]} -eq 0 ]]; then
     exit 0
 fi
-
-ensure_locks_dir
-cleanup_finished_panes
-cleanup_stale_locks
-notify_main_changed
 
 # Ensure all Resolved/ files have **RESOLVED** header
 shopt -s nullglob

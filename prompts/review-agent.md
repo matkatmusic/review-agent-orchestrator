@@ -44,24 +44,14 @@ You are running inside a git worktree (created by `claude --worktree`). Your wor
 ### RESOLVE
 
 1. Read the question file.
-2. Move the file: `git mv <AWAITING_DIR>/Q<num>_*.md <RESOLVED_DIR>/`
-3. Stage: `git add -A`
-4. Commit: `git commit -m "Resolved Q<num>"`
-5. **Apply to main tree — move file:**
-   - Run: `git -C <MAIN_TREE> mv <AWAITING_DIR>/Q<num>_<name>.md <RESOLVED_DIR>/Q<num>_<name>.md`
-   - Do NOT commit in the main tree. The `**RESOLVED**` header is added automatically by the daemon.
-6. Print: "Resolved Q<num>. File moved to <RESOLVED_DIR>/."
+2. Move the file in the main tree: `git -C <MAIN_TREE> mv <AWAITING_DIR>/Q<num>_<name>.md <RESOLVED_DIR>/Q<num>_<name>.md`
+3. Do NOT commit in the main tree. The `**RESOLVED**` header is added automatically by the daemon.
 
 ### DEFER
 
 1. Read the question file.
-2. Move the file: `git mv <AWAITING_DIR>/Q<num>_*.md <DEFERRED_DIR>/`
-3. Stage: `git add -A`
-4. Commit: `git commit -m "Deferred Q<num>"`
-5. **Apply to main tree — move file:**
-   - Run: `git -C <MAIN_TREE> mv <AWAITING_DIR>/Q<num>_<name>.md <DEFERRED_DIR>/Q<num>_<name>.md`
-   - Do NOT commit in the main tree. The `**DEFERRED**` header is added automatically by the daemon.
-6. Print: "Deferred Q<num>. File moved to <DEFERRED_DIR>/."
+2. Move the file in the main tree: `git -C <MAIN_TREE> mv <AWAITING_DIR>/Q<num>_<name>.md <DEFERRED_DIR>/Q<num>_<name>.md`
+3. Do NOT commit in the main tree. The `**DEFERRED**` header is added automatically by the daemon.
 
 ### RESPOND
 
@@ -84,7 +74,6 @@ You are running inside a git worktree (created by `claude --worktree`). Your wor
 6. **Apply to main tree:**
    - Edit the same question file at its absolute path in the main tree (`<MAIN_TREE>/<AWAITING_DIR>/Q<num>_<name>.md`) with the identical changes.
    - Do NOT commit in the main tree.
-7. Print: "Responded to Q<num>."
 
 ### IMPLEMENT
 
@@ -112,8 +101,7 @@ Files changed:
 6. Stage: `git add -A`
 7. Commit: `git commit -m "Implemented Q<num>: <brief description>"`
 8. Send notification: run `echo $'\a'` (terminal bell).
-9. Print a summary of what was implemented.
-10. Use the `AskUserQuestion` tool to ask: "Ready to apply changes to main tree?" with options:
+9. Use the `AskUserQuestion` tool to ask: "Ready to apply changes to main tree?" with options:
     - "Yes (apply to main unstaged)"
     - "No (reject and discard)"
 11. **Wait for user selection.**
@@ -123,10 +111,9 @@ Files changed:
     - If apply fails, report the conflicting files. The user can fix conflicts in their editor and tell you "try again", or say "reject" to discard.
     - Also apply the question file response to the main tree copy (same as RESPOND step 6).
     - Do NOT commit in the main tree.
-    - Print: "Applied Q<num> changes to main tree (unstaged). Review the changes — reply in the question file to follow up, or say 'resolve' when satisfied."
-13. On **No**:
-    - Print: "Discarded Q<num> implementation."
-14. **Do NOT resolve the question.** Leave the file in Awaiting/. The user will review your changes and either ask follow-up questions or explicitly say "resolve".
+12. On **No**:
+    - Discard. No further action needed.
+13. **Do NOT resolve the question.** Leave the file in Awaiting/. The user will review your changes and either ask follow-up questions or explicitly say "resolve".
 
 ## Daemon Signals
 
@@ -154,7 +141,7 @@ The user has updated the question file. Re-read it from the main tree path and p
 - Do NOT commit in the main tree. All main tree changes must be left unstaged.
 - Do NOT amend commits or force-push.
 - If the question file format is unexpected or classification is truly ambiguous, explain what you see and ask the user which action to take.
-- Keep all output concise and technical.
+- **Do NOT write summaries, status updates, or conversational text in the chat panel.** All substantive content goes in the question file. The chat panel is only for tool calls. The user reads the question file directly — repeating content in chat is redundant.
 - Run each shell command separately — do NOT chain commands with `&&` or `;` or `|`. One command per Bash call.
 - **New question numbering:** If you need to create a new question file, first check the highest Q number across ALL folders in the main tree: `<MAIN_TREE>/<AWAITING_DIR>/`, `<MAIN_TREE>/<RESOLVED_DIR>/`, and `<MAIN_TREE>/<DEFERRED_DIR>/`. Use the next number after the highest found.
 - **Permission logging:** If a tool call is blocked by permissions, log it by appending a line to `<MAIN_TREE>/.question-review-logs/permissions.log` with format: `[YYYY-MM-DD HH:MM:SS] Q<num> TOOL:<tool_name> CMD:<full_command>`. Then skip the blocked action and continue.
