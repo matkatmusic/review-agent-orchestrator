@@ -116,10 +116,6 @@ cancel_and_send() {
     local message="$2"
     local q_num="$3"
 
-    # Send ESC first to dismiss any active UI prompt (e.g., AskUserQuestion)
-    tmux send-keys -t "$pane_id" Escape
-    sleep 0.2
-
     local attempt=0
     while [[ $attempt -lt 5 ]]; do
         tmux send-keys -t "$pane_id" C-c
@@ -167,6 +163,13 @@ reprompt_agent() {
         return 1  # file unchanged since last re-prompt, skip
     fi
 
+    # Skip if agent is showing a UI prompt — don't interrupt it
+    local pane_tail
+    pane_tail=$(tmux capture-pane -t "$pane_id" -p -S -10 2>/dev/null || true)
+    if echo "$pane_tail" | grep -qF 'Esc to cancel'; then
+        return 1
+    fi
+
     # Check if the response is a simple command (resolve/defer) — send directly
     local response_text
     response_text=$(get_pending_response_text "$question_file")
@@ -181,7 +184,7 @@ reprompt_agent() {
             message="defer ${q_num}"
             ;;
         *)
-            message="re-read ${question_file} (the main tree copy, not the worktree copy). process the new response."
+            message="NEW USER RESPONSE in ${question_file} (main tree copy). Steps: (1) Re-read the file. (2) Classify the latest pending response: RESOLVE, RESPOND, or IMPLEMENT. (3) Execute. CRITICAL: If IMPLEMENT, you MUST call AskUserQuestion with 'Ready to apply changes to main tree?' BEFORE applying any changes to the main tree. Do NOT skip this step."
             ;;
     esac
 
@@ -216,9 +219,16 @@ notify_main_changed() {
             continue
         fi
 
+        # Skip if agent is showing a UI prompt (AskUserQuestion) — ESC would dismiss it
+        local pane_tail
+        pane_tail=$(tmux capture-pane -t "$pane_id" -p -S -10 2>/dev/null || true)
+        if echo "$pane_tail" | grep -qF 'Esc to cancel'; then
+            continue
+        fi
+
         local new_head
         new_head=$(git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null)
-        cancel_and_send "$pane_id" "The main repo has new commits. You are in worktree-${q_num}. Rebase: git rebase ${new_head}" "$q_num"
+        cancel_and_send "$pane_id" "The main repo has new commits. You are in worktree-${q_num}. Rebase: git rebase ${new_head} — After rebasing, if you have uncommitted or unapplied IMPLEMENT changes, you MUST call AskUserQuestion with 'Ready to apply changes to main tree?' before applying." "$q_num"
 
         # Update stored HEAD (preserve pane_id and mtime)
         local mtime

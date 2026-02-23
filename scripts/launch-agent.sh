@@ -7,6 +7,11 @@
 PROMPT_FILE="$1"; shift
 PROMPT_CONTENT="$(cat "$PROMPT_FILE")"
 
+# Ensure nvm-managed node is available to the agent (gemini, codex CLIs need it).
+# Agent shells may not source ~/.zshrc where nvm is initialized.
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
 export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=95
 
 # Ensure auto-compact is enabled for agents (user may have it disabled globally).
