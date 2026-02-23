@@ -1,7 +1,9 @@
-<question_user>
+<question_claude number=>
     <text>
+    Ask your question below.
     </text>
-    <agent_response>
-        <text> </text>
-    </agent_response>
-</question_user>
+    <user_response>
+        <text>
+        </text>
+    </user_response>
+</question_claude>
