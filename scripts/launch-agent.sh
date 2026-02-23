@@ -7,7 +7,7 @@
 PROMPT_FILE="$1"; shift
 PROMPT_CONTENT="$(cat "$PROMPT_FILE")"
 
-export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80
+export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=95
 
 # Ensure auto-compact is enabled for agents (user may have it disabled globally).
 # Directly patch ~/.claude.json instead of running 'claude config set' which

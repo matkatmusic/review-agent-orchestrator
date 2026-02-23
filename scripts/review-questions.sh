@@ -83,6 +83,23 @@ has_pending_user_response() {
 #     echo "[review]   Relaunched: $q_num (killed pane, cleaned worktree)"
 # }
 
+# Get the trimmed text of the last pending <user_response> block.
+get_pending_response_text() {
+    local file="$1"
+    local last_user_response
+    last_user_response=$(grep -n '<user_response>' "$file" | tail -1 | cut -d: -f1) || true
+    [[ -z "$last_user_response" ]] && return
+    local raw
+    raw=$(sed -n "${last_user_response},\$p" "$file" \
+        | sed -n '/<text>/,/<\/text>/p' \
+        | sed '1s/.*<text>//; $s/<\/text>.*//' \
+        | tr -s '[:space:]' ' ')
+    # Trim leading/trailing spaces
+    raw="${raw#"${raw%%[![:space:]]*}"}"
+    raw="${raw%"${raw##*[![:space:]]}"}"
+    echo "$raw"
+}
+
 # Extract Q number from filename (e.g., "Q174_foo.md" → "Q174")
 extract_q_number() {
     local filename
@@ -150,7 +167,25 @@ reprompt_agent() {
         return 1  # file unchanged since last re-prompt, skip
     fi
 
-    cancel_and_send "$pane_id" "re-read ${question_file} (the main tree copy, not the worktree copy). process the new response." "$q_num"
+    # Check if the response is a simple command (resolve/defer) — send directly
+    local response_text
+    response_text=$(get_pending_response_text "$question_file")
+    local response_lower
+    response_lower=$(echo "$response_text" | tr '[:upper:]' '[:lower:]')
+    local message
+    case "$response_lower" in
+        resolve|resolved|close|done|"mark resolved")
+            message="resolve ${q_num}"
+            ;;
+        defer|deferred|postpone|later|"not now"|"skip for now"|"move to deferred")
+            message="defer ${q_num}"
+            ;;
+        *)
+            message="re-read ${question_file} (the main tree copy, not the worktree copy). process the new response."
+            ;;
+    esac
+
+    cancel_and_send "$pane_id" "$message" "$q_num"
 
     # Update lockfile with current mtime and HEAD
     write_lockfile "$lockfile" "$pane_id" "$current_mtime"
