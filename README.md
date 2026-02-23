@@ -1,6 +1,8 @@
 # Claude Question Review
 
-Automated question review system using Claude Code agents. Spawns persistent Claude agents in tmux panes to process question files — classifying user responses as RESOLVE, RESPOND, or IMPLEMENT and executing autonomously.
+A work queue where question files are tickets, Claude agents are the workers auto-deployed as question files are modified, and the user is the reviewer who merges.
+
+Spawns persistent Claude agents in tmux panes to process question files — classifying user responses as RESOLVE, RESPOND, DEFER, or IMPLEMENT and executing autonomously.
 
 ## How It Works
 
