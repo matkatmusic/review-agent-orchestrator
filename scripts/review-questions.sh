@@ -65,6 +65,24 @@ has_pending_user_response() {
     [[ -n "$text_content" ]]
 }
 
+# DISABLED: Kill agent, clean up worktree, clear lockfile so scanner respawns fresh
+# relaunch_agent() {
+#     local q_num="$1"
+#     local lockfile="$LOCKS_DIR/${q_num}.lock"
+#     if [[ -f "$lockfile" ]]; then
+#         local pane_id
+#         pane_id=$(head -1 "$lockfile")
+#         tmux kill-pane -t "$pane_id" 2>/dev/null || true
+#         rm -f "$lockfile"
+#     fi
+#     if [[ -d "$PROJECT_ROOT/.claude/worktrees/$q_num" ]]; then
+#         git -C "$PROJECT_ROOT" worktree remove --force ".claude/worktrees/$q_num" 2>/dev/null || true
+#     fi
+#     git -C "$PROJECT_ROOT" worktree prune 2>/dev/null || true
+#     git -C "$PROJECT_ROOT" branch -D "worktree-$q_num" 2>/dev/null || true
+#     echo "[review]   Relaunched: $q_num (killed pane, cleaned worktree)"
+# }
+
 # Extract Q number from filename (e.g., "Q174_foo.md" → "Q174")
 extract_q_number() {
     local filename
@@ -156,6 +174,26 @@ cleanup_stale_locks() {
         fi
     done
 }
+
+# DISABLED: Relaunch on worktree file conflicts with main
+# Check if a worktree has file conflicts with new commits on main
+# has_conflicting_files() {
+#     local q_num="$1"
+#     local main_head
+#     main_head=$(git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null) || return 1
+#     local worktree_base
+#     worktree_base=$(git -C "$PROJECT_ROOT" merge-base "worktree-$q_num" HEAD 2>/dev/null) || return 1
+#     [[ "$worktree_base" == "$main_head" ]] && return 1
+#     local main_changed
+#     main_changed=$(git -C "$PROJECT_ROOT" diff --name-only "$worktree_base" HEAD 2>/dev/null) || return 1
+#     [[ -z "$main_changed" ]] && return 1
+#     local worktree_changed
+#     worktree_changed=$(git -C "$PROJECT_ROOT" diff --name-only "$worktree_base" "worktree-$q_num" 2>/dev/null) || return 1
+#     [[ -z "$worktree_changed" ]] && return 1
+#     local overlap
+#     overlap=$(comm -12 <(echo "$main_changed" | sort) <(echo "$worktree_changed" | sort))
+#     [[ -n "$overlap" ]]
+# }
 
 # Dismiss finished agent panes waiting for user to press Enter
 cleanup_finished_panes() {
@@ -336,7 +374,7 @@ for file in "${question_files[@]}"; do
         continue
     fi
 
-    # Re-prompt existing agent if it has a pending response
+    # Re-prompt existing agent
     if has_active_agent "$q_num"; then
         if reprompt_agent "$q_num" "$file"; then
             reprompted=$((reprompted + 1))
