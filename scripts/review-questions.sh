@@ -283,6 +283,16 @@ cleanup_stale_locks() {
             echo "[review]   Cleaned up: $q_num (pane, lock, worktree, branch)"
         fi
     done
+
+    # If no lockfiles remain, kill the tmux session entirely to avoid a leftover blank pane.
+    # (tmux spawns a replacement shell when the last pane in a session is killed.)
+    shopt -s nullglob
+    local remaining_locks=("$LOCKS_DIR"/*.lock)
+    shopt -u nullglob
+    if [[ ${#remaining_locks[@]} -eq 0 ]] && tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+        tmux kill-session -t "$TMUX_SESSION" 2>/dev/null || true
+        echo "[review]   Killed empty tmux session (no active agents)"
+    fi
 }
 
 # DISABLED: Relaunch on worktree file conflicts with main
@@ -454,19 +464,6 @@ for resolved_file in "$RESOLVED_PATH"/Q*.md; do
         printf '%s\n\n' '**RESOLVED**' | cat - "$resolved_file" > "$resolved_file.tmp"
         mv "$resolved_file.tmp" "$resolved_file"
         echo "[review]   Added **RESOLVED** header: $(basename "$resolved_file")"
-    fi
-done
-shopt -u nullglob
-
-# Ensure all Deferred/ files have **DEFERRED** header
-DEFERRED_PATH="$PROJECT_ROOT/$DEFERRED_DIR"
-shopt -s nullglob
-for deferred_file in "$DEFERRED_PATH"/Q*.md; do
-    first_line=$(head -1 "$deferred_file")
-    if [[ "$first_line" != "**DEFERRED**" ]]; then
-        printf '%s\n\n' '**DEFERRED**' | cat - "$deferred_file" > "$deferred_file.tmp"
-        mv "$deferred_file.tmp" "$deferred_file"
-        echo "[review]   Added **DEFERRED** header: $(basename "$deferred_file")"
     fi
 done
 shopt -u nullglob

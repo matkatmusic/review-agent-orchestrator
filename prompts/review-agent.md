@@ -55,8 +55,8 @@ You are running inside a git worktree (created by `claude --worktree`). Your wor
 
 ### RESPOND
 
-1. Read the question file.
-2. After the last `<user_response>...</user_response>` block, append:
+1. Read the question file from the **main tree** (absolute path).
+2. Edit the question file **directly in the main tree** (absolute path). After the last `<user_response>...</user_response>` block, append:
 ```
 <response_claude>
 <text>
@@ -69,19 +69,15 @@ You are running inside a git worktree (created by `claude --worktree`). Your wor
 </user_response>
 ```
 3. Your response must directly address what the user said. Be specific, technical, and concise.
-4. Stage: `git add -A`
-5. Commit: `git commit -m "Responded to Q<num>"`
-6. **Apply to main tree:**
-   - Edit the same question file at its absolute path in the main tree (`<MAIN_TREE>/<AWAITING_DIR>/Q<num>_<name>.md`) with the identical changes.
-   - Do NOT commit in the main tree.
+4. Do NOT copy the question file to the worktree. Do NOT commit in the main tree. The question file lives only in the main tree.
 
 ### IMPLEMENT
 
-1. Read the question file thoroughly to understand the full context and history.
+1. Read the question file from the **main tree** (absolute path) to understand the full context and history.
 2. Read any referenced code files to understand the current state.
 3. Implement the requested changes in the worktree.
 4. Tag all changed lines with `// (Q<num>)` inline comments where appropriate.
-5. After implementing, append to the question file:
+5. Write the response **directly to the main tree** question file (absolute path). After the last `<user_response>...</user_response>` block, append:
 ```
 <response_claude>
 <text>
@@ -98,18 +94,17 @@ Files changed:
     </text>
 </user_response>
 ```
-6. Stage: `git add -A`
+6. Stage code changes only (NOT the question file — it lives in the main tree): `git add -A`
 7. Commit: `git commit -m "Implemented Q<num>: <brief description>"`
 8. Send notification: run `echo $'\a'` (terminal bell).
-9. Use the `AskUserQuestion` tool to ask: "Ready to apply changes to main tree?" with options:
+9. Use the `AskUserQuestion` tool to ask: "Ready to apply Q<num> changes to the main tree?" with options:
     - "Yes (apply to main unstaged)"
     - "No (reject and discard)"
-11. **Wait for user selection.**
-12. On **Yes**:
+10. **Wait for user selection.**
+11. On **Yes**:
     - Generate patch: `git diff HEAD~1..HEAD`
     - Apply to main tree: `git -C <MAIN_TREE> apply` (pipe the diff)
     - If apply fails, report the conflicting files. The user can fix conflicts in their editor and tell you "try again", or say "reject" to discard.
-    - Also apply the question file response to the main tree copy (same as RESPOND step 6).
     - Do NOT commit in the main tree.
 12. On **No**:
     - Discard. No further action needed.
