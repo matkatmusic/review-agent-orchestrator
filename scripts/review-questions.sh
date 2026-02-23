@@ -90,6 +90,49 @@ extract_q_number() {
     echo "$filename" | grep -oE '^Q[0-9]+' || true
 }
 
+# ---------- Cancel + re-prompt helpers ----------
+
+# Send Ctrl-C until the agent is idle, then send a message.
+# Used by both reprompt_agent and notify_main_changed.
+cancel_and_send() {
+    local pane_id="$1"
+    local message="$2"
+    local q_num="$3"
+
+    # Send ESC first to dismiss any active UI prompt (e.g., AskUserQuestion)
+    tmux send-keys -t "$pane_id" Escape
+    sleep 0.2
+
+    local attempt=0
+    while [[ $attempt -lt 5 ]]; do
+        tmux send-keys -t "$pane_id" C-c
+        sleep 0.2
+        local pane_tail
+        pane_tail=$(tmux capture-pane -t "$pane_id" -p -S -5 2>/dev/null || true)
+        if echo "$pane_tail" | grep -qF 'Ctrl-C'; then
+            break
+        fi
+        attempt=$((attempt + 1))
+    done
+    if [[ $attempt -gt 0 ]]; then
+        echo "[review]   Cancelled in-progress work: $q_num ($((attempt + 1)) Ctrl-C's)"
+    fi
+
+    tmux send-keys -t "$pane_id" "$message" Enter
+    sleep 0.5
+    tmux send-keys -t "$pane_id" Enter
+}
+
+# Write lockfile: line 1 = pane_id, line 2 = mtime, line 3 = HEAD commit
+write_lockfile() {
+    local lockfile="$1"
+    local pane_id="$2"
+    local mtime="$3"
+    local head_commit
+    head_commit=$(git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null || echo "unknown")
+    printf '%s\n%s\n%s\n' "$pane_id" "$mtime" "$head_commit" > "$lockfile"
+}
+
 # ---------- Re-prompt existing agent ----------
 
 reprompt_agent() {
@@ -107,31 +150,53 @@ reprompt_agent() {
         return 1  # file unchanged since last re-prompt, skip
     fi
 
-    # Cancel any in-progress work before re-prompting.
-    # Send Ctrl-C until Claude shows "Press Ctrl-C again to exit" (meaning it's idle).
-    local attempt=0
-    while [[ $attempt -lt 5 ]]; do
-        tmux send-keys -t "$pane_id" C-c
-        sleep 0.2
-        local pane_tail
-        pane_tail=$(tmux capture-pane -t "$pane_id" -p -S -5 2>/dev/null || true)
-        if echo "$pane_tail" | grep -qF 'Ctrl-C'; then
-            break
-        fi
-        attempt=$((attempt + 1))
-    done
-    if [[ $attempt -gt 0 ]]; then
-        echo "[review]   Cancelled in-progress work: $q_num ($((attempt + 1)) Ctrl-C's)"
-    fi
+    cancel_and_send "$pane_id" "re-read ${question_file} (the main tree copy, not the worktree copy). process the new response." "$q_num"
 
-    tmux send-keys -t "$pane_id" "re-read ${question_file} (the main tree copy, not the worktree copy). process the new response." Enter
-    sleep 0.5
-    tmux send-keys -t "$pane_id" Enter
-
-    # Store mtime so we don't re-prompt again until the file changes
-    echo -e "${pane_id}\n${current_mtime}" > "$lockfile"
+    # Update lockfile with current mtime and HEAD
+    write_lockfile "$lockfile" "$pane_id" "$current_mtime"
 
     echo "[review]   Re-prompted agent: $q_num (pane $pane_id)"
+}
+
+# ---------- Notify agents when main branch changes ----------
+
+notify_main_changed() {
+    [[ ! -d "$LOCKS_DIR" ]] && return
+    local current_head
+    current_head=$(git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null) || return
+    local notified=0
+
+    for lockfile in "$LOCKS_DIR"/*.lock; do
+        [[ ! -f "$lockfile" ]] && continue
+        local pane_id stored_head q_num
+        pane_id=$(head -1 "$lockfile")
+        stored_head=$(sed -n '3p' "$lockfile" 2>/dev/null)
+        q_num=$(basename "$lockfile" .lock)
+
+        # Skip if HEAD hasn't changed or no stored HEAD
+        [[ -z "$stored_head" || "$stored_head" == "$current_head" ]] && continue
+
+        # Verify pane is still alive
+        if ! tmux list-panes -t "$TMUX_SESSION" -F '#{pane_id}' 2>/dev/null | grep -qF "$pane_id"; then
+            continue
+        fi
+
+        local new_head
+        new_head=$(git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null)
+        cancel_and_send "$pane_id" "The main repo has new commits. You are in worktree-${q_num}. Rebase: git rebase ${new_head}" "$q_num"
+
+        # Update stored HEAD (preserve pane_id and mtime)
+        local mtime
+        mtime=$(sed -n '2p' "$lockfile" 2>/dev/null)
+        write_lockfile "$lockfile" "$pane_id" "$mtime"
+
+        notified=$((notified + 1))
+        echo "[review]   Notified $q_num: main repo has new commits"
+    done
+
+    if [[ $notified -gt 0 ]]; then
+        echo "[review]   $notified agent(s) notified of new commits in main repo"
+    fi
 }
 
 # ---------- Lockfile-based dedup ----------
@@ -300,10 +365,10 @@ spawn_agent_pane() {
             "$agent_cmd")
     fi
 
-    # Write lockfile with pane_id and file mtime for dedup tracking
+    # Write lockfile with pane_id, file mtime, and HEAD for tracking
     local spawn_mtime
     spawn_mtime=$(stat -f '%m' "$question_file" 2>/dev/null)
-    echo -e "${pane_id}\n${spawn_mtime}" > "$lockfile"
+    write_lockfile "$lockfile" "$pane_id" "$spawn_mtime"
 
     # Set pane title
     tmux select-pane -t "$pane_id" -T "$q_num"
@@ -333,6 +398,7 @@ fi
 ensure_locks_dir
 cleanup_finished_panes
 cleanup_stale_locks
+notify_main_changed
 
 # Ensure all Resolved/ files have **RESOLVED** header
 shopt -s nullglob

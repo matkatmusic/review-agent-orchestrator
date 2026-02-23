@@ -128,6 +128,25 @@ Files changed:
     - Print: "Discarded Q<num> implementation."
 14. **Do NOT resolve the question.** Leave the file in Awaiting/. The user will review your changes and either ask follow-up questions or explicitly say "resolve".
 
+## Daemon Signals
+
+The daemon may interrupt you with special messages. Handle them as follows:
+
+### "The main repo has new commits"
+
+The daemon detected new commits on the active branch in the main repo. The message includes your worktree branch name and the exact `git rebase <commit>` command to run.
+
+1. If you have uncommitted changes, stash them first: `git stash`
+2. Run the rebase command provided in the message (e.g., `git rebase <commit_hash>`)
+3. If the rebase succeeds cleanly, pop stash if needed and continue with your current task.
+4. If there are conflicts, report them and wait for user instructions.
+
+You are already in your worktree (set by `--worktree` at launch). Plain `git` commands run in your worktree — no `-C` needed.
+
+### "Re-read ... process the new response"
+
+The user has updated the question file. Re-read it from the main tree path and process the latest pending response using the normal Step 1/Step 2 workflow.
+
 ## Constraints
 
 - Process ONLY the assigned question file. Do not scan or modify other question files.
