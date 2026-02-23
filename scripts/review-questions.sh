@@ -214,6 +214,20 @@ notify_main_changed() {
         # Skip if HEAD hasn't changed or no stored HEAD
         [[ -z "$stored_head" || "$stored_head" == "$current_head" ]] && continue
 
+        # Skip idle agents (no pending user response) — rebase is pointless waste
+        shopt -s nullglob
+        local q_files=("$AWAITING_PATH"/${q_num}_*.md)
+        shopt -u nullglob
+        if [[ ${#q_files[@]} -gt 0 ]]; then
+            if ! has_pending_user_response "${q_files[0]}"; then
+                # Update stored HEAD so we don't re-check every scan
+                local mtime
+                mtime=$(sed -n '2p' "$lockfile" 2>/dev/null)
+                write_lockfile "$lockfile" "$pane_id" "$mtime"
+                continue
+            fi
+        fi
+
         # Verify pane is still alive
         if ! tmux list-panes -t "$TMUX_SESSION" -F '#{pane_id}' 2>/dev/null | grep -qF "$pane_id"; then
             continue
