@@ -101,13 +101,8 @@ SETTINGS_FILE="$CLAUDE_DIR/settings.json"
 log "Configuring Claude Code permissions..."
 mkdir -p "$CLAUDE_DIR"
 
-if [[ ! -f "$SETTINGS_FILE" ]]; then
-    cp "$SCRIPT_DIR/templates/settings.json" "$SETTINGS_FILE"
-    log "  Created: .claude/settings.json (agent permissions)"
-else
-    log "  .claude/settings.json already exists — skipping"
-    log "  Ensure it includes permissions for: Bash(git *), Bash(ls *), Bash(mv *), Bash(echo *)"
-fi
+cp "$SCRIPT_DIR/templates/settings.json" "$SETTINGS_FILE"
+log "  Installed: .claude/settings.json (agent permissions)"
 
 # ---------- Step 6: Make scripts executable ----------
 

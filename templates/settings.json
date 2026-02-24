@@ -12,6 +12,8 @@
       "Bash(find *)",
       "Bash(mv *)",
       "Bash(cp *)",
+      "Bash(grep *)",
+      "Bash(cat *)",
       "Bash(echo *)",
       "Bash(tmux *)"
     ],
