@@ -102,9 +102,10 @@ Files changed:
     - "No (reject and discard)"
 10. **Wait for user selection.**
 11. On **Yes**:
-    - Apply to main tree: `git format-patch -1 HEAD --stdout | git -C <MAIN_TREE> apply --3way`
-    - The `--3way` flag handles diverged files by doing a 3-way merge instead of failing on context mismatch.
-    - If apply fails with conflicts, report the conflicting files. The user can fix conflicts in their editor and tell you "try again", or say "reject" to discard.
+    - Rebase onto main's current HEAD so your patch context matches: `git rebase $(git -C <MAIN_TREE> rev-parse HEAD)`
+      - If rebase has conflicts, resolve them, then `git rebase --continue`.
+    - Apply your latest commit to main: `git format-patch -1 HEAD --stdout | git -C <MAIN_TREE> apply`
+    - If apply fails, report the conflicting files. The user can fix conflicts in their editor and tell you "try again", or say "reject" to discard.
     - Do NOT commit in the main tree.
 12. On **No**:
     - Discard. No further action needed.
