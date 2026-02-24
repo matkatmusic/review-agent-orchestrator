@@ -102,8 +102,8 @@ Files changed:
     - "No (reject and discard)"
 10. **Wait for user selection.**
 11. On **Yes**:
-    - Generate patch: `git diff HEAD~1..HEAD`
-    - Apply to main tree: `git -C <MAIN_TREE> apply` (pipe the diff)
+    - Generate patch: `git format-patch -1 HEAD --stdout`
+    - Apply to main tree: `git format-patch -1 HEAD --stdout | git -C <MAIN_TREE> apply`
     - If apply fails, report the conflicting files. The user can fix conflicts in their editor and tell you "try again", or say "reject" to discard.
     - Do NOT commit in the main tree.
 12. On **No**:
