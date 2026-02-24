@@ -94,20 +94,18 @@ Files changed:
     </text>
 </user_response>
 ```
-6. Stage code changes only (NOT the question file — it lives in the main tree): `git add -A`
-7. Commit: `git commit -m "Implemented Q<num>: <brief description>"`
+6. **Apply changes directly to the main tree files** (using absolute paths via `<MAIN_TREE>/...`). Edit each changed file in the main tree to match your worktree changes. Do NOT use `git diff` or `git format-patch` to apply — worktrees diverge from main and patches will fail.
+7. Stage and commit in the worktree as a backup: `git add -A && git commit -m "Implemented Q<num>: <brief description>"`
 8. Send notification: run `echo $'\a'` (terminal bell).
 9. Use the `AskUserQuestion` tool to ask: "Ready to apply Q<num> changes to the main tree?" with options:
-    - "Yes (apply to main unstaged)"
-    - "No (reject and discard)"
+    - "Yes — I've reviewed the changes"
+    - "No (reject and revert)"
 10. **Wait for user selection.**
 11. On **Yes**:
-    - Generate patch: `git format-patch -1 HEAD --stdout`
-    - Apply to main tree: `git format-patch -1 HEAD --stdout | git -C <MAIN_TREE> apply`
-    - If apply fails, report the conflicting files. The user can fix conflicts in their editor and tell you "try again", or say "reject" to discard.
+    - Changes are already in the main tree (step 6). Nothing more to do.
     - Do NOT commit in the main tree.
 12. On **No**:
-    - Discard. No further action needed.
+    - Revert the main tree changes: for each file you edited, restore it from git: `git -C <MAIN_TREE> checkout -- <file>`
 13. **Do NOT resolve the question.** Leave the file in Awaiting/. The user will review your changes and either ask follow-up questions or explicitly say "resolve".
 
 ## Daemon Signals
