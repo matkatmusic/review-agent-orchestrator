@@ -19,7 +19,22 @@ PROMPT_FILE="$SUBMODULE_DIR/$AGENT_PROMPT"
 # ---------- Terminal window ----------
 
 open_terminal_window() {
-    if [[ "$TERMINAL_APP" == "iTerm" ]]; then
+    if [[ "$TERMINAL_APP" == "Antigravity" ]]; then
+        osascript <<APPLESCRIPT 2>/dev/null || true
+tell application "System Events"
+    tell first process whose bundle identifier is "com.google.antigravity"
+        set frontmost to true
+        delay 0.3
+        -- Ctrl-Shift-\` to open a new terminal pane
+        keystroke "\`" using {control down, shift down}
+        delay 0.5
+        -- Type the tmux attach command
+        keystroke "tmux attach -t ${TMUX_SESSION}"
+        key code 36 -- Enter
+    end tell
+end tell
+APPLESCRIPT
+    elif [[ "$TERMINAL_APP" == "iTerm" ]]; then
         osascript -e "tell application \"iTerm2\" to create window with default profile command \"tmux attach -t $TMUX_SESSION\"" 2>/dev/null || true
     else
         osascript <<APPLESCRIPT 2>/dev/null || true

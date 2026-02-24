@@ -18,8 +18,8 @@ DEFERRED_DIR="$QUESTIONS_DIR/Deferred"
 SCAN_INTERVAL=10
 
 # Terminal app to open for the tmux session
-# Options: "Terminal" (macOS default), "iTerm" (iTerm2)
-TERMINAL_APP="Terminal"
+# Options: "Antigravity" (VS Code), "Terminal" (macOS default), "iTerm" (iTerm2)
+TERMINAL_APP="Antigravity"
 
 # Terminal window size (columns x rows)
 TERMINAL_COLS=175
