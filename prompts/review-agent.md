@@ -95,7 +95,7 @@ Files changed:
 </user_response>
 ```
 6. Stage: `git add -A`
-7. Commit: `git commit -m "Implemented Q<num>: <brief description>"`
+7. Commit: If this is your first commit on this worktree branch, use `git commit -m "Implemented Q<num>: <brief description>"`. For subsequent implementations (re-prompts), **amend** the existing commit: `git commit --amend -m "Implemented Q<num>: <brief description>"`. This keeps exactly one commit on the branch so `format-patch -1` always captures all changes.
 8. Send notification: run `echo $'\a'` (terminal bell).
 9. Use the `AskUserQuestion` tool to ask: "Ready to apply Q<num> changes to the main tree?" with options:
     - "Yes (apply to main unstaged)"
