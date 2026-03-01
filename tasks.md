@@ -59,16 +59,16 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 **Goal**: Create, read, update, list questions.
 
-- [ ] Create `src/questions.ts` — `createQuestion()`, `getQuestion()`, `listByStatus()`, `listAll()`, `updateStatus()`, `getActiveCount()`, `getGroup()`, `isGroupResolved()`
-- [ ] `createQuestion()` increments `lastQuestionCreated` in metadata, inserts row, returns qnum
-- [ ] Write tests: `src/__tests__/questions.test.ts`
+- [x] Create `src/questions.ts` — `createQuestion()`, `getQuestion()`, `listByStatus()`, `listAll()`, `updateStatus()`, `getActiveCount()`, `getGroup()`, `isGroupResolved()`
+- [x] `createQuestion()` increments `lastQuestionCreated` in metadata, inserts row, returns qnum
+- [x] Write tests: `src/__tests__/questions.test.ts`
   - Create question → returned qnum = lastQuestionCreated
   - Create multiple → qnums increment
   - List by status filters correctly
   - Update status transitions
   - Group resolution: all resolved = true, partial = false
 
-**Verify**: `npm test -- questions.test` — all pass.
+**Verify**: ~~`npm test -- questions.test` — all pass.~~ PASSED — 18/18 tests pass (51ms). Also covers: group assignment, null group default, resolved_at set/clear, getActiveCount, getGroup empty, nonexistent qnum.
 
 ---
 
