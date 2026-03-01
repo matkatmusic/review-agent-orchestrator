@@ -112,12 +112,12 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 **Goal**: Status transition logic works correctly in isolation.
 
-- [ ] Create `src/pipeline.ts` — `enforceBlocked()`, `autoUnblock()`, `promoteAwaiting()`, `runPipeline()`
-- [ ] `enforceBlocked()`: query Awaiting/Active questions, check `isBlocked()`, move to Deferred
-- [ ] `autoUnblock()`: query Deferred questions WITH dependency entries, check if all resolved, move to Awaiting
-- [ ] `promoteAwaiting()`: move Awaiting → Active up to `maxAgents - activeCount`
-- [ ] User-deferred (no dependency entries) must NOT auto-unblock
-- [ ] Write tests: `src/__tests__/pipeline.test.ts`
+- [x] Create `src/pipeline.ts` — `enforceBlocked()`, `autoUnblock()`, `promoteAwaiting()`, `runPipeline()`
+- [x] `enforceBlocked()`: query Awaiting/Active questions, check `isBlocked()`, move to Deferred
+- [x] `autoUnblock()`: query Deferred questions WITH dependency entries, check if all resolved, move to Awaiting
+- [x] `promoteAwaiting()`: move Awaiting → Active up to `maxAgents - activeCount`
+- [x] User-deferred (no dependency entries) must NOT auto-unblock
+- [x] Write tests: `src/__tests__/pipeline.test.ts`
   - Blocked Active question → moved to Deferred
   - Blocked Awaiting question → moved to Deferred
   - All blockers resolved → Deferred moves to Awaiting
@@ -125,7 +125,7 @@ Each stage produces a working, testable artifact. Do not start a stage until the
   - Promote respects MAX_AGENTS capacity
   - Full pipeline runs in correct order (enforce → unblock → promote)
 
-**Verify**: `npm test -- pipeline.test` — all pass.
+**Verify**: ~~`npm test -- pipeline.test` — all pass.~~ PASSED — 16/16 tests pass (50ms). Also covers: unblocked stays Active, no-op returns empty, promote order by qnum, unblocked+promoted in same run.
 
 ---
 
