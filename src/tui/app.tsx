@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import React, { useState } from 'react';
-import { render, Box, Text } from 'ink';
+import { render } from 'ink';
 import { DB } from '../db.js';
 import { loadConfig } from '../config.js';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Dashboard from './dashboard.js';
 import Detail from './detail.js';
+import Create from './create.js';
 
 type Screen =
     | { type: 'dashboard' }
@@ -38,12 +39,12 @@ function App({ db }: AppProps) {
                 />
             );
         case 'create':
-            // Placeholder — Stage 15 will implement create.tsx
             return (
-                <Box flexDirection="column">
-                    <Text>New Question (not yet implemented)</Text>
-                    <Text dimColor>Press any key to go back.</Text>
-                </Box>
+                <Create
+                    db={db}
+                    onCreated={(qnum) => setScreen({ type: 'detail', qnum })}
+                    onBack={() => setScreen({ type: 'dashboard' })}
+                />
             );
     }
 }
