@@ -252,13 +252,13 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 **Goal**: Navigable question list with status filtering.
 
-- [ ] Create `src/tui/app.tsx` — root component, screen router
-- [ ] Create `src/tui/dashboard.tsx` — question list with status tabs, `✱` new-response markers
-- [ ] Keyboard: arrow keys navigate, Tab switches status filter, Enter opens detail, `n` new, `d` defer, `r` resolve, `q` quit
-- [ ] Reads DB directly (read-only for display)
-- [ ] Status bar: counts per status
+- [x] Create `src/tui/app.tsx` — root component, screen router (routes: dashboard, detail placeholder, create placeholder)
+- [x] Create `src/tui/dashboard.tsx` — question list with status tabs, `✱` new-response markers
+- [x] Keyboard: arrow keys navigate, Tab/Shift+Tab switches status filter, Enter opens detail, `n` new, `d` defer, `r` resolve, `a` activate, `R` refresh, `q` quit
+- [x] Reads DB directly (read-only for display; status actions write directly)
+- [x] Status bar: counts per status, total count, unread count in header
 
-**Verify**: `npm run tui` — dashboard renders, questions listed, keyboard navigation works, status filtering works.
+**Verify**: ~~`npm run tui` — dashboard renders, questions listed, keyboard navigation works, status filtering works.~~ PASSED — builds clean, `npm run tui` launches dashboard with status tabs (All/Active/Awaiting/Deferred/Resolved), cursor navigation, question list with Q-number/title/status/group/unread markers, status change actions (defer/resolve/activate), Tab filter cycling, and quit. Detail and create screens are placeholders for Stages 14/15.
 
 ---
 
