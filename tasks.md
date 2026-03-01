@@ -324,6 +324,66 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 ---
 
+## Stage 14b: TUI — Detail Tests
+
+**Goal**: Comprehensive programmatic tests for the detail component using `ink-testing-library`. Ensures all rendering, keyboard modes, status actions, and response submission work correctly. Supplements the initial 26 tests from Stage 14 with additional edge-case and gap coverage.
+
+- [ ] Expand tests in `src/__tests__/detail.test.tsx`
+  - **Rendering**
+    - Question title and Q-number displayed in header
+    - Status displayed with correct label (Active, Awaiting, Deferred, Resolved)
+    - Description text shown below header
+    - Group name shown when present; omitted when null
+    - Blocked-by shows blocker Q-numbers (e.g., `Q1, Q3`); shows `(none)` when empty
+    - Blocks shows downstream Q-numbers; shows `(none)` when empty
+    - Multiple blockers displayed as comma-separated list
+    - `No responses yet.` shown when no responses exist
+    - Response bubbles show author label: `Agent` for agent, `You` for user
+    - Response body text displayed in each bubble
+    - Responses rendered in chronological order (oldest first)
+    - Multi-response conversation shows all responses (3+ messages)
+    - `✱` marker appears on latest response when it's from agent
+    - `✱` marker does NOT appear when latest response is from user
+    - `✱` marker only appears on the LAST response, not on earlier agent responses
+    - Not-found screen shown for invalid qnum with "not found" text
+    - Status bar shows command-mode hints when not in input mode
+  - **Input mode transitions**
+    - `i` enters input mode — status bar changes to show `[Enter] Send  [Esc] Cancel`
+    - Enter key also enters input mode
+    - Esc with empty input exits input mode immediately — status bar reverts to command hints
+    - Esc with non-empty input clears the text but stays in input mode
+    - Esc again (now empty) exits input mode
+    - Submitting a response exits input mode (returns to command mode)
+  - **Response submission**
+    - Typing text + Enter adds a `user` response to DB with correct body
+    - Response appears in conversation view after submit
+    - Response shows `You` label after submit
+    - Empty submit (Enter with no text) does NOT add a response to DB
+    - Whitespace-only submit does NOT add a response to DB
+    - `✱` marker disappears after user submits a response to an agent message
+  - **Status change actions (command mode)**
+    - `d` on Awaiting question → DB status changes to Deferred, header re-renders
+    - `d` on Active question → DB status changes to Deferred
+    - `d` on already-Deferred question → no-op (status unchanged)
+    - `d` on Resolved question → no-op (status unchanged)
+    - `r` on Active question → DB status changes to Resolved, header re-renders
+    - `r` on Awaiting question → DB status changes to Resolved
+    - `r` on already-Resolved question → no-op (status unchanged)
+    - `a` on Deferred question → DB status changes to Awaiting, header re-renders
+    - `a` on Resolved question → DB status changes to Awaiting
+    - `a` on Active question → no-op (only works on Deferred/Resolved)
+    - `a` on Awaiting question → no-op (only works on Deferred/Resolved)
+  - **Input mode isolation**
+    - `d`, `r`, `a` keys are captured as text input, NOT as status actions, when in input mode
+    - Esc in input mode does NOT call onBack
+  - **Navigation**
+    - Esc in command mode calls `onBack`
+    - Esc on not-found screen calls `onBack`
+
+**Verify**: `npm test -- detail.test` — all pass.
+
+---
+
 ## Stage 15: TUI — New Question
 
 **Goal**: Create questions from the TUI.
