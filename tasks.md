@@ -41,17 +41,17 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 **Goal**: Can create, migrate, seed, export, and import a SQLite database.
 
-- [ ] Create `templates/schema.sql` (full schema: `metadata`, `questions`, `responses`, `dependencies` tables + indexes)
-- [ ] Create `templates/seed.sql` (getting-started question + `lastQuestionCreated` metadata row)
-- [ ] Create `src/db.ts` — `DB` class: `open()`, `close()`, `migrate()`, `seed()`, `run()`, `get()`, `all()`, `isDirty()`, `exportDump()`, `importDump()`
-- [ ] Write tests: `src/__tests__/db.test.ts`
+- [x] Create `templates/schema.sql` (full schema: `metadata`, `questions`, `responses`, `dependencies` tables + indexes)
+- [x] Create `templates/seed.sql` (getting-started question + `lastQuestionCreated` metadata row)
+- [x] Create `src/db.ts` — `DB` class: `open()`, `close()`, `migrate()`, `seed()`, `run()`, `get()`, `all()`, `isDirty()`, `exportDump()`, `importDump()`
+- [x] Write tests: `src/__tests__/db.test.ts`
   - Creates DB in temp dir
   - Runs schema migration
   - Seeds data
   - Exports dump → delete DB → import dump → data intact
   - `isDirty()` tracks write operations
 
-**Verify**: `npm test -- db.test` — all pass. Round-trip dump/import preserves all data.
+**Verify**: ~~`npm test -- db.test` — all pass. Round-trip dump/import preserves all data.~~ PASSED — 10/10 tests pass (67ms). Also covers: migration idempotency, seed idempotency, FK enforcement, throws-when-not-open.
 
 ---
 
