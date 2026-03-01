@@ -195,17 +195,17 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 **Goal**: Can spawn, kill, and communicate with tmux panes programmatically.
 
-- [ ] Create `src/tmux.ts` — `hasSession()`, `createSession()`, `splitWindow()`, `killPane()`, `sendKeys()`, `capturePaneTail()`, `listPanes()`
-- [ ] All functions shell out to `tmux` CLI (via `child_process.execSync`)
-- [ ] Error handling: tmux not installed, session doesn't exist, pane already dead
-- [ ] Write tests: `src/__tests__/tmux.test.ts` (integration — requires tmux)
+- [x] Create `src/tmux.ts` — `hasSession()`, `createSession()`, `splitWindow()`, `killPane()`, `sendKeys()`, `capturePaneTail()`, `listPanes()` (also added `isPaneAlive()`, `killSession()`, `isTmuxAvailable()`)
+- [x] All functions shell out to `tmux` CLI (via `child_process.execSync`)
+- [x] Error handling: tmux not installed, session doesn't exist, pane already dead
+- [x] Write tests: `src/__tests__/tmux.test.ts` (integration — requires tmux, auto-skipped if unavailable)
   - Create session → exists
   - Split window → pane ID returned
   - Send keys → captured in pane output
   - Kill pane → no longer listed
   - Graceful error when session doesn't exist
 
-**Verify**: `npm test -- tmux.test` — all pass (skip in CI if no tmux).
+**Verify**: ~~`npm test -- tmux.test` — all pass (skip in CI if no tmux).~~ PASSED — 11/11 tests pass (604ms). Also covers: isPaneAlive, listPanes empty, capturePaneTail on dead pane, killPane safe on dead pane.
 
 ---
 
