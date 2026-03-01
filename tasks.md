@@ -151,16 +151,16 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 **Goal**: Load configuration from `config.sh`, environment, or defaults.
 
-- [ ] Create `src/config.ts` — `loadConfig()`, `resolveProjectRoot()`
-- [ ] Config sources (priority): env vars > `config.local.sh` > `config.sh` > defaults
-- [ ] `resolveProjectRoot()`: derive from tool's own location (walk up to find `Questions/` dir)
-- [ ] Validate: required paths exist, `maxAgents` > 0, etc.
-- [ ] Write tests: `src/__tests__/config.test.ts`
+- [x] Create `src/config.ts` — `loadConfig()`, `resolveProjectRoot()`
+- [x] Config sources (priority): env vars > `config.local.sh` > `config.sh` > defaults
+- [x] `resolveProjectRoot()`: derive from tool's own location (walk up to find `Questions/` dir)
+- [x] Validate: required paths exist, `maxAgents` > 0, etc.
+- [x] Write tests: `src/__tests__/config.test.ts`
   - Defaults applied when no config file
   - Env vars override config file
   - Project root resolution from submodule location
 
-**Verify**: `npm test -- config.test` — all pass.
+**Verify**: ~~`npm test -- config.test` — all pass.~~ PASSED — 15/15 tests pass (13ms). Also covers: shell config parsing (quotes, comments, var refs skipped), maxAgents validation, codeRoot relative/absolute/empty, invalid int fallback.
 
 ---
 
