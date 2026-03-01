@@ -213,19 +213,19 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 **Goal**: Spawn agents for Active questions, re-prompt on new responses, manage lockfiles.
 
-- [ ] Create `src/agents.ts` — `spawnAgent()`, `repromptAgent()`, `isAgentRunning()`, `cleanupStaleLocks()`, `createLockfile()`, `removeLockfile()`
-- [ ] `spawnAgent()`: create worktree, write lockfile, spawn claude in tmux pane with initial message
-- [ ] `repromptAgent()`: send "NEW USER RESPONSE" message to existing pane via `sendKeys()`
-- [ ] `isAgentRunning()`: check lockfile exists AND pane still alive
-- [ ] `cleanupStaleLocks()`: remove lockfiles where pane is dead
-- [ ] Lockfile format: JSON `{ paneId, qnum, headCommit }`
-- [ ] Lockfile location: `<projectRoot>/.question-review-locks/Q<num>.lock`
-- [ ] Write tests: `src/__tests__/agents.test.ts`
+- [x] Create `src/agents.ts` — `spawnAgent()`, `repromptAgent()`, `isAgentRunning()`, `cleanupStaleLocks()`, `createLockfile()`, `removeLockfile()` (also added `readLockfile()`, `listLockfiles()`, `killAgent()`, `buildInitialPrompt()`, `buildClaudeCommand()`, `sendInitialPrompt()`)
+- [x] `spawnAgent()`: create worktree, write lockfile, spawn claude in tmux pane with initial message
+- [x] `repromptAgent()`: send "NEW USER RESPONSE" message to existing pane via `sendKeys()`
+- [x] `isAgentRunning()`: check lockfile exists AND pane still alive
+- [x] `cleanupStaleLocks()`: remove lockfiles where pane is dead
+- [x] Lockfile format: JSON `{ paneId, qnum, headCommit }`
+- [x] Lockfile location: `<projectRoot>/.question-review-locks/Q<num>.lock`
+- [x] Write tests: `src/__tests__/agents.test.ts`
   - Lockfile creation/removal
   - Stale lockfile detection (pane ID doesn't exist)
   - Spawn builds correct claude CLI command
 
-**Verify**: `npm test -- agents.test` — all pass.
+**Verify**: ~~`npm test -- agents.test` — all pass.~~ PASSED — 32/32 tests pass (2270ms). Also covers: readLockfile, listLockfiles, malformed lockfile handling, buildInitialPrompt (with/without codeRoot), buildClaudeCommand (--add-dir variants), killAgent, tmux integration (spawn session creation/reuse, reprompt with pane output verification, sendInitialPrompt, cleanupStaleLocks preserving live agents).
 
 ---
 
