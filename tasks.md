@@ -27,13 +27,13 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 **Goal**: Empty TypeScript project that compiles.
 
-- [ ] Create `package.json` with all dependencies (`better-sqlite3`, `commander`, `ink`, `react`, `vitest`, `typescript`)
-- [ ] Create `tsconfig.json` with JSX support for Ink
-- [ ] Create `.gitignore` (`dist/`, `node_modules/`)
-- [ ] Create `src/types.ts` with all interfaces (`Question`, `Response`, `Dependency`, `PendingAction`, `Config`, `LockfileData`)
-- [ ] `npm install && npm run build`
+- [x] Create `package.json` with all dependencies (`better-sqlite3`, `commander`, `ink`, `react`, `vitest`, `typescript`)
+- [x] Create `tsconfig.json` with JSX support for Ink (+ `sourceMap` and `declarationMap` for TS→JS mapping)
+- [x] Create `.gitignore` (`dist/`, `node_modules/`, `.pending/`)
+- [x] Create `src/types.ts` with all interfaces (`Question`, `Response`, `Dependency`, `PendingAction`, `Config`, `LockfileData`)
+- [x] `npm install && npm run build`
 
-**Verify**: Build succeeds with zero errors. `dist/types.js` exists.
+**Verify**: ~~Build succeeds with zero errors. `dist/types.js` exists.~~ PASSED — 138 packages, 0 vulnerabilities, `dist/types.js` + `.js.map` + `.d.ts` + `.d.ts.map` all present.
 
 ---
 

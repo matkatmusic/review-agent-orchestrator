@@ -1,0 +1,4 @@
+config.local.sh
+dist/
+node_modules/
+.pending/
