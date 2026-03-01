@@ -133,17 +133,17 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 **Goal**: Agents can write actions to `.pending/`; daemon processes them into the DB.
 
-- [ ] Create `src/pending.ts` — `writePending()`, `processPendingQueue()`
-- [ ] Pending file format: JSON, one action per file, filename = `<timestamp>-<random>.json`
-- [ ] Actions: `respond`, `block-by`, `block-by-group`, `add-to-group`, `create`
-- [ ] `processPendingQueue()`: read all files, apply each to DB, delete processed files
-- [ ] Write tests: `src/__tests__/pending.test.ts`
+- [x] Create `src/pending.ts` — `writePending()`, `processPendingQueue()`
+- [x] Pending file format: JSON, one action per file, filename = `<timestamp>-<random>.json`
+- [x] Actions: `respond`, `block-by`, `block-by-group`, `add-to-group`, `create`
+- [x] `processPendingQueue()`: read all files, apply each to DB, delete processed files
+- [x] Write tests: `src/__tests__/pending.test.ts`
   - Write pending → file created in `.pending/`
   - Process queue → action applied to DB, file deleted
   - Multiple pending files processed in timestamp order
   - Invalid action file → logged and skipped (not crash)
 
-**Verify**: `npm test -- pending.test` — all pass.
+**Verify**: ~~`npm test -- pending.test` — all pass.~~ PASSED — 10/10 tests pass (66ms). Also covers: all 5 action types individually, nonexistent dir returns 0, empty dir returns 0.
 
 ---
 
