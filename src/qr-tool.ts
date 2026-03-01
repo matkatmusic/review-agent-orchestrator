@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DB } from './db.js';
 import { loadConfig, resolveProjectRoot } from './config.js';
 import {
     cmdRead, cmdList, cmdInfo, cmdStatus,
     cmdRespond, cmdCreate, cmdBlockBy, cmdBlockByGroup, cmdAddToGroup,
 } from './qr-tool-commands.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const program = new Command();
 
@@ -22,14 +26,13 @@ function openDB(): DB {
     const dbPath = join(root, config.questionsDir, 'questions.db');
     const db = new DB(dbPath);
     db.open();
-    db.migrate(join(root, 'review-agent-orchestrator', 'templates', 'schema.sql'));
+    db.migrate(join(__dirname, '..', 'templates', 'schema.sql'));
     return db;
 }
 
 function getPendingDir(): string {
     const root = resolveProjectRoot();
-    const config = loadConfig(root);
-    return join(root, config.questionsDir, '.pending');
+    return join(root, '.pending');
 }
 
 // ── Read commands ──
@@ -76,9 +79,16 @@ program
 
 program
     .command('respond <qnum> <body>')
-    .description('Submit a response (writes to .pending/)')
+    .description('Submit an agent response (writes to .pending/)')
     .action((qnumStr: string, body: string) => {
-        console.log(cmdRespond(getPendingDir(), parseInt(qnumStr, 10), body));
+        console.log(cmdRespond(getPendingDir(), parseInt(qnumStr, 10), 'agent', body));
+    });
+
+program
+    .command('user-respond <qnum> <body>')
+    .description('Submit a user response (writes to .pending/)')
+    .action((qnumStr: string, body: string) => {
+        console.log(cmdRespond(getPendingDir(), parseInt(qnumStr, 10), 'user', body));
     });
 
 program

@@ -1,0 +1,164 @@
+# Stage 15b Debate Re-Verification Results (Round 2)
+# Providers: Claude (backend-architect), Gemini (gemini-3-pro-preview), Codex (gpt-5.3-codex)
+# Date: 2026-03-01
+#
+# This is the SECOND round of debate. Round 1 found 21 issues (A-U), 16 fixed, 3 skipped.
+# Round 2 re-verified those fixes and looked for new issues.
+#
+# INSTRUCTIONS: Mark each finding with your decision:
+#   [FIX]  = implement the fix
+#   [SKIP] = skip / accept the risk
+#   [DEFER] = fix later (not in this stage)
+
+---
+
+## ALL THREE PROVIDERS AGREE (highest confidence)
+
+### 1. HIGH — addResponse() lacks atomicity
+# Providers: Claude, Gemini, Codex
+# Location: responses.ts:10-23
+# Issue: addResponse() does INSERT into responses + UPDATE on questions
+# tracking columns as two separate db.run() calls. If the UPDATE fails,
+# the response is inserted but last_responder/last_user_response are
+# permanently desynced. needsReprompt() will return wrong answers.
+# Fix: Wrap both calls in db.transaction(), same pattern as createQuestion().
+DECISION: Wrap both calls in db.transaction()
+STATUS: IMPLEMENTED — Wrapped INSERT + UPDATE in db.transaction() in addResponse(). 18/18 responses tests pass.
+
+### 2. MEDIUM — cmdStatus() missing User_Deferred
+# Providers: Claude, Gemini, Codex
+# Location: qr-tool-commands.ts:97-118
+# Issue: cmdStatus() initializes counts with only 4 statuses (Awaiting,
+# Active, Deferred, Resolved). User_Deferred questions are counted in Total
+# but never displayed in the breakdown. Users see mismatched numbers.
+# Fix: Add User_Deferred: 0 to counts initializer and add output line.
+DECISION: Add User_Deferred: 0 to counts initializer and add output line
+STATUS: IMPLEMENTED — Added User_Deferred to counts and output in cmdStatus(). Updated test assertion. 19/19 qr-tool tests pass.
+
+### 3. HIGH — blockByGroup() bypasses cycle detection
+# Providers: Claude, Gemini, Codex
+# Location: dependencies.ts:81-88
+# Issue: blockByGroup() does a bulk INSERT OR IGNORE directly via SQL,
+# bypassing the wouldCreateCycle() check enforced by addBlocker(). Example:
+# Q1 blocks Q2, Q2 is in group "G". blockByGroup(1, "G") creates Q1->Q2->Q1 cycle.
+# Fix: Replace bulk SQL with iteration through addBlocker() which includes
+# cycle detection, or replicate the CTE check in the bulk path.
+DECISION: Replace bulk SQL with iteration through addBlocker()
+STATUS: IMPLEMENTED — blockByGroup() now iterates candidates through addBlocker() which includes cycle detection. New test verifies cycles are skipped. 19/19 dependency tests pass.
+
+---
+
+## TWO OF THREE PROVIDERS AGREE (strong candidates)
+
+### 4. CRITICAL — Schema migration won't add columns to existing DBs
+# Providers: Gemini, Codex (Claude flagged as MEDIUM)
+# Location: db.ts:34-39, templates/schema.sql
+# Issue: CREATE TABLE IF NOT EXISTS does not add new columns to existing
+# tables. Existing databases created before Fixes I/R won't have the 5 new
+# columns. Any query referencing them crashes with "no such column".
+# Note: This only matters if there are pre-existing databases. If this is a
+# greenfield deployment (no v2 DB exists yet), this is not yet an issue.
+# Fix: Add ALTER TABLE ADD COLUMN migrations, guarded by try/catch or
+# PRAGMA table_info checks.
+DECISION: not an issue.  db doesn't exist yet.  ignore.
+STATUS: — SKIPPED (greenfield deployment, no pre-existing v2 databases)
+
+### 5. MEDIUM — cmdList() unsafe status cast
+# Providers: Claude, Codex
+# Location: qr-tool-commands.ts:46
+# Issue: options.status cast to QuestionStatus without validation. Invalid
+# status like "Foo" silently returns empty list with no error.
+# Fix: Validate against known status values before querying.
+DECISION: Validate against known status values before querying
+STATUS: IMPLEMENTED — cmdList() now validates --status against VALID_STATUSES array before querying. Invalid status returns clear error message. 19/19 qr-tool tests pass.
+
+### 6. MEDIUM — Skipped Q: qr-tool respond hardcodes author: 'agent'
+# Providers: Gemini, Codex
+# Location: types.ts:32, qr-tool-commands.ts:122
+# Issue: If a human uses `qr-tool respond`, the response is attributed to
+# 'agent'. last_responder becomes 'agent', needsReprompt() returns false,
+# and the daemon won't deliver the message to the running agent.
+# Original skip rationale: "Users use TUI; agents use qr-tool."
+# Counter-argument: Nothing prevents a user from using qr-tool respond.
+# Fix: Add --author flag, or separate user/agent commands.
+DECISION: separate user/agent commands
+STATUS: IMPLEMENTED — PendingAction type widened to 'user'|'agent'. cmdRespond() takes explicit author param. CLI has `respond` (agent) and `user-respond` (user) commands. 19/19 qr-tool + 12/12 pending tests pass.
+
+### 7. MEDIUM — Skipped U: detectNewCommits repeated notifications + garbling
+# Providers: Gemini, Codex
+# Location: daemon.ts:54-65, agents.ts lockfiles
+# Issue: (a) Rebase message is sent as terminal keystrokes — can garble if
+# agent is mid-input. (b) headCommit in lockfiles is never updated after
+# notification, so the same message is re-sent every scan cycle.
+# Fix: (b) is the actionable fix — update lockfile headCommit after sending
+# the notification to prevent spam. (a) is an inherent tmux limitation.
+DECISION: update lockfile headCommit after sending the notification to prevent spam
+STATUS:
+
+### 8. HIGH — Spawned agents not receiving initial prompt
+# Providers: Codex, Gemini (partial)
+# Location: daemon.ts:149-160, agents.ts:237-249
+# Issue: spawnAgent() launches the claude CLI but sendInitialPrompt() has
+# no call site in the daemon. After Fix F removed scheduleInitialPrompt(),
+# agents are spawned but never told which question to work on.
+# Note: Check if the initial prompt is passed via buildClaudeCommand() or
+# launch-agent.sh arguments. If so, this may not be an issue.
+DECISION: review how/when initial prompt is sent to spawned agents, and assess if this issue still exists.
+STATUS:
+
+---
+
+## SINGLE-PROVIDER FINDINGS (lower confidence)
+
+### 9. MEDIUM — Orphaned agents on manual defer/resolve
+# Provider: Gemini only
+# Location: daemon.ts
+# Issue: Daemon only kills agents when enforceBlocked() moves them to
+# Deferred. If user manually sets Active question to User_Deferred or
+# Resolved via TUI, the agent pane keeps running indefinitely.
+# cleanupStaleLocks() only removes dead panes, doesn't kill live ones.
+# Fix: In scanCycle(), check all lockfiles — if question status is no
+# longer Active, kill the agent.
+DECISION: In scanCycle(), check all lockfiles — if question status is no longer Active, kill the agent.
+STATUS:
+
+### 10. CRITICAL — dist/ may be stale vs src/
+# Provider: Codex only
+# Location: package.json, scripts/daemon.sh
+# Issue: Runtime entrypoints use dist/, which could be out of sync with src/.
+# Multiple fixes may not be active at runtime unless rebuilt.
+# Note: This is a build hygiene issue, not a code bug. npm run build should
+# fix it. Check if dist/ is even committed to git.
+DECISION: Can we make the invocation of the daemon.sh script to check if /dist is stale or not?  if so, how? The more automation we can use when deploying this tool, the better. 
+STATUS:
+
+### 11. LOW — Dashboard cursor clamping during render
+# Provider: Claude only
+# Location: dashboard.tsx:76-77
+# Issue: setCursor() called during render body when clampedCursor !== cursor.
+# This is a React anti-pattern that causes extra re-renders. With 3-second
+# polling, it triggers every poll cycle when cursor needs clamping.
+# Fix: Move cursor clamping into useEffect dependent on questions.length.
+DECISION:  Explain this problem in more detail. 
+STATUS:
+
+### 12. LOW — hasUnreadAgentResponse() vs needsReprompt() semantic split
+# Provider: Claude only
+# Location: responses.ts, dashboard.tsx, detail.tsx
+# Issue: TUI uses hasUnreadAgentResponse() for unread markers while daemon
+# uses needsReprompt() for delivery tracking. These serve different purposes
+# but could confuse developers. After markReprompted() clears last_responder,
+# the TUI still shows the unread marker (correct for TUI, but divergent).
+# Fix: Document the distinction. No code change needed.
+DECISION: This issue seems related to what happens if I commit an active question (via SQL dump), switch to another computer, clone/pull/load the SQL dump, and then want to resume the question on the other computer.   Is there a mechanism in place to allow resuming a question that was started on one computer on another computer? 
+STATUS:
+
+### 13. LOW — TUI polling N+1 query performance
+# Provider: Gemini only
+# Location: dashboard.tsx:22-36
+# Issue: getCounts() iterates all questions calling hasUnreadAgentResponse()
+# individually — N+1 query pattern. For 500 questions, ~501 queries every
+# 3 seconds.
+# Fix: Optimize with a single SQL query using subquery or window function.
+DECISION: Optimize with a single SQL query using subquery or window function.
+STATUS:

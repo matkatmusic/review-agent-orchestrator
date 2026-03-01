@@ -165,7 +165,7 @@ export function listLockfiles(config: Config): LockfileData[] {
 export function isAgentRunning(config: Config, qnum: number): boolean {
     const lock = readLockfile(config, qnum);
     if (!lock) return false;
-    return isPaneAlive(lock.paneId);
+    return isPaneAlive(lock.paneId, config.tmuxSession);
 }
 
 /**
@@ -177,7 +177,7 @@ export function cleanupStaleLocks(config: Config): number[] {
     const locks = listLockfiles(config);
 
     for (const lock of locks) {
-        if (!isPaneAlive(lock.paneId)) {
+        if (!isPaneAlive(lock.paneId, config.tmuxSession)) {
             removeLockfile(config, lock.qnum);
             cleaned.push(lock.qnum);
         }
@@ -212,9 +212,6 @@ export function spawnAgent(
         };
         createLockfile(config, data);
 
-        // Send initial prompt after a small delay for the CLI to start
-        scheduleInitialPrompt(config, qnum, title, description, paneId);
-
         return data;
     }
 
@@ -230,27 +227,7 @@ export function spawnAgent(
     };
     createLockfile(config, data);
 
-    scheduleInitialPrompt(config, qnum, title, description, paneId);
-
     return data;
-}
-
-/**
- * Schedule the initial prompt to be sent after the CLI has started.
- * In production, the daemon will call sendInitialPrompt separately
- * after waiting for the agent to be ready.
- */
-function scheduleInitialPrompt(
-    config: Config,
-    qnum: number,
-    title: string,
-    description: string,
-    _paneId: string,
-): void {
-    // The initial prompt is stored in the lockfile context.
-    // The daemon is responsible for sending it at the right time
-    // (after the claude CLI has initialized).
-    // We don't send it here to avoid a race condition.
 }
 
 /**
@@ -265,7 +242,7 @@ export function sendInitialPrompt(
 ): void {
     const lock = readLockfile(config, qnum);
     if (!lock) return;
-    if (!isPaneAlive(lock.paneId)) return;
+    if (!isPaneAlive(lock.paneId, config.tmuxSession)) return;
 
     const prompt = buildInitialPrompt(config, qnum, title, description);
     sendKeys(lock.paneId, prompt);
@@ -280,7 +257,7 @@ export function repromptAgent(config: Config, qnum: number): boolean {
     const lock = readLockfile(config, qnum);
     if (!lock) return false;
 
-    if (!isPaneAlive(lock.paneId)) {
+    if (!isPaneAlive(lock.paneId, config.tmuxSession)) {
         // Pane is dead — clean up the stale lockfile
         removeLockfile(config, qnum);
         return false;

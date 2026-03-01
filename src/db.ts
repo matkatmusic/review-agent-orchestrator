@@ -12,7 +12,7 @@ export class DB {
     }
 
     open(): void {
-        this.db = new Database(this.dbPath);
+        this.db = new Database(this.dbPath, { timeout: 5000 });
         this.db.pragma('journal_mode = WAL');
         this.db.pragma('foreign_keys = ON');
     }
@@ -64,6 +64,11 @@ export class DB {
         return db.prepare(sql).all(...params) as T[];
     }
 
+    transaction<T>(fn: () => T): T {
+        const db = this.ensureOpen();
+        return db.transaction(fn)();
+    }
+
     isDirty(): boolean {
         return this.dirty;
     }
@@ -73,10 +78,15 @@ export class DB {
     }
 
     exportDump(dumpPath: string): void {
-        execSync(`sqlite3 "${this.dbPath}" .dump > "${dumpPath}"`);
+        execSync(`sqlite3 ${esc(this.dbPath)} .dump > ${esc(dumpPath)}`);
     }
 
     static importDump(dumpPath: string, dbPath: string): void {
-        execSync(`sqlite3 "${dbPath}" < "${dumpPath}"`);
+        execSync(`sqlite3 ${esc(dbPath)} < ${esc(dumpPath)}`);
     }
+}
+
+/** Shell-escape a string for safe use in commands. */
+function esc(s: string): string {
+    return `'${s.replace(/'/g, "'\\''")}'`;
 }

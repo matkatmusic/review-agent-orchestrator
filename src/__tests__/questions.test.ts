@@ -181,4 +181,61 @@ describe('questions', () => {
     it('isGroupResolved — nonexistent group = false', () => {
         expect(isGroupResolved(db, 'nonexistent')).toBe(false);
     });
+
+    // ---- created_from column (Fix R) ----
+
+    it('createQuestion with createdFrom links to parent question', () => {
+        const parent = createQuestion(db, 'original question', 'desc');
+        updateStatus(db, parent, 'Resolved');
+
+        const child = createQuestion(db, 'reopened question', 'follow-up', undefined, parent);
+        const q = getQuestion(db, child);
+        expect(q).toBeDefined();
+        expect(q!.created_from).toBe(parent);
+    });
+
+    it('createQuestion without createdFrom defaults to null', () => {
+        const qnum = createQuestion(db, 'standalone', 'desc');
+        const q = getQuestion(db, qnum);
+        expect(q!.created_from).toBeNull();
+    });
+
+    it('created_from FK enforced — invalid parent rejected', () => {
+        expect(() => createQuestion(db, 'bad_parent', 'desc', undefined, 9999)).toThrow();
+    });
+
+    it('createQuestion is atomic — counter and insert are consistent', () => {
+        // Create multiple questions rapidly and verify no gaps or duplicates
+        const qnums: number[] = [];
+        for (let i = 0; i < 10; i++) {
+            qnums.push(createQuestion(db, `q${i}`, `desc${i}`));
+        }
+        // qnums should be sequential starting from 2 (seed creates Q1)
+        expect(qnums).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+
+        // Verify DB metadata is consistent
+        const meta = db.get<{ value: string }>(
+            "SELECT value FROM metadata WHERE key = 'lastQuestionCreated'"
+        );
+        expect(meta?.value).toBe('11');
+
+        // Verify all questions exist
+        for (const qnum of qnums) {
+            expect(getQuestion(db, qnum)).toBeDefined();
+        }
+    });
+
+    it('createQuestion rolls back on failure', () => {
+        // Manually set counter to 0, so incrementing it yields 1 which
+        // already exists (seed creates Q1), triggering a PRIMARY KEY conflict
+        db.run("UPDATE metadata SET value = '0' WHERE key = 'lastQuestionCreated'");
+
+        expect(() => createQuestion(db, 'conflict', 'desc')).toThrow();
+
+        // Counter should NOT have been incremented (transaction rolled back)
+        const meta = db.get<{ value: string }>(
+            "SELECT value FROM metadata WHERE key = 'lastQuestionCreated'"
+        );
+        expect(meta?.value).toBe('0');
+    });
 });

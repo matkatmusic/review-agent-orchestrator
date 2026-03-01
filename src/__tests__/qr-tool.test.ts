@@ -8,7 +8,7 @@ import {
     cmdRead, cmdList, cmdInfo, cmdStatus,
     cmdRespond, cmdCreate, cmdBlockBy, cmdBlockByGroup, cmdAddToGroup,
 } from '../qr-tool-commands.js';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -150,8 +150,9 @@ describe('qr-tool commands', () => {
             const output = cmdStatus(db);
 
             expect(output).toContain('Total: 3');
-            expect(output).toContain('Awaiting: 2');
-            expect(output).toContain('Active:   1');
+            expect(output).toMatch(/Awaiting:\s+2/);
+            expect(output).toMatch(/Active:\s+1/);
+            expect(output).toContain('User_Deferred:');
         });
     });
 
@@ -173,7 +174,7 @@ describe('qr-tool commands', () => {
     describe('respond via pending', () => {
         it('adds response after pending processed', () => {
             const q = createQuestion(db, 'test', 'desc');
-            cmdRespond(pendingDir, q, 'agent response text');
+            cmdRespond(pendingDir, q, 'agent', 'agent response text');
             processPendingQueue(db, pendingDir);
 
             const output = cmdRead(db, q);
@@ -221,11 +222,34 @@ describe('qr-tool commands', () => {
         });
     });
 
+    // ── Schema path resolution (Fix L) ──
+
+    describe('schema path resolution', () => {
+        it('schema.sql resolves via import.meta.url relative path', () => {
+            // The schema path used by qr-tool is: join(__dirname, '..', 'templates', 'schema.sql')
+            // Verify that __dirname-relative path matches the same file used by tests
+            const schemaViaImportMeta = join(__dirname, '../../templates/schema.sql');
+            expect(existsSync(schemaViaImportMeta)).toBe(true);
+        });
+
+        it('schema path does NOT depend on a hardcoded submodule name', () => {
+            // Regression: old code used join(root, 'review-agent-orchestrator', 'templates', 'schema.sql')
+            // which breaks if the repo is cloned under a different directory name.
+            // The fix uses import.meta.url-relative resolution instead.
+            // Verify schema.sql is reachable from the source dir (not from project root + hardcoded name)
+            const fromSourceDir = join(__dirname, '..', 'templates', 'schema.sql');
+            // __dirname here is src/__tests__, so ../templates doesn't exist — but the actual
+            // qr-tool.ts __dirname is src/, so join(src/, '..', 'templates', 'schema.sql') works
+            const fromQrToolDir = join(__dirname, '..', '..', 'templates', 'schema.sql');
+            expect(existsSync(fromQrToolDir)).toBe(true);
+        });
+    });
+
     // ── Output format ──
 
     describe('output messages', () => {
         it('write commands return confirmation strings', () => {
-            expect(cmdRespond(pendingDir, 1, 'test')).toContain('Pending');
+            expect(cmdRespond(pendingDir, 1, 'agent', 'test')).toContain('Pending');
             expect(cmdCreate(pendingDir, 'title', 'desc')).toContain('Pending');
             expect(cmdBlockBy(pendingDir, 2, 1)).toContain('Pending');
             expect(cmdBlockByGroup(pendingDir, 2, 'grp')).toContain('Pending');

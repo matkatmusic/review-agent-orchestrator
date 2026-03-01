@@ -6,7 +6,10 @@ import {
     listResponses,
     getLatestResponse,
     hasUnreadAgentResponse,
+    needsReprompt,
+    markReprompted,
 } from '../responses.js';
+import { getQuestion } from '../questions.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -125,5 +128,56 @@ describe('responses', () => {
     it('hasUnreadAgentResponse — false for question with no responses', () => {
         const qnum = createQuestion(db, 'empty', 'no responses');
         expect(hasUnreadAgentResponse(db, qnum)).toBe(false);
+    });
+
+    // ---- Reprompt tracking ----
+
+    it('addResponse updates last_responder and timestamp columns', () => {
+        addResponse(db, 1, 'user', 'user reply');
+        const q = getQuestion(db, 1);
+        expect(q!.last_responder).toBe('user');
+        expect(q!.last_user_response).not.toBeNull();
+        expect(q!.last_agent_response).toBeNull();
+    });
+
+    it('addResponse updates last_agent_response for agent', () => {
+        addResponse(db, 1, 'user', 'user reply');
+        addResponse(db, 1, 'agent', 'agent reply');
+        const q = getQuestion(db, 1);
+        expect(q!.last_responder).toBe('agent');
+        expect(q!.last_agent_response).not.toBeNull();
+    });
+
+    it('needsReprompt — true when last responder is user', () => {
+        addResponse(db, 1, 'user', 'user reply');
+        expect(needsReprompt(db, 1)).toBe(true);
+    });
+
+    it('needsReprompt — false when last responder is agent', () => {
+        addResponse(db, 1, 'user', 'user reply');
+        addResponse(db, 1, 'agent', 'agent reply');
+        expect(needsReprompt(db, 1)).toBe(false);
+    });
+
+    it('needsReprompt — false after markReprompted', () => {
+        addResponse(db, 1, 'user', 'user reply');
+        expect(needsReprompt(db, 1)).toBe(true);
+
+        markReprompted(db, 1);
+        expect(needsReprompt(db, 1)).toBe(false);
+    });
+
+    it('needsReprompt — true again after new user response post-reprompt', () => {
+        addResponse(db, 1, 'user', 'first reply');
+        markReprompted(db, 1);
+        expect(needsReprompt(db, 1)).toBe(false);
+
+        addResponse(db, 1, 'user', 'second reply');
+        expect(needsReprompt(db, 1)).toBe(true);
+    });
+
+    it('needsReprompt — false for question with no responses', () => {
+        const qnum = createQuestion(db, 'empty', 'no responses');
+        expect(needsReprompt(db, qnum)).toBe(false);
     });
 });

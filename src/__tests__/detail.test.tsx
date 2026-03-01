@@ -450,18 +450,18 @@ describe('detail', () => {
     // ---- Status change actions (command mode) ----
 
     describe('status change actions', () => {
-        it('"d" on Awaiting → Deferred', async () => {
+        it('"d" on Awaiting → User_Deferred', async () => {
             createQuestion(db, 'q1', 'desc'); // Awaiting by default
             const { lastFrame, stdin } = setup(db, 1);
             await tick();
 
             stdin.write('d');
             await tick();
-            expect(getQuestion(db, 1)!.status).toBe('Deferred');
-            expect(lastFrame()).toContain('Deferred');
+            expect(getQuestion(db, 1)!.status).toBe('User_Deferred');
+            expect(lastFrame()).toContain('User_Deferred');
         });
 
-        it('"d" on Active → Deferred', async () => {
+        it('"d" on Active → User_Deferred', async () => {
             createQuestion(db, 'q1', 'desc');
             updateStatus(db, 1, 'Active');
             const { lastFrame, stdin } = setup(db, 1);
@@ -469,8 +469,8 @@ describe('detail', () => {
 
             stdin.write('d');
             await tick();
-            expect(getQuestion(db, 1)!.status).toBe('Deferred');
-            expect(lastFrame()).toContain('Deferred');
+            expect(getQuestion(db, 1)!.status).toBe('User_Deferred');
+            expect(lastFrame()).toContain('User_Deferred');
         });
 
         it('"d" on already-Deferred → no-op', async () => {
@@ -643,6 +643,32 @@ describe('detail', () => {
     });
 
     // ---- Refresh after response ----
+
+    describe('auto-refresh polling (Fix N)', () => {
+        it('external response appears after polling interval without user input', async () => {
+            vi.useFakeTimers();
+            const q = createQuestion(db, 'q1', 'desc');
+            const { lastFrame } = setup(db, q);
+            await vi.advanceTimersByTimeAsync(0); // initial render tick
+
+            // Initially no responses
+            expect(lastFrame()).toContain('No responses yet.');
+
+            // External change (simulating agent response via daemon)
+            addResponse(db, q, 'agent', 'external agent reply');
+
+            // Before poll — not visible yet
+            expect(lastFrame()).toContain('No responses yet.');
+
+            // Advance past 3-second poll interval
+            await vi.advanceTimersByTimeAsync(3100);
+
+            // Now the agent's response should appear
+            expect(lastFrame()).toContain('external agent reply');
+
+            vi.useRealTimers();
+        });
+    });
 
     describe('refresh after response', () => {
         it('conversation updates after submitting response', async () => {

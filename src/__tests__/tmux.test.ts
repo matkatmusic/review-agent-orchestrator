@@ -73,9 +73,9 @@ describeIfTmux('tmux', () => {
         createSession(TEST_SESSION);
         const paneToKill = splitWindow(TEST_SESSION);
 
-        expect(isPaneAlive(paneToKill)).toBe(true);
+        expect(isPaneAlive(paneToKill, TEST_SESSION)).toBe(true);
         killPane(paneToKill);
-        expect(isPaneAlive(paneToKill)).toBe(false);
+        expect(isPaneAlive(paneToKill, TEST_SESSION)).toBe(false);
     });
 
     it('killPane is safe on already-dead pane', () => {
@@ -93,5 +93,19 @@ describeIfTmux('tmux', () => {
 
     it('isPaneAlive returns false for nonexistent pane', () => {
         expect(isPaneAlive('%99999')).toBe(false);
+    });
+
+    it('isPaneAlive scoped to session does not see panes from other sessions', () => {
+        const OTHER_SESSION = 'qr-tmux-other-test';
+        killSession(OTHER_SESSION);
+        try {
+            const otherPane = createSession(OTHER_SESSION);
+            // The pane exists in OTHER_SESSION but not TEST_SESSION
+            createSession(TEST_SESSION); // ensure TEST_SESSION exists
+            expect(isPaneAlive(otherPane, OTHER_SESSION)).toBe(true);
+            expect(isPaneAlive(otherPane, TEST_SESSION)).toBe(false);
+        } finally {
+            killSession(OTHER_SESSION);
+        }
     });
 });

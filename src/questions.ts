@@ -1,37 +1,41 @@
 import type { DB } from './db.js';
-import type { Question } from './types.js';
+import type { Question, QuestionStatus } from './types.js';
 
 export function createQuestion(
     db: DB,
     title: string,
     description: string,
-    group?: string
+    group?: string,
+    createdFrom?: number
 ): number {
-    // Increment lastQuestionCreated counter
-    db.run(
-        "UPDATE metadata SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'lastQuestionCreated'"
-    );
-    const row = db.get<{ value: string }>(
-        "SELECT value FROM metadata WHERE key = 'lastQuestionCreated'"
-    );
-    const qnum = parseInt(row!.value, 10);
+    return db.transaction(() => {
+        // Increment lastQuestionCreated counter
+        db.run(
+            "UPDATE metadata SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'lastQuestionCreated'"
+        );
+        const row = db.get<{ value: string }>(
+            "SELECT value FROM metadata WHERE key = 'lastQuestionCreated'"
+        );
+        const qnum = parseInt(row!.value, 10);
 
-    db.run(
-        'INSERT INTO questions (qnum, title, description, "group") VALUES (?, ?, ?, ?)',
-        qnum,
-        title,
-        description,
-        group ?? null
-    );
+        db.run(
+            'INSERT INTO questions (qnum, title, description, "group", created_from) VALUES (?, ?, ?, ?, ?)',
+            qnum,
+            title,
+            description,
+            group ?? null,
+            createdFrom ?? null
+        );
 
-    return qnum;
+        return qnum;
+    });
 }
 
 export function getQuestion(db: DB, qnum: number): Question | undefined {
     return db.get<Question>('SELECT * FROM questions WHERE qnum = ?', qnum);
 }
 
-export function listByStatus(db: DB, status: string): Question[] {
+export function listByStatus(db: DB, status: QuestionStatus): Question[] {
     return db.all<Question>(
         'SELECT * FROM questions WHERE status = ? ORDER BY qnum',
         status
@@ -42,7 +46,7 @@ export function listAll(db: DB): Question[] {
     return db.all<Question>('SELECT * FROM questions ORDER BY qnum');
 }
 
-export function updateStatus(db: DB, qnum: number, status: string): void {
+export function updateStatus(db: DB, qnum: number, status: QuestionStatus): void {
     if (status === 'Resolved') {
         db.run(
             "UPDATE questions SET status = ?, resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE qnum = ?",

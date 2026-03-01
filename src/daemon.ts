@@ -5,7 +5,7 @@ import { execSync } from 'node:child_process';
 import { processPendingQueue } from './pending.js';
 import { runPipeline } from './pipeline.js';
 import { listByStatus, getQuestion } from './questions.js';
-import { hasUnreadAgentResponse } from './responses.js';
+import { needsReprompt, markReprompted } from './responses.js';
 import {
     isAgentRunning,
     spawnAgent,
@@ -49,7 +49,7 @@ export function detectNewCommits(config: Config): void {
     const locks = listLockfiles(config);
     for (const lock of locks) {
         if (lock.headCommit !== currentHead && lock.headCommit !== 'unknown') {
-            if (!isPaneAlive(lock.paneId)) continue;
+            if (!isPaneAlive(lock.paneId, config.tmuxSession)) continue;
 
             const message = [
                 'The main repo has new commits.',
@@ -133,13 +133,13 @@ export function scanCycle(config: Config, db: DB): ScanResult {
         try {
             if (isAgentRunning(config, q.qnum)) {
                 // Agent is alive — check if there's a new user response to deliver
-                if (hasUnreadAgentResponse(db, q.qnum)) {
-                    // Latest response is from agent — no new user response to deliver
+                if (!needsReprompt(db, q.qnum)) {
                     continue;
                 }
                 // There's a user response the agent hasn't seen yet — re-prompt
                 const sent = repromptAgent(config, q.qnum);
                 if (sent) {
+                    markReprompted(db, q.qnum);
                     result.reprompted.push(q.qnum);
                     log(`Re-prompted agent for Q${q.qnum}`);
                 } else {
@@ -178,12 +178,12 @@ export function scanCycle(config: Config, db: DB): ScanResult {
     if (db.isDirty()) {
         try {
             db.exportDump(dumpPath);
+            db.resetDirty();
             result.dumpExported = true;
             log(`Exported dump: ${dumpPath}`);
         } catch (err) {
             log(`Failed to export dump: ${err}`);
         }
-        db.resetDirty();
     }
 
     return result;
@@ -203,10 +203,17 @@ export function main(projectRoot?: string): void {
         'schema.sql'
     );
 
+    const seedPath = join(
+        new URL('.', import.meta.url).pathname.replace(/\/src\/$/, ''),
+        'templates',
+        'seed.sql'
+    );
+
     const db = new DB(dbPath);
     try {
         db.open();
         db.migrate(schemaPath);
+        db.seed(seedPath);
         scanCycle(config, db);
     } catch (err) {
         log(`Error: ${err}`);

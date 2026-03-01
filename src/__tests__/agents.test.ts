@@ -321,8 +321,8 @@ describeIfTmux('agents — tmux integration', () => {
         const data2 = spawnAgent(config, 2, 'Q2', 'desc');
 
         expect(data1.paneId).not.toBe(data2.paneId);
-        expect(isPaneAlive(data1.paneId)).toBe(true);
-        expect(isPaneAlive(data2.paneId)).toBe(true);
+        expect(isPaneAlive(data1.paneId, TEST_SESSION)).toBe(true);
+        expect(isPaneAlive(data2.paneId, TEST_SESSION)).toBe(true);
     });
 
     it('repromptAgent sends message to live pane', async () => {
@@ -358,10 +358,10 @@ describeIfTmux('agents — tmux integration', () => {
 
     it('killAgent kills live pane and removes lockfile', () => {
         const data = spawnAgent(config, 7, 'Test', 'desc');
-        expect(isPaneAlive(data.paneId)).toBe(true);
+        expect(isPaneAlive(data.paneId, TEST_SESSION)).toBe(true);
 
         killAgent(config, 7);
-        expect(isPaneAlive(data.paneId)).toBe(false);
+        expect(isPaneAlive(data.paneId, TEST_SESSION)).toBe(false);
         expect(readLockfile(config, 7)).toBeUndefined();
     });
 
@@ -381,7 +381,7 @@ describeIfTmux('agents — tmux integration', () => {
 
         // Live agent's lockfile should still exist
         expect(readLockfile(config, 7)).toBeDefined();
-        expect(isPaneAlive(data.paneId)).toBe(true);
+        expect(isPaneAlive(data.paneId, TEST_SESSION)).toBe(true);
     });
 
     it('sendInitialPrompt sends prompt to live pane', async () => {

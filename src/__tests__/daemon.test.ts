@@ -218,6 +218,24 @@ describe('daemon — scanCycle', () => {
         expect(responses[0]!.body).toBe('hello');
     });
 
+    it('dirty flag preserved when exportDump fails', () => {
+        // Create a question so DB is dirty
+        createQuestion(db, 'test', 'desc');
+        expect(db.isDirty()).toBe(true);
+
+        // Use a config with an invalid dump path to make exportDump fail
+        const badConfig = makeConfig(tmpDir, {
+            questionsDir: 'NonexistentDir',
+        });
+        const result = scanCycle(badConfig, db);
+
+        // Export should have failed
+        expect(result.dumpExported).toBe(false);
+
+        // Dirty flag should still be set (so next cycle retries the export)
+        expect(db.isDirty()).toBe(true);
+    });
+
     it('second cycle after no changes does not re-export dump', () => {
         // First cycle: create something to cause a dump
         const pendingDir = join(tmpDir, '.pending');
@@ -265,6 +283,53 @@ describe('daemon — scanCycle', () => {
         expect(getQuestion(db, q4)!.status).toBe('Awaiting');
         // Dump should still be exported (DB was modified by pipeline)
         expect(result.dumpExported).toBe(true);
+    });
+});
+
+describe('daemon — seed on fresh DB (Fix M)', () => {
+    let tmpDir: string;
+    const SEED_PATH = join(__dirname, '../../templates/seed.sql');
+
+    beforeEach(() => {
+        tmpDir = mkdtempSync(join(tmpdir(), 'qr-daemon-seed-'));
+    });
+
+    afterEach(() => {
+        rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('fresh DB without seed → createQuestion crashes (null metadata)', () => {
+        const freshDb = new DB(join(tmpDir, 'fresh.db'));
+        freshDb.open();
+        freshDb.migrate(SCHEMA_PATH);
+        // No seed() call — metadata table is empty
+        // createQuestion reads metadata counter which returns undefined, causing crash
+        expect(() => createQuestion(freshDb, 'test', 'desc')).toThrow();
+        freshDb.close();
+    });
+
+    it('db.seed() populates metadata so createQuestion works', () => {
+        const db = new DB(join(tmpDir, 'seeded.db'));
+        db.open();
+        db.migrate(SCHEMA_PATH);
+        db.seed(SEED_PATH);
+
+        const row = db.get<{ value: string }>("SELECT value FROM metadata WHERE key = 'lastQuestionCreated'");
+        expect(row).toBeDefined();
+        expect(parseInt(row!.value, 10)).toBeGreaterThanOrEqual(1);
+        db.close();
+    });
+
+    it('db.seed() is idempotent — running twice does not duplicate rows', () => {
+        const db = new DB(join(tmpDir, 'idempotent.db'));
+        db.open();
+        db.migrate(SCHEMA_PATH);
+        db.seed(SEED_PATH);
+        db.seed(SEED_PATH); // Second call — should be a no-op
+
+        const rows = db.all<{ key: string }>("SELECT key FROM metadata");
+        expect(rows).toHaveLength(1); // Only one metadata row
+        db.close();
     });
 });
 

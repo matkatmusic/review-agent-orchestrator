@@ -4,14 +4,19 @@ CREATE TABLE IF NOT EXISTS metadata (
 );
 
 CREATE TABLE IF NOT EXISTS questions (
-    qnum        INTEGER PRIMARY KEY,
-    title       TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    "group"     TEXT,
-    status      TEXT NOT NULL DEFAULT 'Awaiting'
-                CHECK (status IN ('Awaiting', 'Active', 'Deferred', 'Resolved')),
-    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    resolved_at TEXT
+    qnum                INTEGER PRIMARY KEY,
+    title               TEXT NOT NULL,
+    description         TEXT NOT NULL DEFAULT '',
+    "group"             TEXT,
+    status              TEXT NOT NULL DEFAULT 'Awaiting'
+                        CHECK (status IN ('Awaiting', 'Active', 'Deferred', 'User_Deferred', 'Resolved')),
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    resolved_at         TEXT,
+    last_user_response  TEXT,
+    last_agent_response TEXT,
+    last_responder      TEXT CHECK (last_responder IN ('user', 'agent') OR last_responder IS NULL),
+    last_reprompted_at  TEXT,
+    created_from        INTEGER REFERENCES questions(qnum)
 );
 
 CREATE TABLE IF NOT EXISTS responses (

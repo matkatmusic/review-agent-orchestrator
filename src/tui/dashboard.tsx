@@ -1,17 +1,18 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import type { DB } from '../db.js';
 import type { Question } from '../types.js';
 import { listAll, listByStatus, updateStatus } from '../questions.js';
 import { hasUnreadAgentResponse } from '../responses.js';
 
-const STATUSES = ['All', 'Active', 'Awaiting', 'Deferred', 'Resolved'] as const;
+const STATUSES = ['All', 'Active', 'Awaiting', 'Deferred', 'User_Deferred', 'Resolved'] as const;
 type StatusFilter = (typeof STATUSES)[number];
 
 interface StatusCounts {
     Active: number;
     Awaiting: number;
     Deferred: number;
+    User_Deferred: number;
     Resolved: number;
     total: number;
     unread: number;
@@ -27,6 +28,7 @@ function getCounts(db: DB): StatusCounts {
         Active: all.filter(q => q.status === 'Active').length,
         Awaiting: all.filter(q => q.status === 'Awaiting').length,
         Deferred: all.filter(q => q.status === 'Deferred').length,
+        User_Deferred: all.filter(q => q.status === 'User_Deferred').length,
         Resolved: all.filter(q => q.status === 'Resolved').length,
         total: all.length,
         unread,
@@ -51,6 +53,12 @@ export default function Dashboard({ db, onOpenDetail, onNewQuestion }: Dashboard
     const [refreshKey, setRefreshKey] = useState(0);
 
     const refresh = () => setRefreshKey(k => k + 1);
+
+    // Auto-refresh every 3 seconds to pick up external DB changes (daemon, agents)
+    useEffect(() => {
+        const timer = setInterval(refresh, 3000);
+        return () => clearInterval(timer);
+    }, []);
 
     const counts = useMemo(() => getCounts(db), [refreshKey]);
     const questions = useMemo(() => getFilteredQuestions(db, filter), [filter, refreshKey]);
@@ -103,8 +111,8 @@ export default function Dashboard({ db, onOpenDetail, onNewQuestion }: Dashboard
         if (input === 'd') {
             if (questions.length > 0 && questions[clampedCursor]) {
                 const q = questions[clampedCursor]!;
-                if (q.status !== 'Deferred' && q.status !== 'Resolved') {
-                    updateStatus(db, q.qnum, 'Deferred');
+                if (q.status !== 'Deferred' && q.status !== 'User_Deferred' && q.status !== 'Resolved') {
+                    updateStatus(db, q.qnum, 'User_Deferred');
                     refresh();
                 }
             }
@@ -123,7 +131,7 @@ export default function Dashboard({ db, onOpenDetail, onNewQuestion }: Dashboard
         if (input === 'a') {
             if (questions.length > 0 && questions[clampedCursor]) {
                 const q = questions[clampedCursor]!;
-                if (q.status === 'Deferred' || q.status === 'Resolved') {
+                if (q.status === 'Deferred' || q.status === 'User_Deferred' || q.status === 'Resolved') {
                     updateStatus(db, q.qnum, 'Awaiting');
                     refresh();
                 }
@@ -208,6 +216,7 @@ function statusToColor(status: string): string | undefined {
         case 'Active': return 'green';
         case 'Awaiting': return 'blue';
         case 'Deferred': return 'yellow';
+        case 'User_Deferred': return 'yellow';
         case 'Resolved': return 'gray';
         default: return undefined;
     }

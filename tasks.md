@@ -404,11 +404,13 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 **Goal**: Fix any design flaws caught by /octo:debate result
 
-- [ ] run /octo:debate on the final design, prompting to check for hidden bugs, failed/invalid tests, missing functionality, or other issues.  invoke gemini and codex correctly.  use claude's backend-architect agent to help design the debate.
+- [ ] run /octo:debate on the current codebase, prompting to check for hidden bugs, failed/invalid tests, missing functionality, or other issues.  invoke gemini and codex correctly (below).  use claude's backend-architect agent to help design the debate.    
+  - [ ] prompt gemini using: `gemini -m gemini-3-pro-preview < debate_prompt.txt`
+  - [ ] prompt codex using: `codex exec -m gpt-5.3-codex -c 'model_reasoning_effort="high"' < debate_prompt.txt`
 - [ ] present debate findings for review. 
 - [ ] request user's decisions for remaining issues in design that were flagged by debate panel.
 - [ ] implement design changes based on debate findings and user decisions.
-- [ ] run the octo:debate test again.  if it passes, update tasks.md and commit the changes.  if not, repeat previous steps until it passes, prompting the end user for input when necessary.
+- [ ] run the /octo:debate test again on the revised codebase.  if it passes, update tasks.md and commit the changes.  if not, repeat previous steps until it passes, prompting the end user for input when necessary.
 
 ---
 

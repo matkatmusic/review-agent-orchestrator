@@ -62,16 +62,12 @@ export function killPane(paneId: string): void {
 }
 
 export function sendKeys(paneId: string, keys: string): void {
-    // Use literal flag (-l) so special characters aren't interpreted
-    execSync(`tmux send-keys -t ${esc(paneId)} -l ${esc(keys)}`, {
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    // Send Enter separately
-    execSync(`tmux send-keys -t ${esc(paneId)} Enter`, {
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    // Use literal flag (-l) for text, then chain Enter in a single tmux
+    // invocation to prevent interleaving from concurrent sendKeys calls.
+    execSync(
+        `tmux send-keys -t ${esc(paneId)} -l ${esc(keys)} \\; send-keys -t ${esc(paneId)} Enter`,
+        { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+    );
 }
 
 export function capturePaneTail(paneId: string, lines: number = 20): string {
@@ -91,9 +87,15 @@ export function listPanes(session: string): string[] {
     }
 }
 
-export function isPaneAlive(paneId: string): boolean {
+/**
+ * Check if a pane is alive.
+ * When `session` is provided, only checks panes within that session (O(n) for session panes only).
+ * Without `session`, falls back to checking all panes globally (O(n) for all panes).
+ */
+export function isPaneAlive(paneId: string, session?: string): boolean {
     try {
-        const output = exec(`tmux list-panes -a -F '#{pane_id}'`);
+        const flag = session ? `-t ${esc(session)}` : '-a';
+        const output = exec(`tmux list-panes ${flag} -F '#{pane_id}'`);
         return output.split('\n').includes(paneId);
     } catch {
         return false;

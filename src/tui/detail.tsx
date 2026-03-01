@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import type { DB } from '../db.js';
@@ -26,6 +26,12 @@ export default function Detail({ db, qnum, onBack }: DetailProps) {
     const [inputFocused, setInputFocused] = useState(false);
 
     const refresh = () => setRefreshKey(k => k + 1);
+
+    // Auto-refresh every 3 seconds to pick up external DB changes (daemon, agents)
+    useEffect(() => {
+        const timer = setInterval(refresh, 3000);
+        return () => clearInterval(timer);
+    }, []);
 
     const question = useMemo(() => getQuestion(db, qnum), [qnum, refreshKey]);
     const responses = useMemo(() => listResponses(db, qnum), [qnum, refreshKey]);
@@ -56,8 +62,8 @@ export default function Detail({ db, qnum, onBack }: DetailProps) {
             return;
         }
         if (input === 'd') {
-            if (question && question.status !== 'Deferred' && question.status !== 'Resolved') {
-                updateStatus(db, qnum, 'Deferred');
+            if (question && question.status !== 'Deferred' && question.status !== 'User_Deferred' && question.status !== 'Resolved') {
+                updateStatus(db, qnum, 'User_Deferred');
                 refresh();
             }
             return;
@@ -70,7 +76,7 @@ export default function Detail({ db, qnum, onBack }: DetailProps) {
             return;
         }
         if (input === 'a') {
-            if (question && (question.status === 'Deferred' || question.status === 'Resolved')) {
+            if (question && (question.status === 'Deferred' || question.status === 'User_Deferred' || question.status === 'Resolved')) {
                 updateStatus(db, qnum, 'Awaiting');
                 refresh();
             }
@@ -214,6 +220,7 @@ function statusToColor(status: string): string | undefined {
         case 'Active': return 'green';
         case 'Awaiting': return 'blue';
         case 'Deferred': return 'yellow';
+        case 'User_Deferred': return 'yellow';
         case 'Resolved': return 'gray';
         default: return undefined;
     }

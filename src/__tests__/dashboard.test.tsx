@@ -226,7 +226,7 @@ describe('dashboard', () => {
     // ---- Tab filtering ----
 
     describe('tab filtering', () => {
-        it('Tab cycles through status tabs: All → Active → Awaiting → Deferred → Resolved → All', async () => {
+        it('Tab cycles through all status tabs including User_Deferred', async () => {
             createQuestion(db, 'q1', 'desc');
             updateStatus(db, 1, 'Active');
             const { lastFrame, stdin } = setup(db);
@@ -243,6 +243,11 @@ describe('dashboard', () => {
             expect(lastFrame()).toContain('No questions in this view.');
 
             // Tab to Deferred
+            stdin.write(TAB);
+            await tick();
+            expect(lastFrame()).toContain('No questions in this view.');
+
+            // Tab to User_Deferred
             stdin.write(TAB);
             await tick();
             expect(lastFrame()).toContain('No questions in this view.');
@@ -350,15 +355,15 @@ describe('dashboard', () => {
     // ---- Status change actions ----
 
     describe('status change actions', () => {
-        it('"d" on Awaiting question → DB status changes to Deferred', async () => {
+        it('"d" on Awaiting question → DB status changes to User_Deferred', async () => {
             createQuestion(db, 'to_defer', 'desc'); // Awaiting
             const { lastFrame, stdin } = setup(db);
             await tick();
 
             stdin.write('d');
             await tick();
-            expect(getQuestion(db, 1)!.status).toBe('Deferred');
-            expect(lastFrame()).toContain('Deferred');
+            expect(getQuestion(db, 1)!.status).toBe('User_Deferred');
+            expect(lastFrame()).toContain('User_Deferred');
         });
 
         it('"d" on already-Deferred question → no-op', async () => {
@@ -427,6 +432,36 @@ describe('dashboard', () => {
             stdin.write('a');
             await tick();
             expect(getQuestion(db, 1)!.status).toBe('Active');
+        });
+    });
+
+    // ---- Auto-refresh polling (Fix N) ----
+
+    describe('auto-refresh polling', () => {
+        it('external DB change appears after polling interval without user input', async () => {
+            vi.useFakeTimers();
+            const q = createQuestion(db, 'initial_title', 'desc');
+            const { lastFrame } = setup(db);
+            await vi.advanceTimersByTimeAsync(0); // initial render tick
+
+            // Verify initial state
+            expect(lastFrame()).toContain('initial_title');
+            expect(lastFrame()).toContain('(1 questions)');
+
+            // External DB change (simulating daemon creating a question)
+            createQuestion(db, 'externally_added', 'desc');
+
+            // Before poll interval — new question not visible yet
+            expect(lastFrame()).not.toContain('externally_added');
+
+            // Advance past the 3-second poll interval
+            await vi.advanceTimersByTimeAsync(3100);
+
+            // Now the externally-added question should appear
+            expect(lastFrame()).toContain('externally_added');
+            expect(lastFrame()).toContain('(2 questions)');
+
+            vi.useRealTimers();
         });
     });
 

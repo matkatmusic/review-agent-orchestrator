@@ -1,0 +1,118 @@
+You are performing a FOCUSED RE-VERIFICATION of a TypeScript/Node.js application called "Question Review Orchestrator v2". A first-round review found 21 issues (A-U). 16 were fixed, 3 were skipped. Your job is to verify the fixes and look for new problems they may have introduced.
+
+## System Summary
+
+SQLite-backed question tracking system with: DB layer (better-sqlite3, WAL mode), CRUD modules (questions, responses, dependencies), pipeline (enforceBlocked/autoUnblock/promoteAwaiting), pending queue (.pending/ JSON files), tmux agent management, daemon scan cycle, TUI (Ink/React), and CLI tool (qr-tool). ~280 tests across 14 files.
+
+## The 16 Fixes to Verify
+
+For each fix, check: (1) was it implemented correctly? (2) did it introduce new bugs?
+
+### A. createQuestion() transaction (questions.ts:11-31)
+UPDATE metadata + SELECT + INSERT now wrapped in db.transaction(). The DB class gained a transaction() method (db.ts:67-70) that calls better-sqlite3's db.transaction().
+
+### B. Shell injection in exportDump/importDump (db.ts:80-86, 89-92)
+Paths now use esc() single-quote escaping instead of double-quote interpolation.
+
+### C. SQLITE_BUSY timeout (db.ts:15)
+Database constructor now passes { timeout: 5000 }.
+
+### D. blockByGroup() self-exclusion (dependencies.ts:81-88)
+Added AND q.qnum != ? to WHERE clause, passing `blocked` as the third param.
+
+### E. resetDirty() after export (daemon.ts:178-187)
+resetDirty() now inside try block after successful exportDump(). On failure, dirty flag preserved for retry.
+
+### F. Removed no-op scheduleInitialPrompt() (agents.ts)
+Function and its call sites removed. sendInitialPrompt() remains for external use.
+
+### G. getPendingDir() path fix (qr-tool.ts:33-36)
+Changed from join(root, 'Questions', '.pending') to join(root, '.pending'), matching daemon.ts:87.
+
+### H. sendKeys() single invocation (tmux.ts:64-71)
+Text + Enter combined into one tmux command using `send-keys -l <text> \; send-keys Enter`.
+
+### I. Reprompt tracking (responses.ts:46-70, schema.sql:15-18)
+Added columns: last_user_response, last_agent_response, last_responder, last_reprompted_at. addResponse() updates tracking columns. needsReprompt() checks last_responder='user'. markReprompted() sets last_responder=NULL. Daemon uses these instead of hasUnreadAgentResponse().
+
+### J. QuestionStatus typed union (types.ts:1)
+New type: 'Awaiting' | 'Active' | 'Deferred' | 'User_Deferred' | 'Resolved'. updateStatus() and listByStatus() now accept QuestionStatus.
+
+### K. User_Deferred status (types.ts:1, schema.sql:12, pipeline.ts:32-44, dashboard.tsx, detail.tsx)
+New status added to CHECK constraint and all components. User 'd' key sets User_Deferred. autoUnblock() now queries all 'Deferred' (not just those with deps). User_Deferred questions are not touched by autoUnblock.
+
+### L. qr-tool schema path resolution (qr-tool.ts:29)
+Now uses join(__dirname, '..', 'templates', 'schema.sql') where __dirname is derived from import.meta.url.
+
+### M. Daemon seed() call (daemon.ts:216)
+main() now calls db.seed(seedPath) after db.migrate(schemaPath).
+
+### N. TUI polling (dashboard.tsx:57-61, detail.tsx:30-34)
+Added useEffect with 3-second setInterval to increment refreshKey in both components.
+
+### O. Circular dependency detection (dependencies.ts:8-39)
+New wouldCreateCycle() uses recursive CTE starting from blocker, walking blocker_qnum edges. addBlocker() calls it before INSERT.
+
+### P. Transient vs permanent pending errors (pending.ts:30-62, 76-82)
+processPendingQueue split into parse phase (permanent fail = delete) and apply phase (SQLITE_BUSY/LOCKED = keep for retry, other errors = delete).
+
+### R. created_from column (schema.sql:19, questions.ts:4-32)
+New column: created_from INTEGER REFERENCES questions(qnum). createQuestion() accepts optional createdFrom parameter.
+
+### S. isPaneAlive() session scoping (tmux.ts:95-103)
+Accepts optional session parameter. When provided, uses -t <session> instead of -a. All callers pass config.tmuxSession.
+
+---
+
+## 3 Skipped Items — Evaluate Whether They Are Truly Safe
+
+### Q. PendingAction respond hardcodes author: 'agent' (types.ts:32)
+Only agents use qr-tool respond. Users use TUI. Is this actually limiting or is the separation correct?
+
+### T. parseShellConfig only matches UPPERCASE variable names
+Follows shell convention. Any scenario where this causes a real problem?
+
+### U. detectNewCommits sends text as terminal input (daemon.ts:54-65)
+Rebase message typed into tmux pane could garble agent mid-input. Is there a better approach, or is this an inherent tmux limitation?
+
+---
+
+## What to Look For
+
+### 1. Regression bugs from the 16 fixes
+- Fix A: Does the transaction nest correctly? db.run() inside a transaction calls this.dirty=true — does that interact badly with the outer transaction?
+- Fix H: Does the \; chaining syntax work on all tmux versions? Is esc() applied correctly to both the text and the pane ID?
+- Fix I: addResponse() now does two db.run() calls (INSERT response + UPDATE question tracking) — should these be wrapped in a transaction?
+- Fix K: autoUnblock() now queries ALL Deferred questions. A Deferred question with zero deps will pass !isBlocked() and move to Awaiting. Is this the correct behavior for questions deferred by the pipeline (enforceBlocked)?
+- Fix O: The CTE walks blocker_qnum from blocked_qnum. Verify the direction is correct — does it detect A->B->C->A?
+- Fix P: Is the SQLITE_BUSY error code detection correct for better-sqlite3? Does better-sqlite3 set .code on thrown errors?
+
+### 2. New issues not caught in round 1
+Focus especially on:
+- **addResponse() atomicity**: The INSERT into responses + UPDATE of tracking columns are two separate db.run() calls. What happens if the second fails?
+- **qr-tool cmdStatus() missing User_Deferred**: Check if the status summary in qr-tool-commands.ts accounts for the new User_Deferred status.
+- **cmdList() unsafe cast**: qr-tool-commands.ts casts string to QuestionStatus without validation (line 46). Could this pass invalid status to listByStatus?
+- **blockByGroup() vs circular deps**: blockByGroup() does a bulk INSERT OR IGNORE. It bypasses the wouldCreateCycle() check. Could it create cycles?
+- **TUI polling memory/performance**: 3-second setInterval re-queries the entire DB. Any risk of resource issues or stale closure bugs?
+- **Pending queue ordering**: Transient-error files are kept on disk. On next cycle, they sort before newer files (good) or after (bad)?
+- **markReprompted sets last_responder=NULL**: If the daemon marks reprompted, then another user response arrives before the agent responds, does needsReprompt() correctly fire again?
+- **Schema migration on existing DBs**: Adding 5 new columns (4 tracking + created_from) — does CREATE TABLE IF NOT EXISTS handle existing DBs that lack these columns?
+
+### 3. Cross-cutting concerns
+- Are there any places where 'Deferred' is hardcoded that should now also handle 'User_Deferred'?
+- Does the esc() function in db.ts match the one in tmux.ts? (Code duplication, but are they identical?)
+- Is the hasUnreadAgentResponse() function still used correctly everywhere, or are some call sites stale after the needsReprompt() refactor?
+
+---
+
+## Output Format
+
+For each finding, state:
+- **ID**: Sequential number (1, 2, 3...)
+- **TYPE**: REGRESSION (caused by a fix), NEW (missed in round 1), or SKIP-RISK (about a skipped item)
+- **SEVERITY**: CRITICAL / HIGH / MEDIUM / LOW
+- **Location**: file:line
+- **Issue**: Clear description with evidence from the code
+- **Fix**: Recommended resolution
+
+Be specific and reference actual code. Do not repeat the 16 fixes back — only report problems.

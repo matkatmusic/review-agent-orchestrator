@@ -92,14 +92,24 @@ describe('pipeline', () => {
             expect(getQuestion(db, target)!.status).toBe('Awaiting');
         });
 
-        it('user-deferred question (no deps) stays in Deferred', () => {
+        it('user-deferred question (User_Deferred) is not touched by autoUnblock', () => {
             const q = createQuestion(db, 'user_deferred', 'desc');
-            updateStatus(db, q, 'Deferred');
+            updateStatus(db, q, 'User_Deferred');
 
             const moved = autoUnblock(db);
 
             expect(moved).not.toContain(q);
-            expect(getQuestion(db, q)!.status).toBe('Deferred');
+            expect(getQuestion(db, q)!.status).toBe('User_Deferred');
+        });
+
+        it('Deferred question with no deps gets auto-unblocked', () => {
+            const q = createQuestion(db, 'auto_deferred', 'desc');
+            updateStatus(db, q, 'Deferred');
+
+            const moved = autoUnblock(db);
+
+            expect(moved).toContain(q);
+            expect(getQuestion(db, q)!.status).toBe('Awaiting');
         });
 
         it('partial blockers resolved → stays Deferred', () => {

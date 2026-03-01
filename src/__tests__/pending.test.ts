@@ -162,6 +162,9 @@ describe('pending', () => {
     });
 
     it('invalid action file → logged and skipped (not crash)', () => {
+        // NOTE: This test intentionally triggers a FOREIGN KEY constraint error
+        // and a JSON parse error. The "[review] Skipping invalid pending file"
+        // messages in test output are expected — they confirm error handling works.
         const q = createQuestion(db, 'test', 'desc');
         mkdirSync(pendingDir, { recursive: true });
 
@@ -194,6 +197,30 @@ describe('pending', () => {
     it('returns 0 when pending dir does not exist', () => {
         const nonexistent = join(tmpDir, 'no-such-dir');
         expect(processPendingQueue(db, nonexistent)).toBe(0);
+    });
+
+    it('permanent DB error (FK violation) → file deleted', () => {
+        // NOTE: This test intentionally triggers a FOREIGN KEY constraint error.
+        // The "[review] Permanent error" message in test output is expected.
+        mkdirSync(pendingDir, { recursive: true });
+        writeFileSync(
+            join(pendingDir, '0000000001-perm.json'),
+            JSON.stringify({ action: 'respond', qnum: 9999, author: 'agent', body: 'orphan' })
+        );
+
+        processPendingQueue(db, pendingDir);
+
+        // Permanent error → file should be deleted (not retained for retry)
+        expect(readdirSync(pendingDir)).toHaveLength(0);
+    });
+
+    it('bad JSON → file deleted (permanent parse error)', () => {
+        mkdirSync(pendingDir, { recursive: true });
+        writeFileSync(join(pendingDir, '0000000001-bad.json'), 'not json!!!');
+
+        processPendingQueue(db, pendingDir);
+
+        expect(readdirSync(pendingDir)).toHaveLength(0);
     });
 
     it('returns 0 when pending dir is empty', () => {

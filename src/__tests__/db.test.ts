@@ -188,4 +188,67 @@ describe('DB', () => {
             db.run("INSERT INTO responses (qnum, author, body) VALUES (999, 'user', 'orphan')");
         }).toThrow();
     });
+
+    it('transaction commits on success', () => {
+        db.open();
+        db.migrate(SCHEMA_PATH);
+        db.seed(SEED_PATH);
+
+        const result = db.transaction(() => {
+            db.run("UPDATE metadata SET value = '99' WHERE key = 'lastQuestionCreated'");
+            return 'ok';
+        });
+
+        expect(result).toBe('ok');
+        const meta = db.get<{ value: string }>("SELECT value FROM metadata WHERE key = 'lastQuestionCreated'");
+        expect(meta?.value).toBe('99');
+    });
+
+    it('transaction rolls back on error', () => {
+        db.open();
+        db.migrate(SCHEMA_PATH);
+        db.seed(SEED_PATH);
+
+        expect(() => db.transaction(() => {
+            db.run("UPDATE metadata SET value = '99' WHERE key = 'lastQuestionCreated'");
+            throw new Error('forced failure');
+        })).toThrow('forced failure');
+
+        const meta = db.get<{ value: string }>("SELECT value FROM metadata WHERE key = 'lastQuestionCreated'");
+        expect(meta?.value).toBe('1');
+    });
+
+    it('opens with busy timeout for concurrent access safety', () => {
+        db.open();
+        // better-sqlite3 exposes timeout via pragma busy_timeout
+        const row = db.get<{ timeout: number }>("PRAGMA busy_timeout");
+        expect(row?.timeout).toBe(5000);
+    });
+
+    it('exportDump/importDump handle paths with special characters', () => {
+        // Create DB in a path with $, spaces, and backticks to verify no command injection
+        const specialDir = mkdtempSync(join(tmpdir(), 'qr-db-$pecial `test`-'));
+        const specialDbPath = join(specialDir, 'test db.db');
+        const specialDb = new DB(specialDbPath);
+        specialDb.open();
+        specialDb.migrate(SCHEMA_PATH);
+        specialDb.seed(SEED_PATH);
+
+        const dumpPath = join(specialDir, 'dump $file.sql');
+        specialDb.exportDump(dumpPath);
+        expect(existsSync(dumpPath)).toBe(true);
+
+        // Import into another special path
+        const importDbPath = join(specialDir, 'restored `db`.db');
+        DB.importDump(dumpPath, importDbPath);
+
+        const restoredDb = new DB(importDbPath);
+        restoredDb.open();
+        const meta = restoredDb.get<{ value: string }>("SELECT value FROM metadata WHERE key = 'lastQuestionCreated'");
+        expect(meta?.value).toBe('1');
+        restoredDb.close();
+
+        specialDb.close();
+        rmSync(specialDir, { recursive: true, force: true });
+    });
 });

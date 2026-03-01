@@ -39,11 +39,16 @@ export function cmdRead(db: DB, qnum: number): string {
     return lines.join('\n');
 }
 
+const VALID_STATUSES = ['Awaiting', 'Active', 'Deferred', 'User_Deferred', 'Resolved'];
+
 export function cmdList(db: DB, options: { status?: string; group?: string }): string {
     let questions: Question[];
 
     if (options.status) {
-        questions = listByStatus(db, options.status);
+        if (!VALID_STATUSES.includes(options.status)) {
+            return `Error: Invalid status "${options.status}". Valid: ${VALID_STATUSES.join(', ')}`;
+        }
+        questions = listByStatus(db, options.status as import('./types.js').QuestionStatus);
     } else if (options.group) {
         questions = getGroup(db, options.group);
     } else {
@@ -100,6 +105,7 @@ export function cmdStatus(db: DB): string {
         Awaiting: 0,
         Active: 0,
         Deferred: 0,
+        User_Deferred: 0,
         Resolved: 0,
     };
 
@@ -109,19 +115,20 @@ export function cmdStatus(db: DB): string {
 
     const lines: string[] = [];
     lines.push(`Total: ${all.length}`);
-    lines.push(`  Awaiting: ${counts['Awaiting']}`);
-    lines.push(`  Active:   ${counts['Active']}`);
-    lines.push(`  Deferred: ${counts['Deferred']}`);
-    lines.push(`  Resolved: ${counts['Resolved']}`);
+    lines.push(`  Awaiting:       ${counts['Awaiting']}`);
+    lines.push(`  Active:         ${counts['Active']}`);
+    lines.push(`  Deferred:       ${counts['Deferred']}`);
+    lines.push(`  User_Deferred:  ${counts['User_Deferred']}`);
+    lines.push(`  Resolved:       ${counts['Resolved']}`);
 
     return lines.join('\n');
 }
 
 // ── Write commands (write to .pending/) ──
 
-export function cmdRespond(pendingDir: string, qnum: number, body: string): string {
-    writePending(pendingDir, { action: 'respond', qnum, author: 'agent', body });
-    return `Pending: response for Q${qnum}`;
+export function cmdRespond(pendingDir: string, qnum: number, author: 'user' | 'agent', body: string): string {
+    writePending(pendingDir, { action: 'respond', qnum, author, body });
+    return `Pending: ${author} response for Q${qnum}`;
 }
 
 export function cmdCreate(pendingDir: string, title: string, description: string, group?: string): string {

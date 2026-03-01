@@ -26,20 +26,12 @@ export function enforceBlocked(db: DB): number[] {
 
 /**
  * Move Deferred questions whose blockers are ALL resolved back to Awaiting.
- * Only auto-unblocks questions that HAVE dependency entries — user-deferred
- * questions (no deps) stay in Deferred.
+ * User_Deferred questions are not affected — they must be manually reactivated.
  * Returns the qnums that were moved.
  */
 export function autoUnblock(db: DB): number[] {
     const moved: number[] = [];
-
-    // Find Deferred questions that have at least one dependency entry
-    const candidates = db.all<Question>(
-        `SELECT DISTINCT q.* FROM questions q
-         JOIN dependencies d ON d.blocked_qnum = q.qnum
-         WHERE q.status = 'Deferred'
-         ORDER BY q.qnum`
-    );
+    const candidates = listByStatus(db, 'Deferred');
 
     for (const q of candidates) {
         if (!isBlocked(db, q.qnum)) {
