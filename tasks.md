@@ -76,15 +76,15 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 **Goal**: Add and list responses for a question.
 
-- [ ] Create `src/responses.ts` — `addResponse()`, `listResponses()`, `getLatestResponse()`, `hasUnreadAgentResponse()`
-- [ ] `hasUnreadAgentResponse()`: last response is from `agent` and no subsequent `user` response exists (used for TUI `✱` marker)
-- [ ] Write tests: `src/__tests__/responses.test.ts`
+- [x] Create `src/responses.ts` — `addResponse()`, `listResponses()`, `getLatestResponse()`, `hasUnreadAgentResponse()`
+- [x] `hasUnreadAgentResponse()`: last response is from `agent` and no subsequent `user` response exists (used for TUI `✱` marker)
+- [x] Write tests: `src/__tests__/responses.test.ts`
   - Add response → appears in list
   - Responses ordered by `created_at`
   - `hasUnreadAgentResponse()` logic correct
   - Responses tied to correct qnum (FK constraint)
 
-**Verify**: `npm test -- responses.test` — all pass.
+**Verify**: ~~`npm test -- responses.test` — all pass.~~ PASSED — 11/11 tests pass (44ms). Also covers: empty response list, getLatestResponse, FK rejection, unread toggle across agent/user exchanges.
 
 ---
 
