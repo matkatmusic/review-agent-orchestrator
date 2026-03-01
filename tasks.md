@@ -92,19 +92,19 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 **Goal**: Blocking relationships with correct resolution logic.
 
-- [ ] Create `src/dependencies.ts` — `addBlocker()`, `removeBlocker()`, `isBlocked()`, `getBlockers()`, `getBlocked()`, `blockByGroup()`
-- [ ] `isBlocked()` checks if ANY blocker has status != `Resolved`
-- [ ] `blockByGroup()` expands group to individual qnums via query
-- [ ] Write tests: `src/__tests__/dependencies.test.ts`
+- [x] Create `src/dependencies.ts` — `addBlocker()`, `removeBlocker()`, `isBlocked()`, `getBlockers()`, `getBlocked()`, `blockByGroup()`
+- [x] `isBlocked()` checks if ANY blocker has status != `Resolved`
+- [x] `blockByGroup()` expands group to individual qnums via query
+- [x] Write tests: `src/__tests__/dependencies.test.ts`
   - Add blocker → `isBlocked()` returns true
   - Resolve blocker → `isBlocked()` returns false
   - Multiple blockers: blocked until ALL resolved
-  - Self-reference rejected (CHECK constraint)
+  - Self-reference rejected (app-level validation — `INSERT OR IGNORE` suppresses CHECK, so addBlocker validates in code)
   - `blockByGroup()` creates correct dependency rows
   - Group partially resolved → still blocked
   - `getBlockers()`/`getBlocked()` return correct questions
 
-**Verify**: `npm test -- dependencies.test` — all pass.
+**Verify**: ~~`npm test -- dependencies.test` — all pass.~~ PASSED — 14/14 tests pass (47ms). Also covers: addBlocker idempotency, removeBlocker, empty group blockByGroup, no-dep queries return empty.
 
 ---
 
