@@ -25,10 +25,11 @@
         "react": "^18.0.0"
     },
     "devDependencies": {
-        "typescript": "^5.7.0",
-        "vitest": "^3.0.0",
         "@types/better-sqlite3": "^7.0.0",
         "@types/node": "^22.0.0",
-        "@types/react": "^18.0.0"
+        "@types/react": "^18.0.0",
+        "ink-testing-library": "^4.0.0",
+        "typescript": "^5.7.0",
+        "vitest": "^3.0.0"
     }
 }

@@ -266,8 +266,8 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 **Goal**: Programmatic tests for the dashboard component using `ink-testing-library`. Proves rendering, navigation, filtering, and keyboard actions all work without manual interaction.
 
-- [ ] Install `ink-testing-library` as a dev dependency
-- [ ] Write tests: `src/__tests__/dashboard.test.tsx`
+- [x] Install `ink-testing-library` as a dev dependency
+- [x] Write tests: `src/__tests__/dashboard.test.tsx`
   - **Rendering**
     - Empty DB → shows "No questions in this view."
     - Seeded DB → shows question rows with Q-number, title, status
@@ -302,7 +302,7 @@ Each stage produces a working, testable artifact. Do not start a stage until the
     - Enter on empty list → `onOpenDetail` NOT called
     - `n` → `onNewQuestion` called
 
-**Verify**: `npm test -- dashboard.test` — all pass.
+**Verify**: ~~`npm test -- dashboard.test` — all pass.~~ PASSED — 28/28 tests pass (253ms). All 195 tests across 12 files pass. Tests use `ink-testing-library` v4 with async `tick()` delays to allow React `useEffect` to register `useInput` listeners before simulating stdin. Covers: 8 rendering tests, 4 cursor navigation tests, 6 tab filtering tests, 7 status change action tests, 3 callback tests.
 
 ---
 
