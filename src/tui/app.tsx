@@ -6,6 +6,7 @@ import { loadConfig } from '../config.js';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Dashboard from './dashboard.js';
+import Detail from './detail.js';
 
 type Screen =
     | { type: 'dashboard' }
@@ -29,12 +30,12 @@ function App({ db }: AppProps) {
                 />
             );
         case 'detail':
-            // Placeholder — Stage 14 will implement detail.tsx
             return (
-                <Box flexDirection="column">
-                    <Text>Question Detail: Q{screen.qnum} (not yet implemented)</Text>
-                    <Text dimColor>Press any key to go back.</Text>
-                </Box>
+                <Detail
+                    db={db}
+                    qnum={screen.qnum}
+                    onBack={() => setScreen({ type: 'dashboard' })}
+                />
             );
         case 'create':
             // Placeholder — Stage 15 will implement create.tsx
