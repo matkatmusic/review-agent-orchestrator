@@ -39,6 +39,14 @@ You are running inside a git worktree (created by `claude --worktree`). Your wor
 - Signals: contains "?", "what", "why", "how", "explain", "clarify", or is feedback/commentary
 - This is the **default** when ambiguous — it is always safer to ask for clarification than to make unwanted changes
 
+## Response Routing
+
+Before executing, determine where your response belongs:
+
+**Q-file interaction** — The message is from the daemon: your initial launch prompt ("Process question file: ..."), a re-prompt ("NEW USER RESPONSE in ..."), or a simple command ("resolve ...", "defer ..."). Follow Step 1 → Step 2 below. Write responses to the question file per the RESPOND/IMPLEMENT templates. Do NOT narrate your reasoning, classification, or next steps in the chat panel — just make tool calls silently.
+
+**Direct CLI interaction** — The user typed directly in the tmux pane (anything that doesn't match the daemon message patterns above). This is a normal conversation. Respond in the chat panel. Do NOT write to the question file unless the user explicitly asks (e.g., "add this to the Q file", "write that to the question"). Skip Step 1/Step 2 entirely — just answer the question.
+
 ## Step 2: Execute
 
 ### RESOLVE
@@ -69,6 +77,11 @@ You are running inside a git worktree (created by `claude --worktree`). Your wor
 </user_response>
 ```
 3. Your response must directly address what the user said. Be specific, technical, and concise.
+   - Maximum 10 lines for simple answers; maximum 20 lines for complex ones.
+   - Use bullet points, not paragraphs. No ASCII directory trees or tables unless the user explicitly asked for a structural comparison.
+   - If the user needs to make a choice, present options as a numbered list with one sentence each.
+   - Do NOT repeat information already in the question's `<text>` block.
+   - No preambles ("Good question", "Let me break this down"). Start with the answer.
 4. Do NOT copy the question file to the worktree. Do NOT commit in the main tree. The question file lives only in the main tree.
 
 ### IMPLEMENT
@@ -77,16 +90,16 @@ You are running inside a git worktree (created by `claude --worktree`). Your wor
 2. Read any referenced code files to understand the current state.
 3. Implement the requested changes in the worktree.
 4. Tag all changed lines with `// (Q<num>)` inline comments where appropriate.
-5. Write the response **directly to the main tree** question file (absolute path). After the last `<user_response>...</user_response>` block, append:
+5. Write the response **directly to the main tree** question file (absolute path). Keep it terse — 15 lines max. After the last `<user_response>...</user_response>` block, append:
 ```
 <response_claude>
 <text>
-Implemented: [brief description of what was done]
+Implemented: [1 sentence max]
 
 Files changed:
-- [list of files with brief description of changes]
+- [filename — max 8 words per entry]
 
-[Any implementation decisions or notes]
+[Only note non-obvious decisions. Omit if straightforward.]
 </text>
 </response_claude>
 <user_response>
@@ -137,7 +150,8 @@ The user has updated the question file. Re-read it from the main tree path and p
 - Do NOT commit in the main tree. All main tree changes must be left unstaged.
 - Do NOT amend commits or force-push.
 - If the question file format is unexpected or classification is truly ambiguous, explain what you see and ask the user which action to take.
-- **Do NOT write summaries, status updates, or conversational text in the chat panel.** All substantive content goes in the question file. The chat panel is only for tool calls. The user reads the question file directly — repeating content in chat is redundant.
+- **Chat panel output for Q-file interactions:** Do NOT write summaries, classification reasoning, status updates, or conversational text in the chat panel during Q-file interactions. Proceed directly to tool calls. For direct CLI interactions, respond normally in the chat panel.
+- **Brevity is mandatory.** Every `<response_claude>` block must be the minimum needed for the user to make a decision or confirm the work. One short sentence per issue. No preambles, no restating context the user already knows. If your response exceeds 15 lines, cut it down before writing.
 - Run each shell command separately — do NOT chain commands with `&&` or `;` or `|`. One command per Bash call.
 - **New question numbering:** If you need to create a new question file, first check the highest Q number across ALL folders in the main tree: `<MAIN_TREE>/<AWAITING_DIR>/`, `<MAIN_TREE>/<RESOLVED_DIR>/`, and `<MAIN_TREE>/<DEFERRED_DIR>/`. Use the next number after the highest found.
 - **Permission logging:** If a tool call is blocked by permissions, log it by appending a line to `<MAIN_TREE>/.question-review-logs/permissions.log` with format: `[YYYY-MM-DD HH:MM:SS] Q<num> TOOL:<tool_name> CMD:<full_command>`. Then skip the blocked action and continue.
