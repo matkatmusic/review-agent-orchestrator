@@ -258,7 +258,51 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 - [x] Reads DB directly (read-only for display; status actions write directly)
 - [x] Status bar: counts per status, total count, unread count in header
 
-**Verify**: ~~`npm run tui` — dashboard renders, questions listed, keyboard navigation works, status filtering works.~~ PASSED — builds clean, `npm run tui` launches dashboard with status tabs (All/Active/Awaiting/Deferred/Resolved), cursor navigation, question list with Q-number/title/status/group/unread markers, status change actions (defer/resolve/activate), Tab filter cycling, and quit. Detail and create screens are placeholders for Stages 14/15.
+**Verify**: Build compiles clean. Interactive behavior deferred to Stage 13b (programmatic tests via `ink-testing-library`).
+
+---
+
+## Stage 13b: TUI — Dashboard Tests
+
+**Goal**: Programmatic tests for the dashboard component using `ink-testing-library`. Proves rendering, navigation, filtering, and keyboard actions all work without manual interaction.
+
+- [ ] Install `ink-testing-library` as a dev dependency
+- [ ] Write tests: `src/__tests__/dashboard.test.tsx`
+  - **Rendering**
+    - Empty DB → shows "No questions in this view."
+    - Seeded DB → shows question rows with Q-number, title, status
+    - Header shows total question count
+    - Status tabs show correct counts per status
+    - `✱` marker appears on questions with unread agent responses
+    - `✱` marker does NOT appear when latest response is from user
+    - Group name shown in brackets for grouped questions
+    - Long titles are truncated with `...`
+  - **Cursor navigation**
+    - Down arrow moves cursor indicator (`▸`) to next row
+    - Up arrow moves cursor up; stops at top (does not wrap)
+    - Down arrow stops at bottom (does not wrap)
+    - Cursor clamps when list shrinks (e.g., after status change removes current item)
+  - **Tab filtering**
+    - Tab cycles through status tabs: All → Active → Awaiting → Deferred → Resolved → All
+    - Shift+Tab cycles backwards
+    - Filtering to a status shows only questions with that status
+    - Filtering resets cursor to 0
+    - "All" tab shows all questions
+    - Tab to a status with no questions shows "No questions in this view."
+  - **Status change actions**
+    - `d` on Awaiting question → DB status changes to Deferred, re-renders with updated status
+    - `d` on already-Deferred question → no-op (status unchanged)
+    - `d` on Resolved question → no-op
+    - `r` on Active question → DB status changes to Resolved
+    - `r` on already-Resolved question → no-op
+    - `a` on Deferred question → DB status changes to Awaiting
+    - `a` on Active question → no-op (only works on Deferred/Resolved)
+  - **Callbacks**
+    - Enter → `onOpenDetail` called with the qnum of the selected question
+    - Enter on empty list → `onOpenDetail` NOT called
+    - `n` → `onNewQuestion` called
+
+**Verify**: `npm test -- dashboard.test` — all pass.
 
 ---
 
