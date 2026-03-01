@@ -46,6 +46,21 @@ export function hasUnreadAgentResponse(db: DB, qnum: number): boolean {
 }
 
 /**
+ * Bulk query: return the set of qnums whose latest response is from 'agent'.
+ * Single SQL query — avoids N+1 when checking many questions.
+ */
+export function getUnreadQnums(db: DB): Set<number> {
+    const rows = db.all<{ qnum: number }>(
+        `SELECT r.qnum FROM responses r
+         INNER JOIN (
+             SELECT qnum, MAX(id) AS max_id FROM responses GROUP BY qnum
+         ) latest ON r.qnum = latest.qnum AND r.id = latest.max_id
+         WHERE r.author = 'agent'`
+    );
+    return new Set(rows.map(r => r.qnum));
+}
+
+/**
  * Check if a reprompt is needed for a question.
  * Returns true if the last responder is 'user', meaning there's a user
  * response that hasn't been delivered to the agent yet.

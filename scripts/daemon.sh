@@ -19,6 +19,14 @@ elif [[ -f "$SUBMODULE_DIR/config.sh" ]]; then
 fi
 INTERVAL="${SCAN_INTERVAL:-10}"
 
+# Auto-rebuild dist/ if src/ is newer or dist/ doesn't exist
+if [[ ! -d "$SUBMODULE_DIR/dist" ]] || \
+   [[ -n "$(find "$SUBMODULE_DIR/src" -newer "$SUBMODULE_DIR/dist" -name '*.ts' -o -name '*.tsx' 2>/dev/null | head -1)" ]]; then
+    echo "[review] dist/ is stale or missing — rebuilding..."
+    (cd "$SUBMODULE_DIR" && npm run build) || { echo "[review] Build failed — aborting."; exit 1; }
+    echo "[review] Build complete."
+fi
+
 echo "[review] Daemon started — project root: $PROJECT_ROOT"
 echo "[review] Scan interval: ${INTERVAL}s"
 

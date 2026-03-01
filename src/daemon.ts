@@ -14,6 +14,7 @@ import {
     cleanupStaleLocks,
     readLockfile,
     listLockfiles,
+    createLockfile,
     sendInitialPrompt,
 } from './agents.js';
 import { sendKeys, isPaneAlive } from './tmux.js';
@@ -59,6 +60,8 @@ export function detectNewCommits(config: Config): void {
 
             try {
                 sendKeys(lock.paneId, message);
+                // Update lockfile so we don't re-send next cycle
+                createLockfile(config, { ...lock, headCommit: currentHead });
                 log(`Sent rebase signal to Q${lock.qnum} (${lock.headCommit.slice(0, 7)} → ${currentHead.slice(0, 7)})`);
             } catch {
                 // pane may have died between check and send — ignore
@@ -75,6 +78,7 @@ export interface ScanResult {
     spawned: number[];
     reprompted: number[];
     killedByEnforce: number[];
+    killedOrphans: number[];
     staleCleaned: number[];
     dumpExported: boolean;
 }
@@ -95,6 +99,7 @@ export function scanCycle(config: Config, db: DB): ScanResult {
         spawned: [],
         reprompted: [],
         killedByEnforce: [],
+        killedOrphans: [],
         staleCleaned: [],
         dumpExported: false,
     };
@@ -117,6 +122,19 @@ export function scanCycle(config: Config, db: DB): ScanResult {
             killAgent(config, qnum);
             result.killedByEnforce.push(qnum);
             log(`Killed agent for Q${qnum} (blocked → Deferred)`);
+        }
+    }
+
+    // Kill orphaned agents whose questions are no longer Active (e.g. user
+    // manually deferred or resolved via TUI while agent was running)
+    const locks = listLockfiles(config);
+    for (const lock of locks) {
+        if (result.killedByEnforce.includes(lock.qnum)) continue;
+        const q = getQuestion(db, lock.qnum);
+        if (q && q.status !== 'Active') {
+            killAgent(config, lock.qnum);
+            result.killedOrphans.push(lock.qnum);
+            log(`Killed orphaned agent for Q${lock.qnum} (status: ${q.status})`);
         }
     }
 
@@ -147,6 +165,7 @@ export function scanCycle(config: Config, db: DB): ScanResult {
                     const question = getQuestion(db, q.qnum);
                     if (question) {
                         spawnAgent(config, q.qnum, question.title, question.description);
+                        sendInitialPrompt(config, q.qnum, question.title, question.description);
                         result.spawned.push(q.qnum);
                         log(`Spawned agent pane: Q${q.qnum} — ${question.title}`);
                     }
@@ -156,6 +175,7 @@ export function scanCycle(config: Config, db: DB): ScanResult {
                 const question = getQuestion(db, q.qnum);
                 if (question) {
                     spawnAgent(config, q.qnum, question.title, question.description);
+                    sendInitialPrompt(config, q.qnum, question.title, question.description);
                     result.spawned.push(q.qnum);
                     log(`Spawned agent pane: Q${q.qnum} — ${question.title}`);
                 }

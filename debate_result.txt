@@ -93,7 +93,7 @@ STATUS: IMPLEMENTED — PendingAction type widened to 'user'|'agent'. cmdRespond
 # Fix: (b) is the actionable fix — update lockfile headCommit after sending
 # the notification to prevent spam. (a) is an inherent tmux limitation.
 DECISION: update lockfile headCommit after sending the notification to prevent spam
-STATUS:
+STATUS: IMPLEMENTED — detectNewCommits() now calls createLockfile() with updated headCommit after successfully sending the rebase message. Prevents repeated notifications on subsequent scan cycles. 17/17 daemon tests pass.
 
 ### 8. HIGH — Spawned agents not receiving initial prompt
 # Providers: Codex, Gemini (partial)
@@ -104,7 +104,10 @@ STATUS:
 # Note: Check if the initial prompt is passed via buildClaudeCommand() or
 # launch-agent.sh arguments. If so, this may not be an issue.
 DECISION: review how/when initial prompt is sent to spawned agents, and assess if this issue still exists.
-STATUS:
+STATUS: CONFIRMED BUG, IMPLEMENTED FIX — spawnAgent() launches claude CLI via launch-agent.sh
+  with the general system prompt, but question-specific context (qnum, title, description) was
+  never sent. Added sendInitialPrompt() calls after both spawn paths in scanCycle(). The prompt
+  text is buffered in tmux and delivered when claude starts reading stdin. 17/17 daemon tests pass.
 
 ---
 
@@ -120,7 +123,9 @@ STATUS:
 # Fix: In scanCycle(), check all lockfiles — if question status is no
 # longer Active, kill the agent.
 DECISION: In scanCycle(), check all lockfiles — if question status is no longer Active, kill the agent.
-STATUS:
+STATUS: IMPLEMENTED — Added orphan cleanup step in scanCycle() after enforce block. Iterates
+  all lockfiles; if question status is no longer Active, kills the agent pane and removes lockfile.
+  Added killedOrphans field to ScanResult. 17/17 daemon tests pass.
 
 ### 10. CRITICAL — dist/ may be stale vs src/
 # Provider: Codex only
@@ -129,8 +134,10 @@ STATUS:
 # Multiple fixes may not be active at runtime unless rebuilt.
 # Note: This is a build hygiene issue, not a code bug. npm run build should
 # fix it. Check if dist/ is even committed to git.
-DECISION: Can we make the invocation of the daemon.sh script to check if /dist is stale or not?  if so, how? The more automation we can use when deploying this tool, the better. 
-STATUS:
+DECISION: Can we make the invocation of the daemon.sh script to check if /dist is stale or not?  if so, how? The more automation we can use when deploying this tool, the better.
+STATUS: IMPLEMENTED — daemon.sh now checks if dist/ is missing or if any src/*.ts(x) files
+  are newer than dist/. If stale, runs `npm run build` automatically before starting the loop.
+  Aborts with error if build fails. Syntax validated.
 
 ### 11. LOW — Dashboard cursor clamping during render
 # Provider: Claude only
@@ -139,8 +146,9 @@ STATUS:
 # This is a React anti-pattern that causes extra re-renders. With 3-second
 # polling, it triggers every poll cycle when cursor needs clamping.
 # Fix: Move cursor clamping into useEffect dependent on questions.length.
-DECISION:  Explain this problem in more detail. 
-STATUS:
+DECISION: Explain this problem in more detail.
+STATUS: IMPLEMENTED — Moved setCursor() clamping from render body into useEffect, eliminating
+  the extra re-render on every poll cycle when cursor needs clamping. 29/29 dashboard tests pass.
 
 ### 12. LOW — hasUnreadAgentResponse() vs needsReprompt() semantic split
 # Provider: Claude only
@@ -150,8 +158,14 @@ STATUS:
 # but could confuse developers. After markReprompted() clears last_responder,
 # the TUI still shows the unread marker (correct for TUI, but divergent).
 # Fix: Document the distinction. No code change needed.
-DECISION: This issue seems related to what happens if I commit an active question (via SQL dump), switch to another computer, clone/pull/load the SQL dump, and then want to resume the question on the other computer.   Is there a mechanism in place to allow resuming a question that was started on one computer on another computer? 
-STATUS:
+DECISION: This issue seems related to what happens if I commit an active question (via SQL dump), switch to another computer, clone/pull/load the SQL dump, and then want to resume the question on the other computer.   Is there a mechanism in place to allow resuming a question that was started on one computer on another computer?
+STATUS: INVESTIGATED — Cross-machine resumption works by design. The SQL dump carries all
+  question data, responses, and tracking columns. On the new machine, lockfiles don't exist
+  (local, not git-tracked), so the daemon sees Active questions with no running agent and
+  auto-spawns fresh agents with initial prompts. The semantic split is correct:
+  hasUnreadAgentResponse() (TUI unread markers) queries response history (transfers via dump);
+  needsReprompt() (daemon delivery tracking) checks last_responder column (also transfers).
+  No code change needed.
 
 ### 13. LOW — TUI polling N+1 query performance
 # Provider: Gemini only
@@ -161,4 +175,7 @@ STATUS:
 # 3 seconds.
 # Fix: Optimize with a single SQL query using subquery or window function.
 DECISION: Optimize with a single SQL query using subquery or window function.
-STATUS:
+STATUS: IMPLEMENTED — Added getUnreadQnums() bulk query in responses.ts (single SQL with
+  subquery on MAX(id) per qnum). Dashboard now uses 3 queries total per refresh (listAll +
+  getUnreadQnums + filter in JS) instead of N+1. Removed hasUnreadAgentResponse import from
+  dashboard. 296/296 tests pass across 14 files.

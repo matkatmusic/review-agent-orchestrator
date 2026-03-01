@@ -2,8 +2,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import type { DB } from '../db.js';
 import type { Question } from '../types.js';
-import { listAll, listByStatus, updateStatus } from '../questions.js';
-import { hasUnreadAgentResponse } from '../responses.js';
+import { listAll, updateStatus } from '../questions.js';
+import { getUnreadQnums } from '../responses.js';
 
 const STATUSES = ['All', 'Active', 'Awaiting', 'Deferred', 'User_Deferred', 'Resolved'] as const;
 type StatusFilter = (typeof STATUSES)[number];
@@ -18,26 +18,16 @@ interface StatusCounts {
     unread: number;
 }
 
-function getCounts(db: DB): StatusCounts {
-    const all = listAll(db);
-    let unread = 0;
-    for (const q of all) {
-        if (hasUnreadAgentResponse(db, q.qnum)) unread++;
-    }
-    return {
-        Active: all.filter(q => q.status === 'Active').length,
-        Awaiting: all.filter(q => q.status === 'Awaiting').length,
-        Deferred: all.filter(q => q.status === 'Deferred').length,
-        User_Deferred: all.filter(q => q.status === 'User_Deferred').length,
-        Resolved: all.filter(q => q.status === 'Resolved').length,
-        total: all.length,
-        unread,
+function getCounts(questions: Question[], unreadSet: Set<number>): StatusCounts {
+    const counts: StatusCounts = {
+        Active: 0, Awaiting: 0, Deferred: 0, User_Deferred: 0, Resolved: 0,
+        total: questions.length, unread: 0,
     };
-}
-
-function getFilteredQuestions(db: DB, filter: StatusFilter): Question[] {
-    if (filter === 'All') return listAll(db);
-    return listByStatus(db, filter);
+    for (const q of questions) {
+        if (q.status in counts) counts[q.status as keyof Omit<StatusCounts, 'total' | 'unread'>]++;
+        if (unreadSet.has(q.qnum)) counts.unread++;
+    }
+    return counts;
 }
 
 export interface DashboardProps {
@@ -60,21 +50,20 @@ export default function Dashboard({ db, onOpenDetail, onNewQuestion }: Dashboard
         return () => clearInterval(timer);
     }, []);
 
-    const counts = useMemo(() => getCounts(db), [refreshKey]);
-    const questions = useMemo(() => getFilteredQuestions(db, filter), [filter, refreshKey]);
+    // Single bulk query for unread markers (replaces N+1 per-question queries)
+    const unreadSet = useMemo(() => getUnreadQnums(db), [refreshKey]);
+    const allQuestions = useMemo(() => listAll(db), [refreshKey]);
+    const counts = useMemo(() => getCounts(allQuestions, unreadSet), [allQuestions, unreadSet]);
+    const questions = useMemo(() => {
+        if (filter === 'All') return allQuestions;
+        return allQuestions.filter(q => q.status === filter);
+    }, [allQuestions, filter]);
 
-    // Build unread set for marker display
-    const unreadSet = useMemo(() => {
-        const set = new Set<number>();
-        for (const q of questions) {
-            if (hasUnreadAgentResponse(db, q.qnum)) set.add(q.qnum);
-        }
-        return set;
-    }, [questions, refreshKey]);
-
-    // Clamp cursor when list changes
+    // Clamp cursor when list shrinks (e.g. after status change or polling refresh)
     const clampedCursor = Math.min(cursor, Math.max(0, questions.length - 1));
-    if (clampedCursor !== cursor) setCursor(clampedCursor);
+    useEffect(() => {
+        if (clampedCursor !== cursor) setCursor(clampedCursor);
+    }, [clampedCursor, cursor]);
 
     useInput((input, key) => {
         if (input === 'q') {
