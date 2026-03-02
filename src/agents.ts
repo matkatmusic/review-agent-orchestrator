@@ -85,29 +85,43 @@ export function buildInitialPrompt(
 }
 
 /**
- * Build the claude CLI command that launch-agent.sh will execute.
+ * Build the claude CLI command (a compound shell command sent to the tmux pane).
+ * Claude is started in interactive mode with the initial prompt as a positional
+ * argument (auto-submitted first message). This keeps claude alive for reprompting
+ * via sendKeys, unlike -p which runs non-interactively and exits.
  */
 export function buildClaudeCommand(config: Config, qnum: number, initialPromptFile?: string): string {
     const submoduleDir = getSubmoduleDir();
     const promptFile = join(submoduleDir, config.agentPrompt);
-    const launchScript = join(submoduleDir, 'scripts', 'launch-agent.sh');
     const mainTree = config.projectRoot;
     const codeRoot = config.codeRoot || config.projectRoot;
 
-    const parts = [
-        `bash ${esc(launchScript)}`,
-        esc(promptFile),
-        esc(initialPromptFile ?? ''),
+    // Build compound shell command for the tmux pane
+    const parts: string[] = [
+        'unset CLAUDECODE',
+        `export PATH=${esc(process.env.PATH ?? '')}`,
+        'export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=95',
+    ];
+
+    const claudeArgs = [
+        'exec claude',
+        `--append-system-prompt "$(cat ${esc(promptFile)})"`,
         '--worktree',
         `--add-dir ${esc(mainTree)}`,
     ];
 
-    // Add code root as additional directory if it differs from main tree
     if (codeRoot !== mainTree) {
-        parts.push(`--add-dir ${esc(codeRoot)}`);
+        claudeArgs.push(`--add-dir ${esc(codeRoot)}`);
     }
 
-    return parts.join(' ');
+    // Pass initial prompt as a positional argument (interactive mode, auto-submitted)
+    // Using -- to separate options from the positional prompt argument
+    if (initialPromptFile) {
+        claudeArgs.push(`-- "$(cat ${esc(initialPromptFile)})"`);
+    }
+
+    parts.push(claudeArgs.join(' '));
+    return parts.join('; ');
 }
 
 /**
@@ -196,10 +210,14 @@ export function cleanupStaleLocks(config: Config): number[] {
     return cleaned;
 }
 
+/** Resolve the launcher script path for a given qnum. */
+function launcherScriptPath(config: Config, qnum: number): string {
+    return join(locksDir(config), `Q${qnum}.launcher.sh`);
+}
+
 /**
- * Write the initial prompt to a file so launch-agent.sh can pass it via -p.
- * This avoids the race condition of sending the prompt via sendKeys before
- * the claude CLI is ready to read stdin.
+ * Write the initial prompt to a file so it can be passed as a positional
+ * argument via $(cat ...) in the launcher script.
  */
 function writeInitialPromptFile(
     config: Config,
@@ -218,11 +236,27 @@ function writeInitialPromptFile(
 }
 
 /**
+ * Write a launcher shell script for the agent.
+ * This avoids nested single-quote escaping issues when passing compound
+ * commands as tmux pane commands — tmux's esc() wraps in single quotes,
+ * which suppresses $(cat ...) expansion. Writing a script file lets us
+ * pass a simple `bash /path/to/script.sh` to tmux instead.
+ */
+function writeLauncherScript(config: Config, qnum: number, cmd: string): string {
+    const dir = locksDir(config);
+    if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+    }
+    const scriptPath = launcherScriptPath(config, qnum);
+    writeFileSync(scriptPath, `#!/usr/bin/env bash\n${cmd}\n`, { mode: 0o755 });
+    return scriptPath;
+}
+
+/**
  * Spawn a new agent for an Active question.
- * Creates a tmux pane, launches claude CLI with initial prompt, and writes a lockfile.
- * The initial prompt is written to a file and passed via launch-agent.sh's -p flag,
- * eliminating the race condition of sending via sendKeys before claude is ready.
- * Returns the lockfile data on success.
+ * Creates a tmux pane, launches claude CLI in interactive mode, and writes a lockfile.
+ * The initial prompt is passed as a positional argument (auto-submitted first message)
+ * so claude stays alive for reprompting. Returns the lockfile data on success.
  */
 export function spawnAgent(
     config: Config,
@@ -230,31 +264,21 @@ export function spawnAgent(
     title: string,
     description: string,
 ): LockfileData {
-    // Write initial prompt to file for launch-agent.sh to pass via -p
+    // Write initial prompt to file — passed as positional arg to claude
     const initialPromptFile = writeInitialPromptFile(config, qnum, title, description);
-
-    // Ensure tmux session exists
-    if (!hasSession(config.tmuxSession)) {
-        createSession(config.tmuxSession, { cwd: config.projectRoot });
-        // The initial pane is created by createSession; use it for the first agent
-        const paneId = getSessionFirstPane(config.tmuxSession);
-        const cmd = buildClaudeCommand(config, qnum, initialPromptFile);
-        sendKeys(paneId, cmd);
-
-        const data: LockfileData = {
-            paneId,
-            qnum,
-            headCommit: headCommit(config),
-        };
-        createLockfile(config, data);
-
-        return data;
-    }
-
-    // Session exists — split a new pane
-    const paneId = splitWindow(config.tmuxSession, { cwd: config.projectRoot });
     const cmd = buildClaudeCommand(config, qnum, initialPromptFile);
-    sendKeys(paneId, cmd);
+
+    // Write launcher script — avoids shell escaping issues when passing
+    // compound commands (with $(cat ...) expansions) as tmux pane commands.
+    const launcherPath = writeLauncherScript(config, qnum, cmd);
+    const paneCmd = `bash ${esc(launcherPath)}`;
+
+    let paneId: string;
+    if (!hasSession(config.tmuxSession)) {
+        paneId = createSession(config.tmuxSession, { cwd: config.projectRoot, cmd: paneCmd });
+    } else {
+        paneId = splitWindow(config.tmuxSession, { cwd: config.projectRoot, cmd: paneCmd });
+    }
 
     const data: LockfileData = {
         paneId,
@@ -305,7 +329,7 @@ export function repromptAgent(config: Config, qnum: number): boolean {
 }
 
 /**
- * Kill an agent and clean up its lockfile.
+ * Kill an agent and clean up its lockfile, launcher script, and prompt file.
  */
 export function killAgent(config: Config, qnum: number): void {
     const lock = readLockfile(config, qnum);
@@ -313,17 +337,9 @@ export function killAgent(config: Config, qnum: number): void {
         killPane(lock.paneId);
     }
     removeLockfile(config, qnum);
-}
-
-/** Get the first pane ID of a session. */
-function getSessionFirstPane(session: string): string {
-    try {
-        return execSync(
-            `tmux list-panes -t '${session.replace(/'/g, "'\\''")}' -F '#{pane_id}' | head -1`,
-            { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-        ).trim();
-    } catch {
-        return '%0'; // fallback
+    // Clean up ephemeral files
+    for (const path of [launcherScriptPath(config, qnum), promptFilePath(config, qnum)]) {
+        try { unlinkSync(path); } catch { /* already gone */ }
     }
 }
 

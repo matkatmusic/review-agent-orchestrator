@@ -3,6 +3,8 @@ import type { Config } from './types.js';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { processPendingQueue } from './pending.js';
 import { runPipeline } from './pipeline.js';
 import { listByStatus, getQuestion } from './questions.js';
@@ -228,8 +230,28 @@ export function scanCycle(config: Config, db: DB): ScanResult {
 }
 
 /**
- * Main entry point — runs one scan cycle, then exits.
- * Called by daemon.sh in a loop.
+ * Ensure autoCompactEnabled is set in ~/.claude.json (or a custom path for testing).
+ * Agents need this to avoid running out of context window.
+ */
+export function ensureAutocompact(configPath?: string): void {
+    const claudeJson = configPath ?? join(homedir(), '.claude.json');
+    try {
+        let data: Record<string, unknown> = {};
+        if (existsSync(claudeJson)) {
+            data = JSON.parse(readFileSync(claudeJson, 'utf-8'));
+        }
+        if (data.autoCompactEnabled !== true) {
+            data.autoCompactEnabled = true;
+            writeFileSync(claudeJson, JSON.stringify(data, null, 2));
+            log('Enabled autoCompactEnabled in ~/.claude.json');
+        }
+    } catch (err) {
+        log(`Warning: could not update ~/.claude.json: ${err}`);
+    }
+}
+
+/**
+ * Main entry point — runs continuously, scanning on an interval.
  */
 export function main(projectRoot?: string): void {
     const config = loadConfig(projectRoot);
@@ -241,17 +263,39 @@ export function main(projectRoot?: string): void {
     const seedPath = join(submoduleRoot, 'templates', 'seed.sql');
 
     const db = new DB(dbPath);
+    db.open();
+    db.migrate(schemaPath);
+    db.seed(seedPath);
+
+    ensureAutocompact();
+
+    log(`Daemon started — project root: ${config.projectRoot}`);
+    log(`Scan interval: ${config.scanInterval}s`);
+
+    // First cycle immediately
     try {
-        db.open();
-        db.migrate(schemaPath);
-        db.seed(seedPath);
         scanCycle(config, db);
     } catch (err) {
-        log(`Error: ${err}`);
-        process.exitCode = 1;
-    } finally {
-        db.close();
+        log(`Scan error: ${err}`);
     }
+
+    // Subsequent cycles on interval
+    const timer = setInterval(() => {
+        try {
+            scanCycle(config, db);
+        } catch (err) {
+            log(`Scan error: ${err}`);
+        }
+    }, config.scanInterval * 1000);
+
+    const shutdown = () => {
+        log('Shutting down...');
+        clearInterval(timer);
+        db.close();
+        process.exit(0);
+    };
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
 }
 
 // CLI entry point: node dist/daemon.js [project_root]

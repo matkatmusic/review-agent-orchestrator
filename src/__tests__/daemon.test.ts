@@ -4,11 +4,11 @@ import { createQuestion, getQuestion, updateStatus } from '../questions.js';
 import { addResponse, listResponses } from '../responses.js';
 import { addBlocker } from '../dependencies.js';
 import { writePending } from '../pending.js';
-import { scanCycle, detectNewCommits } from '../daemon.js';
+import { scanCycle, detectNewCommits, ensureAutocompact } from '../daemon.js';
 import { createLockfile, readLockfile, listLockfiles } from '../agents.js';
 import { killSession } from '../tmux.js';
 import type { Config } from '../types.js';
-import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -376,6 +376,49 @@ describe('daemon — seed on fresh DB (Fix M)', () => {
         const rows = db.all<{ key: string }>("SELECT key FROM metadata");
         expect(rows).toHaveLength(1); // Only one metadata row
         db.close();
+    });
+});
+
+describe('daemon — ensureAutocompact', () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+        tmpDir = mkdtempSync(join(tmpdir(), 'qr-daemon-autocompact-'));
+    });
+
+    afterEach(() => {
+        rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('creates file and sets autoCompactEnabled when file does not exist', () => {
+        const configPath = join(tmpDir, '.claude.json');
+        ensureAutocompact(configPath);
+
+        expect(existsSync(configPath)).toBe(true);
+        const data = JSON.parse(readFileSync(configPath, 'utf-8'));
+        expect(data.autoCompactEnabled).toBe(true);
+    });
+
+    it('sets autoCompactEnabled in existing file', () => {
+        const configPath = join(tmpDir, '.claude.json');
+        writeFileSync(configPath, JSON.stringify({ someSetting: 'value' }));
+
+        ensureAutocompact(configPath);
+
+        const data = JSON.parse(readFileSync(configPath, 'utf-8'));
+        expect(data.autoCompactEnabled).toBe(true);
+        expect(data.someSetting).toBe('value');
+    });
+
+    it('is idempotent — does not rewrite if already true', () => {
+        const configPath = join(tmpDir, '.claude.json');
+        writeFileSync(configPath, JSON.stringify({ autoCompactEnabled: true }, null, 2));
+        const before = readFileSync(configPath, 'utf-8');
+
+        ensureAutocompact(configPath);
+
+        const after = readFileSync(configPath, 'utf-8');
+        expect(after).toBe(before);
     });
 });
 

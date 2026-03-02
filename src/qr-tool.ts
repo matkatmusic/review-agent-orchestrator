@@ -8,6 +8,8 @@ import {
     cmdRead, cmdList, cmdInfo, cmdStatus,
     cmdRespond, cmdCreate, cmdBlockBy, cmdBlockByGroup, cmdAddToGroup,
 } from './qr-tool-commands.js';
+import { runSetup } from './setup.js';
+import { runReset } from './reset.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -118,6 +120,24 @@ program
     .description('Add question to a group (writes to .pending/)')
     .action((qnumStr: string, group: string) => {
         console.log(cmdAddToGroup(getPendingDir(), parseInt(qnumStr, 10), group));
+    });
+
+// ── Setup / Reset commands ──
+
+program
+    .command('setup [project-root]')
+    .description('Initialize Question Review structure in host project')
+    .action((projectRoot?: string) => {
+        const root = projectRoot ?? resolveProjectRoot();
+        runSetup(root);
+    });
+
+program
+    .command('reset [project-root]')
+    .description('Reset project for a fresh run')
+    .action((projectRoot?: string) => {
+        const root = projectRoot ?? resolveProjectRoot();
+        runReset(root);
     });
 
 program.parse();

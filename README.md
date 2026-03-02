@@ -19,28 +19,25 @@ Add as a git submodule to your project:
 ```bash
 git submodule add <repo-url> .question-review
 cd .question-review && npm install && npm run build
-./setup.sh
+node dist/qr-tool.js setup /path/to/project
 ```
 
-`setup.sh` creates:
+`qr-tool setup` creates:
 - `Questions/Awaiting/`, `Questions/Resolved/`, `Questions/Deferred/` directories
 - `.vscode/tasks.json` entry to auto-start the daemon
 - `.claude/settings.json` with agent permissions
 - `.question-review-logs/` for permission logging (gitignored)
+- `questions.db` (SQLite database with schema + seed data)
 
 ## Usage
 
 ### Daemon
 
 ```bash
-# v2 daemon (TypeScript scan loop with auto-rebuild)
-.question-review/scripts/daemon.sh /path/to/project
-
-# Legacy v1 daemon (bash-based, still functional)
-.question-review/scripts/review-questions-daemon.sh
+node .question-review/dist/daemon.js /path/to/project
 ```
 
-`daemon.sh` auto-rebuilds `dist/` when source files change, then loops `node dist/daemon.js` every `SCAN_INTERVAL` seconds.
+The daemon runs continuously, scanning every `SCAN_INTERVAL` seconds. It handles pending queue processing, pipeline execution, agent spawning, and DB dump export. Press Ctrl+C to stop.
 
 ### TUI
 
@@ -97,6 +94,13 @@ node dist/qr-tool.js <command>
 | `block-by-group <blocked> <group>` | Block by all questions in a group |
 | `add-to-group <qnum> <group>` | Add question to a group |
 
+**Management commands:**
+
+| Command | Description |
+|---------|-------------|
+| `setup [project-root]` | Initialize Question Review structure in host project |
+| `reset [project-root]` | Reset project for a fresh run |
+
 ## Configuration
 
 Edit `config.sh` to customize:
@@ -120,22 +124,16 @@ Create `config.local.sh` for project-specific overrides (gitignored). Environmen
 ```
 your-project/
   .question-review/              # This submodule
-    config.sh                    # Configuration
+    config.sh                    # Configuration (data file, parsed by config.ts)
     config.local.sh              # Local overrides (gitignored)
-    setup.sh                     # One-time project setup
     prompts/
       review-agent.md            # Agent system prompt
-    scripts/
-      daemon.sh                  # v2 daemon loop (auto-rebuild + TS scan)
-      review-questions-daemon.sh # v1 daemon loop (bash scan)
-      review-questions.sh        # v1 single scan pass (bash)
-      launch-agent.sh            # Agent launcher wrapper
-      reset.sh                   # Reset script
-      followup.sh                # Followup helper
     src/                         # TypeScript source
-      daemon.ts                  # Scan cycle: pending → pipeline → agents → cleanup
+      daemon.ts                  # Daemon loop: scan cycle on interval, graceful shutdown
       db.ts                      # SQLite wrapper (better-sqlite3)
       config.ts                  # Config loader (config.sh → config.local.sh → env)
+      setup.ts                   # Project setup (Questions dirs, tasks.json, DB init)
+      reset.ts                   # Project reset (kill agents, clean worktrees, re-setup)
       qr-tool.ts                 # CLI entry point (commander)
       qr-tool-commands.ts        # CLI command implementations
       pipeline.ts                # Status pipeline (enforce → unblock → promote)
@@ -214,6 +212,7 @@ A `metadata` table stores counters (e.g., `lastQuestionCreated` for auto-increme
 - **Git worktrees per agent** — each agent works in an isolated worktree, preventing file conflicts between concurrent agents.
 - **`questions.dump.sql`** — the daemon exports a SQL dump after every DB mutation. This file is committed to git, making the question state portable across machines without shipping the binary `.db` file.
 - **Status pipeline** — the daemon runs enforce → unblock → promote every cycle: questions blocked by unresolved dependencies are forced to Deferred, questions whose blockers are all Resolved are unblocked, and Awaiting questions are promoted to Active up to `MAX_AGENTS`.
+- **All-Node architecture** — Node is the single entry point. `config.sh` and `config.local.sh` are retained as data files (parsed by `config.ts`), but all logic lives in TypeScript.
 
 ## Development
 
@@ -227,11 +226,8 @@ npm run test:watch     # Watch mode tests
 ## Resetting
 
 ```bash
-# Full reset: kill tmux, clean worktrees/locks, update submodule, reinstall settings, scan
-.question-review/scripts/reset.sh /path/to/project
-
-# Reset without scanning (e.g., when VS Code daemon handles scanning)
-.question-review/scripts/reset.sh --no-scan /path/to/project
+# Full reset: kill tmux, clean worktrees/locks, update submodule, reinstall settings
+node .question-review/dist/qr-tool.js reset /path/to/project
 ```
 
 ## Submodule Workflow
@@ -242,6 +238,6 @@ When making changes to the submodule:
 2. Commit in the submodule repo
 3. In the host project: `git -c protocol.file.allow=always submodule update --remote .question-review`
 4. Commit the submodule ref: `git add .question-review && git commit -m "Update submodule"`
-5. Delete `.claude/settings.json` and re-run `setup.sh` (if settings template changed)
+5. Delete `.claude/settings.json` and re-run `qr-tool setup` (if settings template changed)
 
-Or use `reset.sh` which handles steps 3-5 automatically.
+Or use `qr-tool reset` which handles steps 3-5 automatically.
