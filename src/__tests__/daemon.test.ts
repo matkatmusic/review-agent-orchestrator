@@ -26,7 +26,6 @@ function makeConfig(tmpDir: string, overrides?: Partial<Config>): Config {
         maxAgents: 3,
         tmuxSession: TEST_SESSION,
         projectRoot: tmpDir,
-        questionsDir: 'Questions',
         scanInterval: 10,
         terminalApp: 'Terminal',
         agentPrompt: 'prompts/review-agent.md',
@@ -39,18 +38,15 @@ describe('daemon — scanCycle', () => {
     let tmpDir: string;
     let db: DB;
     let config: Config;
-    let questionsDir: string;
 
     beforeEach(() => {
         // Kill any leftover session from previous test
         killSession(TEST_SESSION);
 
         tmpDir = mkdtempSync(join(tmpdir(), 'qr-daemon-test-'));
-        questionsDir = join(tmpDir, 'Questions');
-        mkdirSync(questionsDir, { recursive: true });
 
         config = makeConfig(tmpDir);
-        db = new DB(join(questionsDir, 'questions.db'));
+        db = new DB(join(tmpDir, 'questions.db'));
         db.open();
         db.migrate(SCHEMA_PATH);
         db.run("INSERT INTO metadata (key, value) VALUES ('lastQuestionCreated', '0')");
@@ -87,7 +83,7 @@ describe('daemon — scanCycle', () => {
 
         // Dump should have been exported
         expect(result.dumpExported).toBe(true);
-        expect(existsSync(join(questionsDir, 'questions.dump.sql'))).toBe(true);
+        expect(existsSync(join(tmpDir, 'questions.dump.sql'))).toBe(true);
     });
 
     it('no-op cycle: dump NOT re-exported', () => {
@@ -99,7 +95,7 @@ describe('daemon — scanCycle', () => {
         expect(result.unblocked).toEqual([]);
         expect(result.promoted).toEqual([]);
         expect(result.dumpExported).toBe(false);
-        expect(existsSync(join(questionsDir, 'questions.dump.sql'))).toBe(false);
+        expect(existsSync(join(tmpDir, 'questions.dump.sql'))).toBe(false);
     });
 
     it('dirty tracking: response added → dump exported', () => {
@@ -225,10 +221,10 @@ describe('daemon — scanCycle', () => {
         createQuestion(db, 'test', 'desc');
         expect(db.isDirty()).toBe(true);
 
-        // Use a config with an invalid dump path to make exportDump fail
-        const badConfig = makeConfig(tmpDir, {
-            questionsDir: 'NonexistentDir',
-        });
+        // Use a projectRoot that is a file (not a directory) so the dump path is invalid
+        const badFile = join(tmpDir, 'not-a-dir');
+        writeFileSync(badFile, '');
+        const badConfig = makeConfig(join(badFile, 'deep'));
         const result = scanCycle(badConfig, db);
 
         // Export should have failed

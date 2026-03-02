@@ -32,10 +32,11 @@ const tick = () => new Promise(r => setTimeout(r, 0));
 function setup(db: DB) {
     const onOpenDetail = vi.fn();
     const onNewQuestion = vi.fn();
+    const onSelectionChange = vi.fn();
     const instance = render(
-        <Dashboard db={db} onOpenDetail={onOpenDetail} onNewQuestion={onNewQuestion} />
+        <Dashboard db={db} onOpenDetail={onOpenDetail} onNewQuestion={onNewQuestion} onSelectionChange={onSelectionChange} />
     );
-    return { ...instance, onOpenDetail, onNewQuestion };
+    return { ...instance, onOpenDetail, onNewQuestion, onSelectionChange };
 }
 
 describe('dashboard', () => {
@@ -388,27 +389,18 @@ describe('dashboard', () => {
             expect(getQuestion(db, 1)!.status).toBe('Resolved');
         });
 
-        it('"r" on Active question → DB status changes to Resolved', async () => {
-            createQuestion(db, 'to_resolve', 'desc');
+        it('"r" refreshes the list (does not resolve)', async () => {
+            createQuestion(db, 'q1', 'desc');
             updateStatus(db, 1, 'Active');
             const { lastFrame, stdin } = setup(db);
             await tick();
 
-            stdin.write('r');
-            await tick();
-            expect(getQuestion(db, 1)!.status).toBe('Resolved');
-            expect(lastFrame()).toContain('Resolved');
-        });
-
-        it('"r" on already-Resolved question → no-op', async () => {
-            createQuestion(db, 'already_resolved', 'desc');
+            // Externally change DB status — TUI hasn't seen it yet
             updateStatus(db, 1, 'Resolved');
-            const { stdin } = setup(db);
-            await tick();
-
             stdin.write('r');
             await tick();
-            expect(getQuestion(db, 1)!.status).toBe('Resolved');
+            // After refresh, the TUI should pick up the external change
+            expect(lastFrame()).toContain('Resolved');
         });
 
         it('"a" on Deferred question → DB status changes to Awaiting', async () => {
@@ -491,6 +483,69 @@ describe('dashboard', () => {
         });
     });
 
+    // ---- Status-dependent status bar ----
+
+    describe('status-dependent status bar', () => {
+        it('Awaiting question selected → bar shows [d] and [a] Make Active, no resolve', () => {
+            createQuestion(db, 'q1', 'desc'); // Awaiting
+            const { lastFrame } = setup(db);
+            const frame = lastFrame()!;
+            expect(frame).toContain('[d] Defer');
+            expect(frame).toContain('[a] Make Active');
+            expect(frame).toContain('[r] Refresh');
+            expect(frame).not.toContain('[r] Resolve');
+        });
+
+        it('Deferred question selected → bar shows [a] Activate, no [d]', () => {
+            createQuestion(db, 'q1', 'desc');
+            updateStatus(db, 1, 'Deferred');
+            const { lastFrame } = setup(db);
+            const frame = lastFrame()!;
+            expect(frame).toContain('[a] Activate');
+            expect(frame).not.toContain('[d] Defer');
+            expect(frame).not.toContain('[r] Resolve');
+        });
+
+        it('Resolved question selected → bar shows [a] Activate, no [d]', () => {
+            createQuestion(db, 'q1', 'desc');
+            updateStatus(db, 1, 'Resolved');
+            const { lastFrame } = setup(db);
+            const frame = lastFrame()!;
+            expect(frame).toContain('[a] Activate');
+            expect(frame).not.toContain('[d] Defer');
+            expect(frame).not.toContain('[r] Resolve');
+        });
+
+        it('empty list → status bar omits action hints but keeps [r] Refresh', () => {
+            const { lastFrame } = setup(db);
+            const frame = lastFrame()!;
+            expect(frame).not.toContain('[d] Defer');
+            expect(frame).not.toContain('[a] Activate');
+            expect(frame).not.toContain('[a] Make Active');
+            expect(frame).toContain('[r] Refresh');
+            expect(frame).toContain('[Tab] Filter');
+            expect(frame).toContain('[q] Quit');
+        });
+
+        it('cursor move updates action hints for newly selected question', async () => {
+            createQuestion(db, 'awaiting_q', 'desc'); // Awaiting
+            createQuestion(db, 'resolved_q', 'desc');
+            updateStatus(db, 2, 'Resolved');
+            const { lastFrame, stdin } = setup(db);
+            await tick();
+
+            // Cursor on q1 (Awaiting): [d] Defer and [a] Make Active
+            expect(lastFrame()).toContain('[d] Defer');
+            expect(lastFrame()).toContain('[a] Make Active');
+
+            // Move to q2 (Resolved): [a] Activate only
+            stdin.write(ARROW_DOWN);
+            await tick();
+            expect(lastFrame()).toContain('[a] Activate');
+            expect(lastFrame()).not.toContain('[d] Defer');
+        });
+    });
+
     // ---- Callbacks ----
 
     describe('callbacks', () => {
@@ -525,6 +580,23 @@ describe('dashboard', () => {
             stdin.write('n');
             await tick();
             expect(onNewQuestion).toHaveBeenCalled();
+        });
+    });
+
+    // ---- Header context callback ----
+
+    describe('onSelectionChange', () => {
+        it('always fires with { type: "none" } — dashboard shows title only', async () => {
+            createQuestion(db, 'q1', 'my description');
+            const { onSelectionChange } = setup(db);
+            await tick();
+            expect(onSelectionChange).toHaveBeenCalledWith({ type: 'none' });
+        });
+
+        it('fires with { type: "none" } on empty list', async () => {
+            const { onSelectionChange } = setup(db);
+            await tick();
+            expect(onSelectionChange).toHaveBeenCalledWith({ type: 'none' });
         });
     });
 });

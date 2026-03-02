@@ -106,10 +106,6 @@ export default function Create({ db, onCreated, onBack }: CreateProps) {
 
     return (
         <Box flexDirection="column">
-            <Box marginBottom={1}>
-                <Text bold> New Question </Text>
-            </Box>
-
             {FIELDS.map((field, i) => {
                 const active = i === activeField;
                 return (

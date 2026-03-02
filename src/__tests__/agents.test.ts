@@ -30,7 +30,6 @@ function makeConfig(overrides?: Partial<Config>): Config {
         maxAgents: 6,
         tmuxSession: 'q-review',
         projectRoot: '/tmp/test-project',
-        questionsDir: 'Questions',
         scanInterval: 10,
         terminalApp: 'Terminal',
         agentPrompt: 'prompts/review-agent.md',

@@ -25,10 +25,11 @@ const tick = () => new Promise(r => setTimeout(r, 0));
 
 function setup(db: DB, qnum: number) {
     const onBack = vi.fn();
+    const onHeaderUpdate = vi.fn();
     const instance = render(
-        <Detail db={db} qnum={qnum} onBack={onBack} />
+        <Detail db={db} qnum={qnum} onBack={onBack} onHeaderUpdate={onHeaderUpdate} />
     );
-    return { ...instance, onBack };
+    return { ...instance, onBack, onHeaderUpdate };
 }
 
 describe('detail', () => {
@@ -51,82 +52,47 @@ describe('detail', () => {
     // ---- Rendering ----
 
     describe('rendering', () => {
-        it('shows question title and qnum', () => {
-            createQuestion(db, 'Fix auth bug', 'detailed description');
-            const { lastFrame } = setup(db, 1);
-            const frame = lastFrame();
-            expect(frame).toContain('Q1');
-            expect(frame).toContain('Fix auth bug');
-        });
-
-        it('shows question status', () => {
-            createQuestion(db, 'q1', 'desc');
-            updateStatus(db, 1, 'Active');
-            const { lastFrame } = setup(db, 1);
-            expect(lastFrame()).toContain('Active');
-        });
-
-        it('shows status with correct label for each status', () => {
-            createQuestion(db, 'q1', 'desc');
-            for (const status of ['Active', 'Awaiting', 'Deferred', 'Resolved'] as const) {
-                updateStatus(db, 1, status);
-                const { lastFrame, unmount } = setup(db, 1);
-                expect(lastFrame()).toContain(status);
-                unmount();
-            }
-        });
-
         it('shows description', () => {
             createQuestion(db, 'q1', 'This is the full description of the question');
             const { lastFrame } = setup(db, 1);
             expect(lastFrame()).toContain('This is the full description of the question');
         });
 
-        it('shows group when present', () => {
-            createQuestion(db, 'q1', 'desc', 'auth-group');
-            const { lastFrame } = setup(db, 1);
-            expect(lastFrame()).toContain('auth-group');
+        it('calls onHeaderUpdate with question context on mount', async () => {
+            const q1 = createQuestion(db, 'Fix auth bug', 'detailed description');
+            addBlocker(db, q1, createQuestion(db, 'blocker', 'desc'));
+            updateStatus(db, q1, 'Active');
+            const { onHeaderUpdate } = setup(db, q1);
+            await tick();
+            expect(onHeaderUpdate).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: 'question',
+                    qnum: q1,
+                    status: 'Active',
+                    blockers: [2],
+                    description: 'detailed description',
+                })
+            );
         });
 
-        it('omits group when null', () => {
+        it('calls onHeaderUpdate with updated status after status change', async () => {
             createQuestion(db, 'q1', 'desc');
-            const { lastFrame } = setup(db, 1);
-            expect(lastFrame()).not.toContain('Group:');
+            updateStatus(db, 1, 'Active');
+            const { stdin, onHeaderUpdate } = setup(db, 1);
+            await tick();
+            onHeaderUpdate.mockClear();
+
+            stdin.write('r'); // resolve
+            await tick();
+            expect(onHeaderUpdate).toHaveBeenCalledWith(
+                expect.objectContaining({ status: 'Resolved' })
+            );
         });
 
-        it('shows blockers and blocked questions', () => {
-            const q1 = createQuestion(db, 'blocker', 'desc');
-            const q2 = createQuestion(db, 'target', 'desc');
-            const q3 = createQuestion(db, 'downstream', 'desc');
-            addBlocker(db, q2, q1);
-            addBlocker(db, q3, q2);
-
-            const { lastFrame } = setup(db, q2);
-            const frame = lastFrame();
-            expect(frame).toContain('Blocked by:');
-            expect(frame).toContain('Q1');
-            expect(frame).toContain('Blocks:');
-            expect(frame).toContain('Q3');
-        });
-
-        it('shows multiple blockers as comma-separated list', () => {
-            const q1 = createQuestion(db, 'blocker1', 'desc');
-            const q2 = createQuestion(db, 'blocker2', 'desc');
-            const q3 = createQuestion(db, 'blocked-q', 'desc');
-            addBlocker(db, q3, q1);
-            addBlocker(db, q3, q2);
-
-            const { lastFrame } = setup(db, q3);
-            const frame = lastFrame()!;
-            expect(frame).toContain('Q1');
-            expect(frame).toContain('Q2');
-        });
-
-        it('shows "(none)" when no dependencies', () => {
-            createQuestion(db, 'q1', 'desc');
-            const { lastFrame } = setup(db, 1);
-            const frame = lastFrame();
-            expect(frame).toContain('(none)');
+        it('calls onHeaderUpdate with none for invalid qnum', async () => {
+            const { onHeaderUpdate } = setup(db, 999);
+            await tick();
+            expect(onHeaderUpdate).toHaveBeenCalledWith({ type: 'none' });
         });
 
         it('shows "No responses yet." for question with no responses', () => {
@@ -236,13 +202,126 @@ describe('detail', () => {
             expect(lastFrame()).toContain('not found');
         });
 
-        it('shows command-mode hints in status bar when not in input mode', () => {
-            createQuestion(db, 'q1', 'desc');
+        it('Awaiting question → status bar shows [d], [a] Make Active, and [r]', () => {
+            createQuestion(db, 'q1', 'desc'); // Awaiting by default
             const { lastFrame } = setup(db, 1);
             const frame = lastFrame()!;
             expect(frame).toContain('[Esc] Back');
             expect(frame).toContain('[d] Defer');
+            expect(frame).toContain('[a] Make Active');
             expect(frame).toContain('[r] Resolve');
+            expect(frame).not.toContain('[a] Activate');
+        });
+
+        it('Active question → status bar shows [d] and [r], not [a]', () => {
+            createQuestion(db, 'q1', 'desc');
+            updateStatus(db, 1, 'Active');
+            const { lastFrame } = setup(db, 1);
+            const frame = lastFrame()!;
+            expect(frame).toContain('[d] Defer');
+            expect(frame).toContain('[r] Resolve');
+            expect(frame).not.toContain('[a] Activate');
+            expect(frame).not.toContain('[a] Make Active');
+        });
+
+        it('Deferred question → status bar shows [a] and [r], not [d]', () => {
+            createQuestion(db, 'q1', 'desc');
+            updateStatus(db, 1, 'Deferred');
+            const { lastFrame } = setup(db, 1);
+            const frame = lastFrame()!;
+            expect(frame).toContain('[a] Activate');
+            expect(frame).toContain('[r] Resolve');
+            expect(frame).not.toContain('[d] Defer');
+        });
+
+        it('User_Deferred question → status bar shows [a] and [r], not [d]', () => {
+            createQuestion(db, 'q1', 'desc');
+            updateStatus(db, 1, 'User_Deferred');
+            const { lastFrame } = setup(db, 1);
+            const frame = lastFrame()!;
+            expect(frame).toContain('[a] Activate');
+            expect(frame).toContain('[r] Resolve');
+            expect(frame).not.toContain('[d] Defer');
+        });
+
+        it('Resolved question → status bar shows [a], not [d] or [r]', () => {
+            createQuestion(db, 'q1', 'desc');
+            updateStatus(db, 1, 'Resolved');
+            const { lastFrame } = setup(db, 1);
+            const frame = lastFrame()!;
+            expect(frame).toContain('[a] Activate');
+            expect(frame).not.toContain('[d] Defer');
+            expect(frame).not.toContain('[r] Resolve');
+        });
+
+        it('status bar updates after resolving an Active question', async () => {
+            createQuestion(db, 'q1', 'desc');
+            updateStatus(db, 1, 'Active');
+            const { lastFrame, stdin } = setup(db, 1);
+            await tick();
+
+            // Before: Active shows [d] and [r]
+            expect(lastFrame()).toContain('[d] Defer');
+            expect(lastFrame()).toContain('[r] Resolve');
+            expect(lastFrame()).not.toContain('[a] Activate');
+
+            // Resolve it
+            stdin.write('r');
+            await tick();
+
+            // After: Resolved shows only [a]
+            expect(lastFrame()).toContain('[a] Activate');
+            expect(lastFrame()).not.toContain('[d] Defer');
+            expect(lastFrame()).not.toContain('[r] Resolve');
+        });
+    });
+
+    // ---- Response overflow ----
+
+    describe('response overflow', () => {
+        function setupWithHeight(db: DB, qnum: number, contentHeight: number) {
+            const onBack = vi.fn();
+            const onHeaderUpdate = vi.fn();
+            const instance = render(
+                <Detail db={db} qnum={qnum} onBack={onBack} onHeaderUpdate={onHeaderUpdate} contentHeight={contentHeight} />
+            );
+            return { ...instance, onBack, onHeaderUpdate };
+        }
+
+        it('shows hidden indicator when responses exceed contentHeight', () => {
+            const q = createQuestion(db, 'q1', 'desc');
+            // Add 10 responses — with LINES_PER_RESPONSE=4 and RESERVED=5, contentHeight=13 fits 2 responses
+            for (let i = 0; i < 10; i++) {
+                addResponse(db, q, i % 2 === 0 ? 'agent' : 'user', `Message ${i}`);
+            }
+            const { lastFrame } = setupWithHeight(db, q, 13);
+            const frame = lastFrame()!;
+            expect(frame).toContain('earlier response(s) hidden');
+            // Most recent messages should be visible
+            expect(frame).toContain('Message 9');
+        });
+
+        it('shows all responses when contentHeight is large enough', () => {
+            const q = createQuestion(db, 'q1', 'desc');
+            addResponse(db, q, 'agent', 'First');
+            addResponse(db, q, 'user', 'Second');
+            const { lastFrame } = setupWithHeight(db, q, 50);
+            const frame = lastFrame()!;
+            expect(frame).toContain('First');
+            expect(frame).toContain('Second');
+            expect(frame).not.toContain('hidden');
+        });
+
+        it('shows all responses when contentHeight is not provided', () => {
+            const q = createQuestion(db, 'q1', 'desc');
+            for (let i = 0; i < 10; i++) {
+                addResponse(db, q, 'agent', `Msg ${i}`);
+            }
+            const { lastFrame } = setup(db, q);
+            const frame = lastFrame()!;
+            expect(frame).toContain('Msg 0');
+            expect(frame).toContain('Msg 9');
+            expect(frame).not.toContain('hidden');
         });
     });
 
@@ -452,25 +531,25 @@ describe('detail', () => {
     describe('status change actions', () => {
         it('"d" on Awaiting → User_Deferred', async () => {
             createQuestion(db, 'q1', 'desc'); // Awaiting by default
-            const { lastFrame, stdin } = setup(db, 1);
+            const { onHeaderUpdate, stdin } = setup(db, 1);
             await tick();
 
             stdin.write('d');
             await tick();
             expect(getQuestion(db, 1)!.status).toBe('User_Deferred');
-            expect(lastFrame()).toContain('User_Deferred');
+            expect(onHeaderUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'User_Deferred' }));
         });
 
         it('"d" on Active → User_Deferred', async () => {
             createQuestion(db, 'q1', 'desc');
             updateStatus(db, 1, 'Active');
-            const { lastFrame, stdin } = setup(db, 1);
+            const { onHeaderUpdate, stdin } = setup(db, 1);
             await tick();
 
             stdin.write('d');
             await tick();
             expect(getQuestion(db, 1)!.status).toBe('User_Deferred');
-            expect(lastFrame()).toContain('User_Deferred');
+            expect(onHeaderUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'User_Deferred' }));
         });
 
         it('"d" on already-Deferred → no-op', async () => {
@@ -498,24 +577,24 @@ describe('detail', () => {
         it('"r" on Active → Resolved', async () => {
             createQuestion(db, 'q1', 'desc');
             updateStatus(db, 1, 'Active');
-            const { lastFrame, stdin } = setup(db, 1);
+            const { onHeaderUpdate, stdin } = setup(db, 1);
             await tick();
 
             stdin.write('r');
             await tick();
             expect(getQuestion(db, 1)!.status).toBe('Resolved');
-            expect(lastFrame()).toContain('Resolved');
+            expect(onHeaderUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'Resolved' }));
         });
 
         it('"r" on Awaiting → Resolved', async () => {
             createQuestion(db, 'q1', 'desc');
-            const { lastFrame, stdin } = setup(db, 1);
+            const { onHeaderUpdate, stdin } = setup(db, 1);
             await tick();
 
             stdin.write('r');
             await tick();
             expect(getQuestion(db, 1)!.status).toBe('Resolved');
-            expect(lastFrame()).toContain('Resolved');
+            expect(onHeaderUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'Resolved' }));
         });
 
         it('"r" on already-Resolved → no-op', async () => {
@@ -532,25 +611,25 @@ describe('detail', () => {
         it('"a" on Deferred → Awaiting', async () => {
             createQuestion(db, 'q1', 'desc');
             updateStatus(db, 1, 'Deferred');
-            const { lastFrame, stdin } = setup(db, 1);
+            const { onHeaderUpdate, stdin } = setup(db, 1);
             await tick();
 
             stdin.write('a');
             await tick();
             expect(getQuestion(db, 1)!.status).toBe('Awaiting');
-            expect(lastFrame()).toContain('Awaiting');
+            expect(onHeaderUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'Awaiting' }));
         });
 
         it('"a" on Resolved → Awaiting', async () => {
             createQuestion(db, 'q1', 'desc');
             updateStatus(db, 1, 'Resolved');
-            const { lastFrame, stdin } = setup(db, 1);
+            const { onHeaderUpdate, stdin } = setup(db, 1);
             await tick();
 
             stdin.write('a');
             await tick();
             expect(getQuestion(db, 1)!.status).toBe('Awaiting');
-            expect(lastFrame()).toContain('Awaiting');
+            expect(onHeaderUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'Awaiting' }));
         });
 
         it('"a" on Active → no-op', async () => {
@@ -564,15 +643,16 @@ describe('detail', () => {
             expect(getQuestion(db, 1)!.status).toBe('Active');
         });
 
-        it('"a" on Awaiting → no-op', async () => {
+        it('"a" on Awaiting → Active', async () => {
             createQuestion(db, 'q1', 'desc');
             // Awaiting is the default status
-            const { stdin } = setup(db, 1);
+            const { onHeaderUpdate, stdin } = setup(db, 1);
             await tick();
 
             stdin.write('a');
             await tick();
-            expect(getQuestion(db, 1)!.status).toBe('Awaiting');
+            expect(getQuestion(db, 1)!.status).toBe('Active');
+            expect(onHeaderUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: 'Active' }));
         });
     });
 

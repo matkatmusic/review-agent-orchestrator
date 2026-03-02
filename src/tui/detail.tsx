@@ -2,15 +2,18 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import type { DB } from '../db.js';
-import type { Question, Response } from '../types.js';
+import type { Response } from '../types.js';
 import { getQuestion, updateStatus } from '../questions.js';
 import { listResponses, addResponse, hasUnreadAgentResponse } from '../responses.js';
 import { getBlockers, getBlocked } from '../dependencies.js';
+import { getValidActions } from './status-actions.js';
+import type { HeaderContext } from './header.js';
 
 const UNREAD = '\u2731'; // ✱
+const LINES_PER_RESPONSE = 4;
+const RESERVED_LINES = 5; // description + input area + status bar
 
 function formatTimestamp(iso: string): string {
-    // "2026-02-28T20:31:00Z" → "2026-02-28 20:31"
     return iso.replace('T', ' ').replace(/:\d{2}Z?$/, '');
 }
 
@@ -18,9 +21,11 @@ export interface DetailProps {
     db: DB;
     qnum: number;
     onBack: () => void;
+    onHeaderUpdate?: (ctx: HeaderContext) => void;
+    contentHeight?: number;
 }
 
-export default function Detail({ db, qnum, onBack }: DetailProps) {
+export default function Detail({ db, qnum, onBack, onHeaderUpdate, contentHeight }: DetailProps) {
     const [inputValue, setInputValue] = useState('');
     const [refreshKey, setRefreshKey] = useState(0);
     const [inputFocused, setInputFocused] = useState(false);
@@ -39,8 +44,23 @@ export default function Detail({ db, qnum, onBack }: DetailProps) {
     const blocked = useMemo(() => getBlocked(db, qnum), [qnum, refreshKey]);
     const unread = useMemo(() => hasUnreadAgentResponse(db, qnum), [qnum, refreshKey]);
 
+    // Report question context to the persistent header
+    useEffect(() => {
+        if (!onHeaderUpdate) return;
+        if (question) {
+            onHeaderUpdate({
+                type: 'question',
+                qnum: question.qnum,
+                status: question.status,
+                blockers: blockers.map(b => b.qnum),
+                description: question.description,
+            });
+        } else {
+            onHeaderUpdate({ type: 'none' });
+        }
+    }, [question, blockers, onHeaderUpdate]);
+
     useInput((input, key) => {
-        // Esc is handled in both modes
         if (key.escape) {
             if (inputFocused) {
                 if (inputValue.length > 0) {
@@ -76,7 +96,10 @@ export default function Detail({ db, qnum, onBack }: DetailProps) {
             return;
         }
         if (input === 'a') {
-            if (question && (question.status === 'Deferred' || question.status === 'User_Deferred' || question.status === 'Resolved')) {
+            if (question && question.status === 'Awaiting') {
+                updateStatus(db, qnum, 'Active');
+                refresh();
+            } else if (question && (question.status === 'Deferred' || question.status === 'User_Deferred' || question.status === 'Resolved')) {
                 updateStatus(db, qnum, 'Awaiting');
                 refresh();
             }
@@ -102,39 +125,15 @@ export default function Detail({ db, qnum, onBack }: DetailProps) {
         );
     }
 
-    const statusColor = statusToColor(question.status);
-    const blockersStr = blockers.length > 0
-        ? blockers.map(b => `Q${b.qnum}`).join(', ')
-        : '(none)';
-    const blockedStr = blocked.length > 0
-        ? blocked.map(b => `Q${b.qnum}`).join(', ')
-        : '(none)';
+    // Slice responses to show only the most recent ones that fit
+    const maxVisible = contentHeight
+        ? Math.max(1, Math.floor((contentHeight - RESERVED_LINES) / LINES_PER_RESPONSE))
+        : responses.length;
+    const visibleResponses = responses.slice(-maxVisible);
+    const hiddenCount = responses.length - visibleResponses.length;
 
     return (
         <Box flexDirection="column">
-            {/* Header */}
-            <Box flexDirection="column" marginBottom={1}>
-                <Text bold> Q{question.qnum}: {question.title} </Text>
-                <Box gap={2}>
-                    <Text>
-                        Status: <Text color={statusColor} bold>{question.status}</Text>
-                    </Text>
-                    {question.group && (
-                        <Text>
-                            Group: <Text dimColor>{question.group}</Text>
-                        </Text>
-                    )}
-                </Box>
-                <Box gap={2}>
-                    <Text>
-                        Blocked by: <Text dimColor>{blockersStr}</Text>
-                    </Text>
-                    <Text>
-                        Blocks: <Text dimColor>{blockedStr}</Text>
-                    </Text>
-                </Box>
-            </Box>
-
             {/* Description */}
             {question.description && (
                 <Box marginBottom={1} paddingLeft={1}>
@@ -147,14 +146,23 @@ export default function Detail({ db, qnum, onBack }: DetailProps) {
                 {responses.length === 0 ? (
                     <Text dimColor>  No responses yet.</Text>
                 ) : (
-                    responses.map((resp, i) => (
-                        <ResponseBubble
-                            key={resp.id}
-                            response={resp}
-                            isLatest={i === responses.length - 1}
-                            unread={i === responses.length - 1 && unread}
-                        />
-                    ))
+                    <>
+                        {hiddenCount > 0 && (
+                            <Text dimColor>  ... {hiddenCount} earlier response(s) hidden ...</Text>
+                        )}
+                        {visibleResponses.map((resp, i) => {
+                            const globalIdx = hiddenCount + i;
+                            const isLast = globalIdx === responses.length - 1;
+                            return (
+                                <ResponseBubble
+                                    key={resp.id}
+                                    response={resp}
+                                    isLatest={isLast}
+                                    unread={isLast && unread}
+                                />
+                            );
+                        })}
+                    </>
                 )}
             </Box>
 
@@ -181,7 +189,7 @@ export default function Detail({ db, qnum, onBack }: DetailProps) {
                 <Text dimColor>
                     {inputFocused
                         ? ' [Enter] Send  [Esc] Cancel '
-                        : ' [i/Enter] Reply  [Esc] Back  [d] Defer  [a] Activate  [r] Resolve '
+                        : ` [i/Enter] Reply  [Esc] Back  ${getValidActions(question.status).map(a => `[${a.key}] ${a.label}`).join('  ')} `
                     }
                 </Text>
             </Box>
@@ -213,15 +221,4 @@ function ResponseBubble({ response, isLatest, unread }: ResponseBubbleProps) {
             </Box>
         </Box>
     );
-}
-
-function statusToColor(status: string): string | undefined {
-    switch (status) {
-        case 'Active': return 'green';
-        case 'Awaiting': return 'blue';
-        case 'Deferred': return 'yellow';
-        case 'User_Deferred': return 'yellow';
-        case 'Resolved': return 'gray';
-        default: return undefined;
-    }
 }

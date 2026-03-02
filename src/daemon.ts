@@ -1,6 +1,7 @@
 import { DB } from './db.js';
 import type { Config } from './types.js';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 import { processPendingQueue } from './pending.js';
 import { runPipeline } from './pipeline.js';
@@ -88,7 +89,7 @@ export interface ScanResult {
  */
 export function scanCycle(config: Config, db: DB): ScanResult {
     const pendingDir = join(config.projectRoot, '.pending');
-    const dumpPath = join(config.projectRoot, config.questionsDir, 'questions.dump.sql');
+    const dumpPath = join(config.projectRoot, 'questions.dump.sql');
 
     const result: ScanResult = {
         pendingProcessed: 0,
@@ -232,19 +233,12 @@ export function scanCycle(config: Config, db: DB): ScanResult {
  */
 export function main(projectRoot?: string): void {
     const config = loadConfig(projectRoot);
-    const dbPath = join(config.projectRoot, config.questionsDir, 'questions.db');
-    const schemaPath = join(
-        // Derive submodule dir from this file's location
-        new URL('.', import.meta.url).pathname.replace(/\/src\/$/, ''),
-        'templates',
-        'schema.sql'
-    );
-
-    const seedPath = join(
-        new URL('.', import.meta.url).pathname.replace(/\/src\/$/, ''),
-        'templates',
-        'seed.sql'
-    );
+    const dbPath = join(config.projectRoot, 'questions.db');
+    // Derive submodule root from this file's location (works from both src/ and dist/)
+    const thisDir = dirname(fileURLToPath(import.meta.url));
+    const submoduleRoot = dirname(thisDir);
+    const schemaPath = join(submoduleRoot, 'templates', 'schema.sql');
+    const seedPath = join(submoduleRoot, 'templates', 'seed.sql');
 
     const db = new DB(dbPath);
     try {

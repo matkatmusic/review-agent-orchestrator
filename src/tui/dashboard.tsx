@@ -4,6 +4,9 @@ import type { DB } from '../db.js';
 import type { Question } from '../types.js';
 import { listAll, updateStatus, deleteQuestion } from '../questions.js';
 import { getUnreadQnums } from '../responses.js';
+import { getValidActions } from './status-actions.js';
+import { statusToColor } from './status-color.js';
+import type { HeaderContext } from './header.js';
 
 const STATUSES = ['All', 'Active', 'Awaiting', 'Deferred', 'User_Deferred', 'Resolved'] as const;
 type StatusFilter = (typeof STATUSES)[number];
@@ -34,9 +37,10 @@ export interface DashboardProps {
     db: DB;
     onOpenDetail: (qnum: number) => void;
     onNewQuestion: () => void;
+    onSelectionChange?: (ctx: HeaderContext) => void;
 }
 
-export default function Dashboard({ db, onOpenDetail, onNewQuestion }: DashboardProps) {
+export default function Dashboard({ db, onOpenDetail, onNewQuestion, onSelectionChange }: DashboardProps) {
     const { exit } = useApp();
     const [filter, setFilter] = useState<StatusFilter>('All');
     const [cursor, setCursor] = useState(0);
@@ -64,6 +68,11 @@ export default function Dashboard({ db, onOpenDetail, onNewQuestion }: Dashboard
     useEffect(() => {
         if (clampedCursor !== cursor) setCursor(clampedCursor);
     }, [clampedCursor, cursor]);
+
+    // Dashboard shows just the title bar — no question details in the header
+    useEffect(() => {
+        if (onSelectionChange) onSelectionChange({ type: 'none' });
+    }, [onSelectionChange]);
 
     useInput((input, key) => {
         if (input === 'q') {
@@ -107,20 +116,17 @@ export default function Dashboard({ db, onOpenDetail, onNewQuestion }: Dashboard
             }
             return;
         }
-        if (input === 'r') {
-            if (questions.length > 0 && questions[clampedCursor]) {
-                const q = questions[clampedCursor]!;
-                if (q.status !== 'Resolved') {
-                    updateStatus(db, q.qnum, 'Resolved');
-                    refresh();
-                }
-            }
+        if (input === 'r' || input === 'R') {
+            refresh();
             return;
         }
         if (input === 'a') {
             if (questions.length > 0 && questions[clampedCursor]) {
                 const q = questions[clampedCursor]!;
-                if (q.status === 'Deferred' || q.status === 'User_Deferred' || q.status === 'Resolved') {
+                if (q.status === 'Awaiting') {
+                    updateStatus(db, q.qnum, 'Active');
+                    refresh();
+                } else if (q.status === 'Deferred' || q.status === 'User_Deferred' || q.status === 'Resolved') {
                     updateStatus(db, q.qnum, 'Awaiting');
                     refresh();
                 }
@@ -132,11 +138,6 @@ export default function Dashboard({ db, onOpenDetail, onNewQuestion }: Dashboard
                 deleteQuestion(db, questions[clampedCursor]!.qnum);
                 refresh();
             }
-            return;
-        }
-        // Refresh on 'R' (shift+r is capital R)
-        if (input === 'R') {
-            refresh();
             return;
         }
     });
@@ -173,7 +174,7 @@ export default function Dashboard({ db, onOpenDetail, onNewQuestion }: Dashboard
                     questions.map((q, i) => {
                         const selected = i === clampedCursor;
                         const marker = unreadSet.has(q.qnum) ? '\u2731' : ' ';
-                        const statusColor = statusToColor(q.status);
+                        const sColor = statusToColor(q.status);
                         return (
                             <Box key={q.qnum}>
                                 <Text color={selected ? 'cyan' : undefined} bold={selected}>
@@ -189,7 +190,7 @@ export default function Dashboard({ db, onOpenDetail, onNewQuestion }: Dashboard
                                 <Text> </Text>
                                 <Text color="yellow" bold>{marker}</Text>
                                 <Text>  </Text>
-                                <Text color={statusColor}>{q.status.padEnd(8)}</Text>
+                                <Text color={sColor}>{q.status.padEnd(8)}</Text>
                                 {q.group && <Text dimColor>  [{q.group}]</Text>}
                             </Box>
                         );
@@ -200,20 +201,15 @@ export default function Dashboard({ db, onOpenDetail, onNewQuestion }: Dashboard
             {/* Status bar */}
             <Box marginTop={1} borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false}>
                 <Text dimColor>
-                    {' [Enter] View  [n] New  [d] Defer  [a] Activate  [r] Resolve  [x] Delete  [Tab] Filter  [R] Refresh  [q] Quit '}
+                    {(() => {
+                        const selected = questions.length > 0 ? questions[clampedCursor] : undefined;
+                        const actionHints = selected
+                            ? getValidActions(selected.status).filter(a => a.key !== 'r').map(a => `[${a.key}] ${a.label}`).join('  ')
+                            : '';
+                        return ` [Enter] View  [n] New  ${actionHints}${actionHints ? '  ' : ''}[x] Delete  [Tab] Filter  [r] Refresh  [q] Quit `;
+                    })()}
                 </Text>
             </Box>
         </Box>
     );
-}
-
-function statusToColor(status: string): string | undefined {
-    switch (status) {
-        case 'Active': return 'green';
-        case 'Awaiting': return 'blue';
-        case 'Deferred': return 'yellow';
-        case 'User_Deferred': return 'yellow';
-        case 'Resolved': return 'gray';
-        default: return undefined;
-    }
 }

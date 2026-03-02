@@ -23,7 +23,7 @@ program
 function openDB(): DB {
     const root = resolveProjectRoot();
     const config = loadConfig(root);
-    const dbPath = join(root, config.questionsDir, 'questions.db');
+    const dbPath = join(root, 'questions.db');
     const db = new DB(dbPath);
     db.open();
     db.migrate(join(__dirname, '..', 'templates', 'schema.sql'));

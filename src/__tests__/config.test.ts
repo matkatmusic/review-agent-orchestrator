@@ -87,7 +87,6 @@ describe('config', () => {
 
             expect(config.maxAgents).toBe(6);
             expect(config.tmuxSession).toBe('q-review');
-            expect(config.questionsDir).toBe('Questions');
             expect(config.scanInterval).toBe(10);
             expect(config.projectRoot).toBe(tmpDir);
         });

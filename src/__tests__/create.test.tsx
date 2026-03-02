@@ -52,9 +52,12 @@ describe('create', () => {
     // ---- Rendering ----
 
     describe('rendering', () => {
-        it('shows "New Question" header', () => {
+        it('shows Title field with cursor indicator', () => {
             const { lastFrame } = setup(db);
-            expect(lastFrame()).toContain('New Question');
+            // "New Question" header moved to parent Header component;
+            // Create shows form fields starting with Title
+            expect(lastFrame()).toContain('Title:');
+            expect(lastFrame()).toContain('\u25B8'); // cursor on first field
         });
 
         it('shows all field labels', () => {

@@ -416,7 +416,39 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 ---
 
-## Stage 16: V1 Migration Script
+## Stage 16: TUI — Header Title Bar
+
+**Goal**: Clear the terminal and display a persistent header title bar when the app loads.
+
+- [ ] On app launch, clear the terminal window (ANSI escape or Ink's `clearTerminal` equivalent)
+- [ ] Render a horizontal line spanning the full terminal width at the top of the screen, with "Review Agent Orchestrator" centered within it (e.g., `────── Review Agent Orchestrator ──────`)
+- [ ] The header title bar must remain fixed at the top, always visible — it should not scroll with content
+- [ ] All existing screens (dashboard, detail, create) render below the header
+- [ ] Write tests: `src/__tests__/header.test.tsx`
+  - Header renders "Review Agent Orchestrator" text
+  - Horizontal line fills remaining terminal width
+  - Header is present on dashboard, detail, and create screens
+
+**Verify**: Launch TUI → terminal clears, header bar visible at top. Navigate between screens → header persists. Scroll content → header stays fixed.
+
+---
+
+## Stage 16b: TUI — Question Header Shows Status and Agent Assignment
+
+**Goal**: The detail view header for a question should show the current status and whether an agent is actively assigned to it in a tmux pane.
+
+- [ ] In the detail view header, display the question's current status (already done) plus an "Agent: active" / "Agent: none" indicator
+- [ ] Check for an active agent by looking for a lockfile in `<projectRoot>/.question-review-locks/Q<num>.lock` AND verifying the pane is alive (reuse `isAgentRunning()` from `src/agents.ts`)
+- [ ] Agent indicator should update on refresh (3-second poll already exists in detail.tsx)
+- [ ] Write tests: `src/__tests__/detail.test.tsx`
+  - Question with no lockfile → shows "Agent: none" or equivalent
+  - Question with active lockfile + live pane → shows "Agent: active" or equivalent
+
+**Verify**: Launch TUI with daemon running, open an Active question that has a spawned agent → header shows agent indicator. Kill the agent pane → indicator updates to "none" after poll interval.
+
+---
+
+## Stage 17: V1 Migration Script
 
 **Goal**: Import all 152 existing question files into the database.
 
@@ -438,7 +470,7 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 ---
 
-## Stage 17: Setup & Integration
+## Stage 18: Setup & Integration
 
 **Goal**: Fresh clone → working system in one command.
 
@@ -468,7 +500,7 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 ---
 
-## Stage 18: Cleanup
+## Stage 19: Cleanup
 
 **Goal**: Remove v1 artifacts, finalize git tracking.
 
@@ -481,3 +513,31 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 - [ ] Run full test suite: `npm test`
 
 **Verify**: `git status` clean. Fresh clone + `setup.sh` → full working system. All tests pass.
+
+---
+
+# Bugs
+
+---
+
+## BUG-001: Detail status bar shows inapplicable actions for current question status — FIXED
+
+**Status**: RESOLVED (Stage 15b)
+
+**Fix**: Created shared `getValidActions()` in `src/tui/status-actions.ts`. Both `detail.tsx` and `dashboard.tsx` now compute status bar actions dynamically based on the current question status. 6 new tests in detail.test.tsx, 5 in dashboard.test.tsx. All 335 tests pass.
+
+---
+
+## BUG-002: No visible feedback when status changes and header is scrolled off-screen — FIXED
+
+**Status**: RESOLVED (Stage 16 — persistent header)
+
+**Fix**: Implemented a persistent 3-line header in `src/tui/header.tsx` that stays fixed at the top of the terminal via a two-zone layout in `app.tsx` using `useStdout()` for terminal dimensions. The header always shows `Q#`, status (color-coded), blocked-by list, and description — so status changes are always visible. Child screens report context to the header via callbacks (`onHeaderUpdate`, `onSelectionChange`). Detail view slices responses to fit available height. 15 new header tests + updated detail/dashboard/create tests. All 335 tests pass.
+
+---
+
+## BUG-003: Seed data gives incorrect instructions — tells user to type "resolve" instead of pressing `r` — FIXED
+
+**Status**: RESOLVED
+
+**Fix**: Updated `templates/seed.sql` — replaced `type "resolve"` with `press [r]` in both the question description (line 4) and the agent response body (line 16). Also mentions `[i]` for reply mode.

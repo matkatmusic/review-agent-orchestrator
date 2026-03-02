@@ -39,7 +39,6 @@ export interface Config {
     maxAgents: number;
     tmuxSession: string;
     projectRoot: string;
-    questionsDir: string;
     scanInterval: number;
     terminalApp: string;
     agentPrompt: string;
