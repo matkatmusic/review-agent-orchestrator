@@ -1,0 +1,45 @@
+You are reviewing a software architecture proposal. Be CONCISE — one short sentence per issue found. No filler.
+
+## Proposal: Merge TUI + Daemon into Single Process
+
+An Ink/React terminal app (TUI) manages AI coding agents in tmux panes. Currently a separate daemon process runs a scan loop (spawn/kill agents, promote questions, process pending queue). The proposal merges them.
+
+### Key Changes
+1. Enable SQLite WAL mode so agents (separate tmux processes) write to DB directly via CLI tool (qr-tool), eliminating a `.pending/` JSON file queue
+2. Replace lockfiles on disk (`.question-review-locks/Q<n>.lock`) with an `agent_sessions` DB table
+3. Run `scanCycle()` (the daemon's core loop) inside a React `useEffect` timer
+4. qr-tool opens its own DB connection per invocation instead of writing JSON files
+
+### Current Flow
+- Agents write JSON to `.pending/` folder (atomic file writes)
+- Daemon reads `.pending/`, writes to SQLite, runs pipeline (enforce blockers, promote questions, spawn agents)
+- TUI polls SQLite every 3s for display
+- Lockfiles track which tmux pane belongs to which question
+
+### Proposed Flow
+- Agents write directly to SQLite (WAL mode) via qr-tool
+- TUI runs scanCycle() on a timer internally
+- `agent_sessions` table replaces lockfiles
+- Single process for everything except agents themselves
+
+### `agent_sessions` Table
+```sql
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    qnum        INTEGER PRIMARY KEY,
+    pane_id     TEXT NOT NULL,
+    head_commit TEXT NOT NULL DEFAULT 'unknown',
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+```
+
+## Your Task
+
+Find flaws, gotchas, bugs, and better alternatives. Consider:
+1. SQLite WAL concurrency: multiple agents writing simultaneously, SQLITE_BUSY handling, connection open/close overhead per qr-tool invocation
+2. scanCycle() in useEffect: it calls execSync (git, tmux) — will it block/freeze the Ink React render loop?
+3. Single-process failure: crash kills UI AND agent management (currently independent)
+4. Lockfiles vs DB table: lockfiles survive DB corruption; DB table doesn't
+5. Would an IPC mechanism (Unix sockets, named pipes, etc.) be better than SQLite WAL for agent-to-TUI communication?
+6. Missing details: DB dump export, ensureAutocompact(), db.seed(), detectNewCommits() — are these addressed?
+
+Output format: One short sentence per issue. Group by category. No lengthy explanations.
