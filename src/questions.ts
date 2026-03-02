@@ -76,6 +76,14 @@ export function getGroup(db: DB, group: string): Question[] {
     );
 }
 
+export function deleteQuestion(db: DB, qnum: number): void {
+    db.transaction(() => {
+        db.run('DELETE FROM responses WHERE qnum = ?', qnum);
+        db.run('DELETE FROM dependencies WHERE blocked_qnum = ? OR blocker_qnum = ?', qnum, qnum);
+        db.run('DELETE FROM questions WHERE qnum = ?', qnum);
+    });
+}
+
 export function isGroupResolved(db: DB, group: string): boolean {
     const row = db.get<{ total: number; resolved: number }>(
         `SELECT COUNT(*) AS total,

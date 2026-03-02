@@ -1,0 +1,131 @@
+You are performing a THIRD-ROUND verification of a TypeScript/Node.js application called "Question Review Orchestrator v2". Two previous rounds of multi-AI debate have been completed:
+
+- Round 1 found 21 issues (A-U). 16 were fixed, 3 were skipped.
+- Round 2 re-verified those fixes and found 13 additional issues. All 13 were addressed: 10 implemented, 3 skipped/investigated.
+
+Your job in this round is twofold:
+(1) Verify the 13 round 2 fixes were implemented correctly and did not introduce regressions.
+(2) Find any NEW issues that remain in the codebase.
+
+## System Summary
+
+SQLite-backed question tracking system with: DB layer (better-sqlite3, WAL mode), CRUD modules (questions, responses, dependencies), pipeline (enforceBlocked/autoUnblock/promoteAwaiting), pending queue (.pending/ JSON files), tmux agent management, daemon scan cycle, TUI (Ink/React), and CLI tool (qr-tool). ~296 tests across 14 files.
+
+---
+
+## The 13 Round 2 Fixes to Verify
+
+For each fix, check: (1) was it implemented correctly? (2) did it introduce new bugs? (3) are the tests adequate?
+
+### R2-1. addResponse() atomicity (responses.ts)
+INSERT into responses + UPDATE on questions tracking columns now wrapped in db.transaction(). Verify: transaction boundary is correct, error rollback works, no nested transaction issues with the DB class.
+
+### R2-2. cmdStatus() missing User_Deferred (qr-tool-commands.ts)
+User_Deferred added to counts initializer and output. Verify: the count is correct, the output formatting aligns with other statuses, no off-by-one in the total.
+
+### R2-3. blockByGroup() bypasses cycle detection (dependencies.ts)
+Replaced bulk INSERT OR IGNORE with iteration through addBlocker(). Verify: (a) cycles are correctly skipped without throwing, (b) self-blocking is still prevented, (c) performance is acceptable for typical group sizes, (d) the function still filters out the blocked qnum itself.
+
+### R2-4. Schema migration for existing DBs — SKIPPED
+Decision: greenfield deployment, no pre-existing v2 databases. Verify this assumption is still valid — is there any path where a DB is created with the old schema and then upgraded?
+
+### R2-5. cmdList() unsafe status cast (qr-tool-commands.ts)
+Added VALID_STATUSES validation before querying. Verify: the validation array matches the QuestionStatus type exactly, error message is clear, edge cases (empty string, undefined) handled.
+
+### R2-6. qr-tool respond hardcodes author (qr-tool-commands.ts, types.ts)
+Added user-respond command. PendingAction type widened to include 'user'|'agent' author. Verify: (a) CLI routing is correct for both commands, (b) the pending file written by user-respond sets author='user', (c) addResponse() uses the author from the pending action correctly, (d) last_responder column reflects the correct author.
+
+### R2-7. detectNewCommits repeated notifications (daemon.ts)
+Updates lockfile headCommit after sending notification. Verify: (a) createLockfile() is called with the correct new headCommit, (b) the update happens only on successful send, (c) race condition: what if the daemon crashes between sending and updating the lockfile?
+
+### R2-8. Spawned agents not receiving initial prompt (daemon.ts, agents.ts)
+Added sendInitialPrompt() calls after spawn paths in scanCycle(). Verify: (a) the prompt content includes qnum, title, and description, (b) the timing is correct — does the claude CLI have time to start reading stdin before sendKeys fires? (c) is there a sleep/delay, or does tmux buffer handle this? (d) what happens if sendInitialPrompt() fails?
+
+### R2-9. Orphaned agents on manual defer/resolve (daemon.ts)
+Added orphan cleanup step in scanCycle(). Iterates lockfiles; kills agent if question status is not Active. Verify: (a) the cleanup runs at the right point in the cycle (after enforce block but before reprompts), (b) Awaiting questions with lockfiles are correctly identified as orphans, (c) the kill + lockfile removal is atomic enough, (d) killedOrphans field is correctly reported.
+
+### R2-10. dist/ may be stale (daemon.sh)
+daemon.sh auto-rebuilds if dist/ is missing or stale. Verify: (a) the staleness check compares src/**/*.ts(x) mtimes against dist/, (b) build failure aborts the daemon, (c) the check runs only once at startup or every cycle?
+
+### R2-11. Dashboard cursor clamping during render (dashboard.tsx)
+Moved setCursor() from render body to useEffect. Verify: (a) the useEffect dependencies are correct (should depend on questions.length and cursor), (b) no infinite loop from the effect setting state that triggers itself, (c) the clamping logic is correct for edge cases (empty list, list shrinks below cursor).
+
+### R2-12. hasUnreadAgentResponse vs needsReprompt semantic split — INVESTIGATED
+Confirmed correct by design: hasUnreadAgentResponse() for TUI markers, needsReprompt() for daemon delivery. Verify: (a) are there any remaining call sites that use the wrong function for their context? (b) after getUnreadQnums() bulk query was added, is hasUnreadAgentResponse() still used anywhere?
+
+### R2-13. TUI polling N+1 query (responses.ts, dashboard.tsx)
+Replaced N+1 hasUnreadAgentResponse() calls with getUnreadQnums() bulk query. Verify: (a) the SQL is correct — does it actually find unread agent responses? (b) the bulk result is used correctly in the dashboard, (c) are there other N+1 patterns remaining in the TUI (e.g., detail view)?
+
+---
+
+## 3 Round 2 Skipped Items — Re-evaluate
+
+### R2-4. Schema migration (skipped: greenfield)
+Still safe to skip? Has any new code path emerged that creates a DB and later expects the new columns?
+
+### R2-12. Semantic split (investigated: correct by design)
+The investigation also explored cross-machine resumption via SQL dump. Verify this actually works: does importDump() recreate the tracking columns? Does the daemon correctly auto-spawn for Active questions with no lockfile?
+
+### Round 1 skips still standing:
+- T. parseShellConfig uppercase-only — still acceptable?
+- U. detectNewCommits garbling — R2-7 fixed the spam issue; garbling remains an inherent tmux limitation. Still acceptable?
+
+---
+
+## What to Look For
+
+### 1. Regression bugs from the 13 round 2 fixes
+- R2-1: Does db.transaction() in addResponse() interact correctly with the daemon's scan cycle? Could the transaction hold a write lock that blocks pending queue processing?
+- R2-3: blockByGroup() now iterates — if addBlocker() throws for a non-cycle reason (e.g., FK violation), does the iteration abort or continue? Should it collect errors?
+- R2-6: With two separate CLI commands (respond vs user-respond), is there any shared code path that still defaults to 'agent'?
+- R2-8: sendInitialPrompt() uses sendKeys() under the hood. If the agent pane hasn't fully initialized yet, the keystrokes could be lost or interpreted by the shell rather than claude CLI. Is there a readiness check?
+- R2-9: Orphan cleanup kills agents for non-Active questions. What about questions that transition Active -> Deferred -> Active quickly (via autoUnblock)? Could the orphan check kill an agent that is about to become Active again in the same cycle?
+- R2-13: getUnreadQnums() bulk query — does the SQL handle the case where a question has zero responses?
+
+### 2. New issues not caught in rounds 1 or 2
+Focus on:
+- **Error handling in scanCycle**: If any step throws, does the cycle continue or abort entirely? Is there try/catch around individual steps?
+- **Concurrent daemon instances**: What prevents two daemon.sh processes from running simultaneously? File lock? PID check?
+- **Pending queue race with qr-tool**: qr-tool writes .pending files while daemon reads them. Is there an atomic write pattern (write to temp + rename)?
+- **TUI state consistency**: Dashboard polls every 3 seconds but detail view also polls. If the user is in detail view and the question gets resolved by the daemon, does the TUI handle the missing question gracefully?
+- **Config validation**: parseShellConfig() reads config.sh. What happens if required variables are missing? Undefined values propagated?
+- **Lockfile corruption**: createLockfile() writes JSON. If the daemon crashes mid-write, the next cycle reads a partial JSON file. Is there error handling in readLockfile()?
+- **Test coverage gaps**: Are there tests for the interaction between orphan cleanup and auto-unblock in the same cycle? Tests for getUnreadQnums() returning empty results? Tests for user-respond pending action processing?
+- **Memory leaks in TUI**: useEffect setInterval — is the interval properly cleaned up on unmount? Both dashboard and detail components.
+- **Type widening side effects**: PendingAction author field changed from literal 'agent' to 'user'|'agent'. Are all consumers of PendingAction handling both values?
+- **SQL injection surface**: Any place where user-provided strings (question titles, response text, group names) are interpolated into SQL rather than parameterized?
+
+### 3. Cross-cutting verification
+- Is the QuestionStatus type used consistently everywhere? Any remaining string literals that should use the type?
+- Are all db.run() calls that modify multiple rows/tables wrapped in transactions where they should be?
+- Does the daemon's scan cycle order (pending -> pipeline -> spawn/reprompt -> orphan cleanup -> dump) have any ordering bugs?
+- Is the dirty flag set correctly by all write operations, ensuring exportDump() fires when needed?
+
+---
+
+## Output Format
+
+### Section A: Round 2 Fix Verification
+
+For each of the 13 fixes, state one of:
+- **CONFIRMED CORRECT**: Fix is properly implemented and tested.
+- **PARTIAL**: Fix addresses the core issue but has a secondary problem. Describe it.
+- **INCORRECT**: Fix does not resolve the original issue or introduces a regression. Describe it.
+
+### Section B: New Findings
+
+For each new finding, state:
+- **ID**: Sequential number (1, 2, 3...)
+- **TYPE**: REGRESSION (caused by a round 2 fix), NEW (missed in rounds 1 and 2), or SKIP-RISK (about a skipped item)
+- **SEVERITY**: CRITICAL / HIGH / MEDIUM / LOW
+- **Location**: file:line (be specific)
+- **Issue**: Clear description with evidence from the code
+- **Fix**: Recommended resolution
+
+### Section C: Overall Assessment
+
+Rate the codebase health on a scale of 1-5 after two rounds of fixes. Note any systemic patterns (positive or negative) you observe.
+
+---
+
+Be specific and reference actual code. Do not parrot the fix descriptions back — only report problems or confirmations based on what you see in the source code below.

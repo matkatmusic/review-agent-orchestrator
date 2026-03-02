@@ -6,6 +6,7 @@ import {
     writeFileSync,
     unlinkSync,
     readdirSync,
+    renameSync,
 } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
@@ -29,6 +30,11 @@ function locksDir(config: Config): string {
 /** Resolve the lockfile path for a given qnum. */
 function lockfilePath(config: Config, qnum: number): string {
     return join(locksDir(config), `Q${qnum}.lock`);
+}
+
+/** Resolve the initial prompt file path for a given qnum. */
+function promptFilePath(config: Config, qnum: number): string {
+    return join(locksDir(config), `Q${qnum}.prompt`);
 }
 
 /** Get the current HEAD commit hash from the project root. */
@@ -81,7 +87,7 @@ export function buildInitialPrompt(
 /**
  * Build the claude CLI command that launch-agent.sh will execute.
  */
-export function buildClaudeCommand(config: Config, qnum: number): string {
+export function buildClaudeCommand(config: Config, qnum: number, initialPromptFile?: string): string {
     const submoduleDir = getSubmoduleDir();
     const promptFile = join(submoduleDir, config.agentPrompt);
     const launchScript = join(submoduleDir, 'scripts', 'launch-agent.sh');
@@ -91,6 +97,7 @@ export function buildClaudeCommand(config: Config, qnum: number): string {
     const parts = [
         `bash ${esc(launchScript)}`,
         esc(promptFile),
+        esc(initialPromptFile ?? ''),
         '--worktree',
         `--add-dir ${esc(mainTree)}`,
     ];
@@ -111,7 +118,10 @@ export function createLockfile(config: Config, data: LockfileData): void {
     if (!existsSync(dir)) {
         mkdirSync(dir, { recursive: true });
     }
-    writeFileSync(lockfilePath(config, data.qnum), JSON.stringify(data, null, 2));
+    const finalPath = lockfilePath(config, data.qnum);
+    const tmpPath = finalPath + '.tmp';
+    writeFileSync(tmpPath, JSON.stringify(data, null, 2));
+    renameSync(tmpPath, finalPath);
 }
 
 /**
@@ -187,8 +197,31 @@ export function cleanupStaleLocks(config: Config): number[] {
 }
 
 /**
+ * Write the initial prompt to a file so launch-agent.sh can pass it via -p.
+ * This avoids the race condition of sending the prompt via sendKeys before
+ * the claude CLI is ready to read stdin.
+ */
+function writeInitialPromptFile(
+    config: Config,
+    qnum: number,
+    title: string,
+    description: string,
+): string {
+    const dir = locksDir(config);
+    if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+    }
+    const filePath = promptFilePath(config, qnum);
+    const prompt = buildInitialPrompt(config, qnum, title, description);
+    writeFileSync(filePath, prompt);
+    return filePath;
+}
+
+/**
  * Spawn a new agent for an Active question.
- * Creates a tmux pane, launches claude CLI, and writes a lockfile.
+ * Creates a tmux pane, launches claude CLI with initial prompt, and writes a lockfile.
+ * The initial prompt is written to a file and passed via launch-agent.sh's -p flag,
+ * eliminating the race condition of sending via sendKeys before claude is ready.
  * Returns the lockfile data on success.
  */
 export function spawnAgent(
@@ -197,12 +230,15 @@ export function spawnAgent(
     title: string,
     description: string,
 ): LockfileData {
+    // Write initial prompt to file for launch-agent.sh to pass via -p
+    const initialPromptFile = writeInitialPromptFile(config, qnum, title, description);
+
     // Ensure tmux session exists
     if (!hasSession(config.tmuxSession)) {
         createSession(config.tmuxSession, { cwd: config.projectRoot });
         // The initial pane is created by createSession; use it for the first agent
         const paneId = getSessionFirstPane(config.tmuxSession);
-        const cmd = buildClaudeCommand(config, qnum);
+        const cmd = buildClaudeCommand(config, qnum, initialPromptFile);
         sendKeys(paneId, cmd);
 
         const data: LockfileData = {
@@ -217,7 +253,7 @@ export function spawnAgent(
 
     // Session exists — split a new pane
     const paneId = splitWindow(config.tmuxSession, { cwd: config.projectRoot });
-    const cmd = buildClaudeCommand(config, qnum);
+    const cmd = buildClaudeCommand(config, qnum, initialPromptFile);
     sendKeys(paneId, cmd);
 
     const data: LockfileData = {

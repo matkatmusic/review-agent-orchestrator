@@ -15,7 +15,6 @@ import {
     readLockfile,
     listLockfiles,
     createLockfile,
-    sendInitialPrompt,
 } from './agents.js';
 import { sendKeys, isPaneAlive } from './tmux.js';
 import { loadConfig } from './config.js';
@@ -105,93 +104,111 @@ export function scanCycle(config: Config, db: DB): ScanResult {
     };
 
     // 1. Process pending queue (.pending/ → DB writes)
-    result.pendingProcessed = processPendingQueue(db, pendingDir);
-    if (result.pendingProcessed > 0) {
-        log(`Processed ${result.pendingProcessed} pending action(s)`);
+    try {
+        result.pendingProcessed = processPendingQueue(db, pendingDir);
+        if (result.pendingProcessed > 0) {
+            log(`Processed ${result.pendingProcessed} pending action(s)`);
+        }
+    } catch (err) {
+        log(`Pending queue error: ${err}`);
     }
 
     // 2. Run pipeline: enforce blocked → auto-unblock → promote awaiting
-    const pipeline = runPipeline(db, config.maxAgents);
-    result.enforced = pipeline.enforced;
-    result.unblocked = pipeline.unblocked;
-    result.promoted = pipeline.promoted;
+    try {
+        const pipeline = runPipeline(db, config.maxAgents);
+        result.enforced = pipeline.enforced;
+        result.unblocked = pipeline.unblocked;
+        result.promoted = pipeline.promoted;
 
-    // Kill agents for questions that were enforced to Deferred
-    for (const qnum of result.enforced) {
-        if (isAgentRunning(config, qnum)) {
-            killAgent(config, qnum);
-            result.killedByEnforce.push(qnum);
-            log(`Killed agent for Q${qnum} (blocked → Deferred)`);
+        // Kill agents for questions that were enforced to Deferred
+        for (const qnum of result.enforced) {
+            if (isAgentRunning(config, qnum)) {
+                killAgent(config, qnum);
+                result.killedByEnforce.push(qnum);
+                log(`Killed agent for Q${qnum} (blocked → Deferred)`);
+            }
         }
-    }
 
-    // Kill orphaned agents whose questions are no longer Active (e.g. user
-    // manually deferred or resolved via TUI while agent was running)
-    const locks = listLockfiles(config);
-    for (const lock of locks) {
-        if (result.killedByEnforce.includes(lock.qnum)) continue;
-        const q = getQuestion(db, lock.qnum);
-        if (q && q.status !== 'Active') {
-            killAgent(config, lock.qnum);
-            result.killedOrphans.push(lock.qnum);
-            log(`Killed orphaned agent for Q${lock.qnum} (status: ${q.status})`);
+        // Kill orphaned agents whose questions are no longer Active (e.g. user
+        // manually deferred, resolved, or deleted via TUI while agent was running)
+        const locks = listLockfiles(config);
+        for (const lock of locks) {
+            if (result.killedByEnforce.includes(lock.qnum)) continue;
+            const q = getQuestion(db, lock.qnum);
+            if (!q || q.status !== 'Active') {
+                killAgent(config, lock.qnum);
+                result.killedOrphans.push(lock.qnum);
+                log(`Killed orphaned agent for Q${lock.qnum} (${q ? `status: ${q.status}` : 'deleted'})`);
+            }
         }
-    }
 
-    if (result.unblocked.length > 0) {
-        log(`Unblocked: ${result.unblocked.map(q => `Q${q}`).join(', ')}`);
-    }
-    if (result.promoted.length > 0) {
-        log(`Promoted: ${result.promoted.map(q => `Q${q}`).join(', ')}`);
+        if (result.unblocked.length > 0) {
+            log(`Unblocked: ${result.unblocked.map(q => `Q${q}`).join(', ')}`);
+        }
+        if (result.promoted.length > 0) {
+            log(`Promoted: ${result.promoted.map(q => `Q${q}`).join(', ')}`);
+        }
+    } catch (err) {
+        log(`Pipeline error: ${err}`);
     }
 
     // 3. Spawn/re-prompt agents for Active questions
-    const active = listByStatus(db, 'Active');
-    for (const q of active) {
-        try {
-            if (isAgentRunning(config, q.qnum)) {
-                // Agent is alive — check if there's a new user response to deliver
-                if (!needsReprompt(db, q.qnum)) {
-                    continue;
-                }
-                // There's a user response the agent hasn't seen yet — re-prompt
-                const sent = repromptAgent(config, q.qnum);
-                if (sent) {
-                    markReprompted(db, q.qnum);
-                    result.reprompted.push(q.qnum);
-                    log(`Re-prompted agent for Q${q.qnum}`);
+    try {
+        const active = listByStatus(db, 'Active');
+        for (const q of active) {
+            try {
+                if (isAgentRunning(config, q.qnum)) {
+                    // Agent is alive — check if there's a new user response to deliver
+                    if (!needsReprompt(db, q.qnum)) {
+                        continue;
+                    }
+                    // There's a user response the agent hasn't seen yet — re-prompt
+                    const sent = repromptAgent(config, q.qnum);
+                    if (sent) {
+                        markReprompted(db, q.qnum);
+                        result.reprompted.push(q.qnum);
+                        log(`Re-prompted agent for Q${q.qnum}`);
+                    } else {
+                        // Pane died — spawn a new agent (prompt passed via file, no sendKeys race)
+                        const question = getQuestion(db, q.qnum);
+                        if (question) {
+                            spawnAgent(config, q.qnum, question.title, question.description);
+                            result.spawned.push(q.qnum);
+                            log(`Spawned agent pane: Q${q.qnum} — ${question.title}`);
+                        }
+                    }
                 } else {
-                    // Pane died — spawn a new agent
+                    // No agent running — spawn one (prompt passed via file, no sendKeys race)
                     const question = getQuestion(db, q.qnum);
                     if (question) {
                         spawnAgent(config, q.qnum, question.title, question.description);
-                        sendInitialPrompt(config, q.qnum, question.title, question.description);
                         result.spawned.push(q.qnum);
                         log(`Spawned agent pane: Q${q.qnum} — ${question.title}`);
                     }
                 }
-            } else {
-                // No agent running — spawn one
-                const question = getQuestion(db, q.qnum);
-                if (question) {
-                    spawnAgent(config, q.qnum, question.title, question.description);
-                    sendInitialPrompt(config, q.qnum, question.title, question.description);
-                    result.spawned.push(q.qnum);
-                    log(`Spawned agent pane: Q${q.qnum} — ${question.title}`);
-                }
+            } catch (err) {
+                log(`Failed to manage agent for Q${q.qnum}: ${err}`);
             }
-        } catch (err) {
-            log(`Failed to manage agent for Q${q.qnum}: ${err}`);
         }
+    } catch (err) {
+        log(`Agent management error: ${err}`);
     }
 
     // 4. Detect new commits and send rebase signals
-    detectNewCommits(config);
+    try {
+        detectNewCommits(config);
+    } catch (err) {
+        log(`Commit detection error: ${err}`);
+    }
 
     // 5. Cleanup stale lockfiles
-    result.staleCleaned = cleanupStaleLocks(config);
-    if (result.staleCleaned.length > 0) {
-        log(`Cleaned stale locks: ${result.staleCleaned.map(q => `Q${q}`).join(', ')}`);
+    try {
+        result.staleCleaned = cleanupStaleLocks(config);
+        if (result.staleCleaned.length > 0) {
+            log(`Cleaned stale locks: ${result.staleCleaned.map(q => `Q${q}`).join(', ')}`);
+        }
+    } catch (err) {
+        log(`Stale lock cleanup error: ${err}`);
     }
 
     // 6. Export dump if DB was modified

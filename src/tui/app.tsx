@@ -79,6 +79,11 @@ function main() {
         process.exit(1);
     }
 
+    process.on('SIGINT', () => {
+        db.close();
+        process.exit(0);
+    });
+
     const instance = render(<App db={db} />);
 
     instance.waitUntilExit().then(() => {

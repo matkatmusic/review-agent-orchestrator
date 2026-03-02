@@ -3,7 +3,7 @@ import React from 'react';
 import { render } from 'ink-testing-library';
 import Dashboard from '../tui/dashboard.js';
 import { DB } from '../db.js';
-import { createQuestion, getQuestion, updateStatus } from '../questions.js';
+import { createQuestion, getQuestion, updateStatus, deleteQuestion } from '../questions.js';
 import { addResponse } from '../responses.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -432,6 +432,32 @@ describe('dashboard', () => {
             stdin.write('a');
             await tick();
             expect(getQuestion(db, 1)!.status).toBe('Active');
+        });
+
+        it('"x" deletes the selected question from DB', async () => {
+            createQuestion(db, 'to_delete', 'desc');
+            createQuestion(db, 'keep_me', 'desc');
+            const { lastFrame, stdin } = setup(db);
+            await tick();
+
+            // Cursor is on q1 — delete it
+            stdin.write('x');
+            await tick();
+            expect(getQuestion(db, 1)).toBeUndefined();
+            // q2 should still exist
+            expect(getQuestion(db, 2)).toBeDefined();
+            // Dashboard should no longer show the deleted question
+            expect(lastFrame()).not.toContain('to_delete');
+            expect(lastFrame()).toContain('keep_me');
+        });
+
+        it('"x" on empty list → no-op', async () => {
+            const { stdin } = setup(db);
+            await tick();
+
+            // Should not crash
+            stdin.write('x');
+            await tick();
         });
     });
 

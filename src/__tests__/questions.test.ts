@@ -9,7 +9,10 @@ import {
     getActiveCount,
     getGroup,
     isGroupResolved,
+    deleteQuestion,
 } from '../questions.js';
+import { addResponse, listResponses } from '../responses.js';
+import { addBlocker, getBlockers } from '../dependencies.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -237,5 +240,43 @@ describe('questions', () => {
             "SELECT value FROM metadata WHERE key = 'lastQuestionCreated'"
         );
         expect(meta?.value).toBe('0');
+    });
+
+    // ---- deleteQuestion ----
+
+    it('deleteQuestion removes the question from the DB', () => {
+        const qnum = createQuestion(db, 'to_delete', 'desc');
+        expect(getQuestion(db, qnum)).toBeDefined();
+
+        deleteQuestion(db, qnum);
+        expect(getQuestion(db, qnum)).toBeUndefined();
+    });
+
+    it('deleteQuestion removes associated responses', () => {
+        const qnum = createQuestion(db, 'with_responses', 'desc');
+        addResponse(db, qnum, 'user', 'hello');
+        addResponse(db, qnum, 'agent', 'hi back');
+        expect(listResponses(db, qnum)).toHaveLength(2);
+
+        deleteQuestion(db, qnum);
+        expect(getQuestion(db, qnum)).toBeUndefined();
+        // Responses should also be gone
+        expect(listResponses(db, qnum)).toHaveLength(0);
+    });
+
+    it('deleteQuestion removes associated dependencies', () => {
+        const q1 = createQuestion(db, 'blocker', 'desc');
+        const q2 = createQuestion(db, 'blocked', 'desc');
+        addBlocker(db, q2, q1);
+        expect(getBlockers(db, q2)).toHaveLength(1);
+
+        deleteQuestion(db, q1);
+        expect(getQuestion(db, q1)).toBeUndefined();
+        // Dependency should also be gone
+        expect(getBlockers(db, q2)).toHaveLength(0);
+    });
+
+    it('deleteQuestion on nonexistent qnum is a no-op', () => {
+        expect(() => deleteQuestion(db, 9999)).not.toThrow();
     });
 });

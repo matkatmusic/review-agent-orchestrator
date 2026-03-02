@@ -1,6 +1,6 @@
 import type { DB } from './db.js';
 import type { PendingAction } from './types.js';
-import { mkdirSync, writeFileSync, readdirSync, readFileSync, unlinkSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readdirSync, readFileSync, unlinkSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { addResponse } from './responses.js';
@@ -13,7 +13,9 @@ export function writePending(pendingDir: string, action: PendingAction): string 
     const random = randomBytes(4).toString('hex');
     const filename = `${timestamp}-${random}.json`;
     const filepath = join(pendingDir, filename);
-    writeFileSync(filepath, JSON.stringify(action), 'utf-8');
+    const tmppath = filepath + '.tmp';
+    writeFileSync(tmppath, JSON.stringify(action), 'utf-8');
+    renameSync(tmppath, filepath);
     return filepath;
 }
 

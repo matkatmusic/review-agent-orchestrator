@@ -87,8 +87,11 @@ export function blockByGroup(db: DB, blocked: number, group: string): void {
     for (const c of candidates) {
         try {
             addBlocker(db, blocked, c.qnum);
-        } catch {
-            // skip if would create cycle or self-ref
+        } catch (err) {
+            if (err instanceof Error && (err.message.includes('circular dependency') || err.message.includes('cannot block itself'))) {
+                continue; // expected — skip cycles and self-refs
+            }
+            throw err; // unexpected error — propagate
         }
     }
 }

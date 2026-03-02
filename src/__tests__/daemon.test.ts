@@ -178,16 +178,18 @@ describe('daemon — scanCycle', () => {
         expect(getQuestion(db, q4)!.status).toBe('Awaiting');
     });
 
-    it('cleanup stale lockfiles', () => {
-        // Create lockfiles for dead panes
+    it('cleanup stale lockfiles for non-existent questions', () => {
+        // Lockfiles for questions that don't exist in the DB are cleaned up
+        // by the orphan cleanup step (since !q is true).
         createLockfile(config, { paneId: '%99998', qnum: 10, headCommit: 'a' });
         createLockfile(config, { paneId: '%99999', qnum: 20, headCommit: 'b' });
         db.resetDirty();
 
         const result = scanCycle(config, db);
 
-        expect(result.staleCleaned).toContain(10);
-        expect(result.staleCleaned).toContain(20);
+        // Orphan cleanup handles lockfiles for deleted/non-existent questions
+        expect(result.killedOrphans).toContain(10);
+        expect(result.killedOrphans).toContain(20);
         expect(listLockfiles(config)).toEqual([]);
     });
 
@@ -264,6 +266,54 @@ describe('daemon — scanCycle', () => {
 
         // The question should remain Active regardless
         expect(getQuestion(db, q)!.status).toBe('Active');
+    });
+
+    it('orphan cleanup kills agent for manually deferred question', () => {
+        const q = createQuestion(db, 'orphan_test', 'desc');
+        updateStatus(db, q, 'Active');
+        // Simulate a running agent with a lockfile
+        createLockfile(config, { paneId: '%99999', qnum: q, headCommit: 'abc' });
+        // User manually defers the question via TUI
+        updateStatus(db, q, 'User_Deferred');
+        db.resetDirty();
+
+        const result = scanCycle(config, db);
+
+        // Agent should have been killed as an orphan
+        expect(result.killedOrphans).toContain(q);
+        // Lockfile should be removed
+        expect(readLockfile(config, q)).toBeUndefined();
+        // Question stays User_Deferred (not auto-unblocked)
+        expect(getQuestion(db, q)!.status).toBe('User_Deferred');
+    });
+
+    it('orphan cleanup kills agent for manually resolved question', () => {
+        const q = createQuestion(db, 'resolved_orphan', 'desc');
+        updateStatus(db, q, 'Active');
+        createLockfile(config, { paneId: '%99998', qnum: q, headCommit: 'abc' });
+        updateStatus(db, q, 'Resolved');
+        db.resetDirty();
+
+        const result = scanCycle(config, db);
+
+        expect(result.killedOrphans).toContain(q);
+        expect(readLockfile(config, q)).toBeUndefined();
+        expect(getQuestion(db, q)!.status).toBe('Resolved');
+    });
+
+    it('orphan cleanup kills agent for deleted question', () => {
+        const q = createQuestion(db, 'will_delete', 'desc');
+        updateStatus(db, q, 'Active');
+        createLockfile(config, { paneId: '%99997', qnum: q, headCommit: 'abc' });
+        // Delete the question directly from the DB (simulates external deletion)
+        db.run('DELETE FROM questions WHERE qnum = ?', q);
+        db.resetDirty();
+
+        const result = scanCycle(config, db);
+
+        // Agent should have been killed as orphan (question no longer exists)
+        expect(result.killedOrphans).toContain(q);
+        expect(readLockfile(config, q)).toBeUndefined();
     });
 
     it('spawn failure does not crash cycle or affect other steps', () => {

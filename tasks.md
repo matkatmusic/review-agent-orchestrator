@@ -400,17 +400,19 @@ Each stage produces a working, testable artifact. Do not start a stage until the
 
 ---
 
-## Stage 15b: Debate Verification of design
+## Stage 15b: Debate Verification of design ✅
 
 **Goal**: Fix any design flaws caught by /octo:debate result
 
-- [ ] run /octo:debate on the current codebase, prompting to check for hidden bugs, failed/invalid tests, missing functionality, or other issues.  invoke gemini and codex correctly (below).  use claude's backend-architect agent to help design the debate.    
-  - [ ] prompt gemini using: `gemini -m gemini-3-pro-preview < debate_prompt.txt`
-  - [ ] prompt codex using: `codex exec -m gpt-5.3-codex -c 'model_reasoning_effort="high"' < debate_prompt.txt`
-- [ ] present debate findings for review. 
-- [ ] request user's decisions for remaining issues in design that were flagged by debate panel.
-- [ ] implement design changes based on debate findings and user decisions.
-- [ ] run the /octo:debate test again on the revised codebase.  if it passes, update tasks.md and commit the changes.  if not, repeat previous steps until it passes, prompting the end user for input when necessary.
+- [x] run /octo:debate on the current codebase, prompting to check for hidden bugs, failed/invalid tests, missing functionality, or other issues.  invoke gemini and codex correctly (below).  use claude's backend-architect agent to help design the debate.
+  - [x] prompt gemini using: `gemini -m gemini-3-pro-preview < debate_prompt.txt`
+  - [x] prompt codex using: `codex exec -m gpt-5.3-codex -c 'model_reasoning_effort="high"' < debate_prompt.txt`
+- [x] present debate findings for review.
+- [x] request user's decisions for remaining issues in design that were flagged by debate panel.
+- [x] implement design changes based on debate findings and user decisions.
+- [x] run the /octo:debate test again on the revised codebase.  if it passes, update tasks.md and commit the changes.  if not, repeat previous steps until it passes, prompting the end user for input when necessary.
+
+**Verify**: Three rounds of three-way AI debate (Claude backend-architect, Gemini gemini-3-pro-preview, Codex gpt-5.3-codex) completed. 34 findings across 3 rounds, all addressed. Key fixes implemented: atomic file writes (pending.ts, agents.ts), sendInitialPrompt race eliminated (prompt-via-file), find command precedence fix (daemon.sh), per-step error isolation (daemon.ts), narrowed catch in blockByGroup (dependencies.ts), orphan cleanup for deleted questions (daemon.ts), SIGINT handler (app.tsx), deleteQuestion with TUI command (questions.ts, dashboard.tsx), getUnreadQnums tests (responses.test.ts), orphan cleanup tests (daemon.test.ts). 308/308 tests pass.
 
 ---
 

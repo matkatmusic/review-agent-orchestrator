@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import type { DB } from '../db.js';
 import type { Question } from '../types.js';
-import { listAll, updateStatus } from '../questions.js';
+import { listAll, updateStatus, deleteQuestion } from '../questions.js';
 import { getUnreadQnums } from '../responses.js';
 
 const STATUSES = ['All', 'Active', 'Awaiting', 'Deferred', 'User_Deferred', 'Resolved'] as const;
@@ -127,6 +127,13 @@ export default function Dashboard({ db, onOpenDetail, onNewQuestion }: Dashboard
             }
             return;
         }
+        if (input === 'x') {
+            if (questions.length > 0 && questions[clampedCursor]) {
+                deleteQuestion(db, questions[clampedCursor]!.qnum);
+                refresh();
+            }
+            return;
+        }
         // Refresh on 'R' (shift+r is capital R)
         if (input === 'R') {
             refresh();
@@ -193,7 +200,7 @@ export default function Dashboard({ db, onOpenDetail, onNewQuestion }: Dashboard
             {/* Status bar */}
             <Box marginTop={1} borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false}>
                 <Text dimColor>
-                    {' [Enter] View  [n] New  [d] Defer  [a] Activate  [r] Resolve  [Tab] Filter  [R] Refresh  [q] Quit '}
+                    {' [Enter] View  [n] New  [d] Defer  [a] Activate  [r] Resolve  [x] Delete  [Tab] Filter  [R] Refresh  [q] Quit '}
                 </Text>
             </Box>
         </Box>

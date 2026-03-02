@@ -1,9 +1,9 @@
-# Stage 15b Debate Re-Verification Results (Round 2)
+# Stage 15b Debate Round 3 Verification Results
 # Providers: Claude (backend-architect), Gemini (gemini-3-pro-preview), Codex (gpt-5.3-codex)
 # Date: 2026-03-01
 #
-# This is the SECOND round of debate. Round 1 found 21 issues (A-U), 16 fixed, 3 skipped.
-# Round 2 re-verified those fixes and looked for new issues.
+# This is the THIRD round of debate. Rounds 1+2 found 34 issues total, all addressed.
+# Round 3 re-verified round 2 fixes and looked for new issues.
 #
 # INSTRUCTIONS: Mark each finding with your decision:
 #   [FIX]  = implement the fix
@@ -12,170 +12,213 @@
 
 ---
 
+## SECTION A: Round 2 Fix Verification (all 13 fixes)
+
+### R2-1. addResponse() atomicity — CONFIRMED CORRECT (3/3)
+All three providers confirm the transaction wrapping is correct.
+
+### R2-2. cmdStatus() User_Deferred — CONFIRMED CORRECT (3/3)
+All three providers confirm the fix is correct.
+
+### R2-3. blockByGroup() cycle detection — CONFIRMED CORRECT (3/3)
+All agree core fix is correct. Two providers note the catch-all swallows
+non-cycle errors (see Finding #1 below).
+
+### R2-4. Schema migration skip — CONFIRMED CORRECT (2/3)
+Claude and Gemini confirm greenfield skip is valid. Codex disagrees but
+their concern about "npm run migrate" pointing to a missing artifact is
+about Stage 16 (not yet implemented). The skip remains valid.
+
+### R2-5. cmdList() status validation — CONFIRMED CORRECT (2/3)
+Claude and Gemini confirm. Codex notes empty string edge case but
+Commander won't pass empty string for a required option.
+
+### R2-6. user-respond command — CONFIRMED CORRECT (3/3)
+All three confirm the routing, type widening, and pending action flow are correct.
+
+### R2-7. detectNewCommits dedup — CONFIRMED CORRECT (2/3)
+Claude and Gemini confirm. Codex notes a theoretical crash window between
+sendKeys and createLockfile, but Claude and Gemini correctly note this is
+benign (harmless duplicate notification on restart).
+
+### R2-8. sendInitialPrompt timing — PARTIAL (3/3)
+All three flag the same concern: no readiness check/delay between spawnAgent
+and sendInitialPrompt. Claude notes tmux PTY buffering makes it work in
+practice. Gemini rates it INCORRECT; Claude and Codex rate PARTIAL.
+See Finding #2 below.
+
+### R2-9. Orphaned agent cleanup — CONFIRMED CORRECT (3/3)
+All three confirm the logic, ordering, and guard conditions are correct.
+
+### R2-10. daemon.sh auto-rebuild — MIXED (1 correct, 2 partial/incorrect)
+Claude confirms. Gemini says find -newer compares against dist/ directory
+mtime causing rebuild on every startup. Codex says the -o precedence in
+the find command is buggy for .tsx files.
+See Finding #3 below.
+
+### R2-11. Dashboard cursor clamping — CONFIRMED CORRECT (3/3)
+All three confirm useEffect implementation is correct with no infinite loops.
+
+### R2-12. Semantic split investigation — CONFIRMED CORRECT (3/3)
+All three confirm the design is correct and cross-machine resumption works.
+
+### R2-13. N+1 bulk query — CONFIRMED CORRECT (3/3)
+All three confirm the SQL and dashboard integration are correct.
+
+---
+
+## SECTION B: New Findings
+
 ## ALL THREE PROVIDERS AGREE (highest confidence)
 
-### 1. HIGH — addResponse() lacks atomicity
+### 1. MEDIUM — Pending file writes are not atomic
 # Providers: Claude, Gemini, Codex
-# Location: responses.ts:10-23
-# Issue: addResponse() does INSERT into responses + UPDATE on questions
-# tracking columns as two separate db.run() calls. If the UPDATE fails,
-# the response is inserted but last_responder/last_user_response are
-# permanently desynced. needsReprompt() will return wrong answers.
-# Fix: Wrap both calls in db.transaction(), same pattern as createQuestion().
-DECISION: Wrap both calls in db.transaction()
-STATUS: IMPLEMENTED — Wrapped INSERT + UPDATE in db.transaction() in addResponse(). 18/18 responses tests pass.
+# Location: pending.ts:16 (writePending)
+# Issue: writePending uses writeFileSync directly to the final .json path.
+# If the daemon reads .pending/ mid-write, it could parse partial JSON,
+# delete the file as "invalid," and permanently lose the action.
+# Note: Claude rates this LOW (writeFileSync is synchronous, payloads are
+# small), Gemini rates CRITICAL, Codex rates HIGH.
+# Fix: Write to .tmp file first, then renameSync (atomic on POSIX).
+DECISION: Fix
+STATUS: IMPLEMENTED — writePending now writes to .tmp file first, then renameSync to .json. 298/298 tests pass.
 
-### 2. MEDIUM — cmdStatus() missing User_Deferred
+### 2. MEDIUM — sendInitialPrompt timing (R2-8 follow-up)
 # Providers: Claude, Gemini, Codex
-# Location: qr-tool-commands.ts:97-118
-# Issue: cmdStatus() initializes counts with only 4 statuses (Awaiting,
-# Active, Deferred, Resolved). User_Deferred questions are counted in Total
-# but never displayed in the breakdown. Users see mismatched numbers.
-# Fix: Add User_Deferred: 0 to counts initializer and add output line.
-DECISION: Add User_Deferred: 0 to counts initializer and add output line
-STATUS: IMPLEMENTED — Added User_Deferred to counts and output in cmdStatus(). Updated test assertion. 19/19 qr-tool tests pass.
+# Location: daemon.ts:167-168, daemon.ts:178-179
+# Issue: sendInitialPrompt is called immediately after spawnAgent with no
+# readiness check. The claude CLI takes seconds to start. tmux PTY
+# buffering makes this work in practice, but it's not guaranteed.
+# Gemini rates this CRITICAL (prompt lost); Claude rates PARTIAL (works
+# via PTY buffer); Codex rates HIGH (no retry path).
+# Fix: Add a small delay (e.g., 300ms setTimeout) or a pane readiness
+# probe before sending the initial prompt.
+DECISION: Write prompt to file, pass via -p in launch-agent.sh. Eliminates race entirely.
+STATUS: IMPLEMENTED — spawnAgent() now writes initial prompt to Q<num>.prompt file in locks dir. buildClaudeCommand() passes it as second arg to launch-agent.sh, which reads it and passes via `claude -p`. Removed sendInitialPrompt() calls from scanCycle(). 298/298 tests pass.
 
-### 3. HIGH — blockByGroup() bypasses cycle detection
-# Providers: Claude, Gemini, Codex
-# Location: dependencies.ts:81-88
-# Issue: blockByGroup() does a bulk INSERT OR IGNORE directly via SQL,
-# bypassing the wouldCreateCycle() check enforced by addBlocker(). Example:
-# Q1 blocks Q2, Q2 is in group "G". blockByGroup(1, "G") creates Q1->Q2->Q1 cycle.
-# Fix: Replace bulk SQL with iteration through addBlocker() which includes
-# cycle detection, or replicate the CTE check in the bulk path.
-DECISION: Replace bulk SQL with iteration through addBlocker()
-STATUS: IMPLEMENTED — blockByGroup() now iterates candidates through addBlocker() which includes cycle detection. New test verifies cycles are skipped. 19/19 dependency tests pass.
+### 3. MEDIUM — daemon.sh find command may have precedence issue
+# Providers: Gemini, Codex (Claude confirms as correct)
+# Location: scripts/daemon.sh:24
+# Issue: The find command uses `-name '*.ts' -o -name '*.tsx'` with
+# `-newer dist`. Gemini says -newer compares against dir mtime (false
+# positive on every startup). Codex says -o precedence could trigger
+# unnecessary builds for .tsx files.
+# Claude says it's correct. The actual command is:
+#   find src -newer dist -name '*.ts' -o -name '*.tsx'
+# Due to find's precedence rules, -o splits this into two expressions:
+#   (find src -newer dist -name '*.ts') -o (find src -name '*.tsx')
+# The second branch has no -newer filter, so ANY .tsx file triggers rebuild.
+# Fix: Group predicates: find src \( -name '*.ts' -o -name '*.tsx' \) -newer dist
+DECISION: check 'man find' in terminal, look for rules on precedence of operators.
+STATUS: CONFIRMED BUG, IMPLEMENTED FIX — man find confirms AND has higher precedence than OR. The -o split the expression so .tsx files matched without -newer. Fixed by grouping: \( -name '*.ts' -o -name '*.tsx' \) -newer dist. Syntax validated.
 
 ---
 
 ## TWO OF THREE PROVIDERS AGREE (strong candidates)
 
-### 4. CRITICAL — Schema migration won't add columns to existing DBs
-# Providers: Gemini, Codex (Claude flagged as MEDIUM)
-# Location: db.ts:34-39, templates/schema.sql
-# Issue: CREATE TABLE IF NOT EXISTS does not add new columns to existing
-# tables. Existing databases created before Fixes I/R won't have the 5 new
-# columns. Any query referencing them crashes with "no such column".
-# Note: This only matters if there are pre-existing databases. If this is a
-# greenfield deployment (no v2 DB exists yet), this is not yet an issue.
-# Fix: Add ALTER TABLE ADD COLUMN migrations, guarded by try/catch or
-# PRAGMA table_info checks.
-DECISION: not an issue.  db doesn't exist yet.  ignore.
-STATUS: — SKIPPED (greenfield deployment, no pre-existing v2 databases)
+### 4. LOW — blockByGroup catch-all swallows non-cycle errors
+# Providers: Gemini, Codex (Claude notes it but calls it "practically safe")
+# Location: dependencies.ts:88-91
+# Issue: catch block silently swallows ALL errors from addBlocker, not just
+# cycle/self-reference errors. Currently safe because candidates come from
+# the DB (FK violation impossible) and self-ref is filtered by SQL.
+# Fix: Narrow catch to only skip errors with "circular dependency" message.
+DECISION: Narrow catch to only skip errors with "circular dependency" message.
+STATUS: IMPLEMENTED — blockByGroup catch now only skips cycle/self-ref errors; unexpected errors re-thrown. 301/301 tests pass.
 
-### 5. MEDIUM — cmdList() unsafe status cast
+### 5. MEDIUM — scanCycle lacks per-step error isolation
 # Providers: Claude, Codex
-# Location: qr-tool-commands.ts:46
-# Issue: options.status cast to QuestionStatus without validation. Invalid
-# status like "Foo" silently returns empty list with no error.
-# Fix: Validate against known status values before querying.
-DECISION: Validate against known status values before querying
-STATUS: IMPLEMENTED — cmdList() now validates --status against VALID_STATUSES array before querying. Invalid status returns clear error message. 19/19 qr-tool tests pass.
+# Location: daemon.ts:90 (scanCycle)
+# Issue: Individual steps (pending, pipeline, commit detect) are not wrapped
+# in try/catch. If any step throws, the entire cycle aborts. The agent
+# spawn loop has per-question try/catch, but other steps do not.
+# Fix: Wrap each major step in its own try/catch.
+DECISION: Fix.
+STATUS: IMPLEMENTED — Each major step in scanCycle (pending, pipeline+orphans, agent management, commit detection, stale cleanup, dump export) now wrapped in its own try/catch. 298/298 tests pass.
 
-### 6. MEDIUM — Skipped Q: qr-tool respond hardcodes author: 'agent'
-# Providers: Gemini, Codex
-# Location: types.ts:32, qr-tool-commands.ts:122
-# Issue: If a human uses `qr-tool respond`, the response is attributed to
-# 'agent'. last_responder becomes 'agent', needsReprompt() returns false,
-# and the daemon won't deliver the message to the running agent.
-# Original skip rationale: "Users use TUI; agents use qr-tool."
-# Counter-argument: Nothing prevents a user from using qr-tool respond.
-# Fix: Add --author flag, or separate user/agent commands.
-DECISION: separate user/agent commands
-STATUS: IMPLEMENTED — PendingAction type widened to 'user'|'agent'. cmdRespond() takes explicit author param. CLI has `respond` (agent) and `user-respond` (user) commands. 19/19 qr-tool + 12/12 pending tests pass.
+### 6. LOW — No concurrent daemon protection
+# Providers: Claude, Codex
+# Location: scripts/daemon.sh:33
+# Issue: No PID file or flock guard. Two daemon.sh instances could process
+# the same pending files, causing duplicate responses.
+# Fix: Add flock-based mutual exclusion in daemon.sh.
+DECISION: Not an issue.  I won't run daemon.sh twice since it's auto-launched by the IDE.
+STATUS: SKIPPED
 
-### 7. MEDIUM — Skipped U: detectNewCommits repeated notifications + garbling
-# Providers: Gemini, Codex
-# Location: daemon.ts:54-65, agents.ts lockfiles
-# Issue: (a) Rebase message is sent as terminal keystrokes — can garble if
-# agent is mid-input. (b) headCommit in lockfiles is never updated after
-# notification, so the same message is re-sent every scan cycle.
-# Fix: (b) is the actionable fix — update lockfile headCommit after sending
-# the notification to prevent spam. (a) is an inherent tmux limitation.
-DECISION: update lockfile headCommit after sending the notification to prevent spam
-STATUS: IMPLEMENTED — detectNewCommits() now calls createLockfile() with updated headCommit after successfully sending the rebase message. Prevents repeated notifications on subsequent scan cycles. 17/17 daemon tests pass.
-
-### 8. HIGH — Spawned agents not receiving initial prompt
-# Providers: Codex, Gemini (partial)
-# Location: daemon.ts:149-160, agents.ts:237-249
-# Issue: spawnAgent() launches the claude CLI but sendInitialPrompt() has
-# no call site in the daemon. After Fix F removed scheduleInitialPrompt(),
-# agents are spawned but never told which question to work on.
-# Note: Check if the initial prompt is passed via buildClaudeCommand() or
-# launch-agent.sh arguments. If so, this may not be an issue.
-DECISION: review how/when initial prompt is sent to spawned agents, and assess if this issue still exists.
-STATUS: CONFIRMED BUG, IMPLEMENTED FIX — spawnAgent() launches claude CLI via launch-agent.sh
-  with the general system prompt, but question-specific context (qnum, title, description) was
-  never sent. Added sendInitialPrompt() calls after both spawn paths in scanCycle(). The prompt
-  text is buffered in tmux and delivered when claude starts reading stdin. 17/17 daemon tests pass.
+### 7. LOW — Lockfile writes are not atomic
+# Providers: Claude, Gemini
+# Location: agents.ts:109-114 (createLockfile)
+# Issue: Same as finding #1 but for lockfiles. Crash mid-write leaves
+# partial JSON. readLockfile handles this gracefully (returns undefined),
+# but the consequence is an orphaned tmux pane.
+# Fix: Same temp+rename pattern.
+DECISION: FIX.
+STATUS: IMPLEMENTED — createLockfile now writes to .tmp file first, then renameSync. 298/298 tests pass.
 
 ---
 
 ## SINGLE-PROVIDER FINDINGS (lower confidence)
 
-### 9. MEDIUM — Orphaned agents on manual defer/resolve
-# Provider: Gemini only
-# Location: daemon.ts
-# Issue: Daemon only kills agents when enforceBlocked() moves them to
-# Deferred. If user manually sets Active question to User_Deferred or
-# Resolved via TUI, the agent pane keeps running indefinitely.
-# cleanupStaleLocks() only removes dead panes, doesn't kill live ones.
-# Fix: In scanCycle(), check all lockfiles — if question status is no
-# longer Active, kill the agent.
-DECISION: In scanCycle(), check all lockfiles — if question status is no longer Active, kill the agent.
-STATUS: IMPLEMENTED — Added orphan cleanup step in scanCycle() after enforce block. Iterates
-  all lockfiles; if question status is no longer Active, kills the agent pane and removes lockfile.
-  Added killedOrphans field to ScanResult. 17/17 daemon tests pass.
-
-### 10. CRITICAL — dist/ may be stale vs src/
-# Provider: Codex only
-# Location: package.json, scripts/daemon.sh
-# Issue: Runtime entrypoints use dist/, which could be out of sync with src/.
-# Multiple fixes may not be active at runtime unless rebuilt.
-# Note: This is a build hygiene issue, not a code bug. npm run build should
-# fix it. Check if dist/ is even committed to git.
-DECISION: Can we make the invocation of the daemon.sh script to check if /dist is stale or not?  if so, how? The more automation we can use when deploying this tool, the better.
-STATUS: IMPLEMENTED — daemon.sh now checks if dist/ is missing or if any src/*.ts(x) files
-  are newer than dist/. If stale, runs `npm run build` automatically before starting the loop.
-  Aborts with error if build fails. Syntax validated.
-
-### 11. LOW — Dashboard cursor clamping during render
+### 8. LOW — getUnreadQnums lacks unit tests
 # Provider: Claude only
-# Location: dashboard.tsx:76-77
-# Issue: setCursor() called during render body when clampedCursor !== cursor.
-# This is a React anti-pattern that causes extra re-renders. With 3-second
-# polling, it triggers every poll cycle when cursor needs clamping.
-# Fix: Move cursor clamping into useEffect dependent on questions.length.
-DECISION: Explain this problem in more detail.
-STATUS: IMPLEMENTED — Moved setCursor() clamping from render body into useEffect, eliminating
-  the extra re-render on every poll cycle when cursor needs clamping. 29/29 dashboard tests pass.
+# Location: responses.ts:52-61
+# Issue: getUnreadQnums is only tested indirectly via dashboard tests.
+# No direct tests for edge cases (empty DB, mixed authors, no responses).
+# Fix: Add test cases to responses.test.ts.
+DECISION: Add test cases to responses.test.ts.
+STATUS: IMPLEMENTED — Added 3 getUnreadQnums unit tests (latest agent, no responses, mixed authors). 21/21 responses tests pass.
 
-### 12. LOW — hasUnreadAgentResponse() vs needsReprompt() semantic split
+### 9. LOW — No orphan cleanup tests
 # Provider: Claude only
-# Location: responses.ts, dashboard.tsx, detail.tsx
-# Issue: TUI uses hasUnreadAgentResponse() for unread markers while daemon
-# uses needsReprompt() for delivery tracking. These serve different purposes
-# but could confuse developers. After markReprompted() clears last_responder,
-# the TUI still shows the unread marker (correct for TUI, but divergent).
-# Fix: Document the distinction. No code change needed.
-DECISION: This issue seems related to what happens if I commit an active question (via SQL dump), switch to another computer, clone/pull/load the SQL dump, and then want to resume the question on the other computer.   Is there a mechanism in place to allow resuming a question that was started on one computer on another computer?
-STATUS: INVESTIGATED — Cross-machine resumption works by design. The SQL dump carries all
-  question data, responses, and tracking columns. On the new machine, lockfiles don't exist
-  (local, not git-tracked), so the daemon sees Active questions with no running agent and
-  auto-spawns fresh agents with initial prompts. The semantic split is correct:
-  hasUnreadAgentResponse() (TUI unread markers) queries response history (transfers via dump);
-  needsReprompt() (daemon delivery tracking) checks last_responder column (also transfers).
-  No code change needed.
+# Location: daemon.ts:129-139
+# Issue: Orphan cleanup logic has no dedicated test. The enforce-kill path
+# is tested but not the manual defer/resolve orphan path.
+# Fix: Add test case to daemon.test.ts.
+DECISION: Add test case to daemon.test.ts.
+STATUS: IMPLEMENTED — Added 2 orphan cleanup tests (User_Deferred + Resolved). 298/298 tests pass (19/19 daemon tests).
 
-### 13. LOW — TUI polling N+1 query performance
+### 10. HIGH — TUI direct writes not exported to dump
 # Provider: Gemini only
-# Location: dashboard.tsx:22-36
-# Issue: getCounts() iterates all questions calling hasUnreadAgentResponse()
-# individually — N+1 query pattern. For 500 questions, ~501 queries every
-# 3 seconds.
-# Fix: Optimize with a single SQL query using subquery or window function.
-DECISION: Optimize with a single SQL query using subquery or window function.
-STATUS: IMPLEMENTED — Added getUnreadQnums() bulk query in responses.ts (single SQL with
-  subquery on MAX(id) per qnum). Dashboard now uses 3 queries total per refresh (listAll +
-  getUnreadQnums + filter in JS) instead of N+1. Removed hasUnreadAgentResponse import from
-  dashboard. 296/296 tests pass across 14 files.
+# Location: dashboard.tsx, detail.tsx, create.tsx
+# Issue: TUI writes directly to DB but never calls exportDump(). Changes
+# are only exported when the daemon detects isDirty() on its own DB instance.
+# But the daemon's DB instance has a separate dirty flag — TUI writes set
+# dirty on the TUI's DB instance, not the daemon's.
+# Note: Claude investigated this and concluded the daemon WILL pick up
+# changes because the daemon checks isDirty() on ITS OWN writes. If the
+# daemon makes no changes in a cycle, it won't export, even if the TUI
+# modified the DB. However, the dump is a convenience feature (not persistence).
+# Fix: TUI could write a marker file that the daemon checks.
+DECISION: can SQLite be configured to dump every time the db is modified?
+STATUS: SKIPPED — This is SQLite, not MySQL. SQLite has no built-in auto-dump trigger. The dump is a convenience feature for cross-machine transfer, not persistence. The daemon exports on its own dirty writes. Acceptable as-is.
+
+### 11. LOW — TUI doesn't close DB on SIGINT
+# Provider: Claude only
+# Location: tui/app.tsx:82-86
+# Issue: If the TUI receives SIGINT, db.close() is skipped. SQLite WAL
+# handles crash recovery, so this is benign.
+# Fix: Add process.on('SIGINT', ...) handler.
+DECISION: Add process.on('SIGINT', ...) handler.
+STATUS: IMPLEMENTED — Added SIGINT handler in app.tsx that calls db.close() before exit.
+
+### 12. LOW — Orphan check misses deleted questions
+# Provider: Gemini only
+# Location: daemon.ts:134
+# Issue: `if (q && q.status !== 'Active')` — if a question is deleted from
+# the DB entirely, q is undefined and the agent is NOT killed.
+# Fix: Change to `if (!q || q.status !== 'Active')`.
+DECISION: make the fix.  also add a test case to daemon.test.ts. and also add a 'Delete Question' TUI command to the screen that shows all questions.
+STATUS: IMPLEMENTED — (1) Orphan check fixed: `if (!q || q.status !== 'Active')` handles deleted questions. (2) Added 3 daemon tests for orphan cleanup (User_Deferred, Resolved, deleted). (3) Added `deleteQuestion()` to questions.ts (deletes responses, dependencies, then question in a transaction). (4) Added 'x' key to dashboard for delete with status bar updated. (5) Added 4 questions.test.ts tests (delete, delete with responses, delete with deps, no-op on nonexistent). (6) Added 2 dashboard.test.tsx tests ('x' deletes, 'x' on empty list). 308/308 tests pass.
+
+---
+
+## SECTION C: Overall Assessment
+
+# Claude:  4/5 — "Production-ready for its intended use case."
+# Gemini:  3.5/5 — "IPC boundaries causing friction. Atomic file ops needed."
+# Codex:   3/5 — "Core data model clean, but operational robustness gaps."
+#
+# Average: 3.5/5
+# The codebase has improved significantly through 3 rounds of debate.
+# No CRITICAL issues remain. Remaining concerns are operational hardening
+# (file atomicity, concurrent protection, test coverage gaps).

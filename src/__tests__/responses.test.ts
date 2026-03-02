@@ -6,6 +6,7 @@ import {
     listResponses,
     getLatestResponse,
     hasUnreadAgentResponse,
+    getUnreadQnums,
     needsReprompt,
     markReprompted,
 } from '../responses.js';
@@ -128,6 +129,38 @@ describe('responses', () => {
     it('hasUnreadAgentResponse — false for question with no responses', () => {
         const qnum = createQuestion(db, 'empty', 'no responses');
         expect(hasUnreadAgentResponse(db, qnum)).toBe(false);
+    });
+
+    // ---- Bulk unread query (getUnreadQnums) ----
+
+    it('getUnreadQnums returns qnums whose latest response is from agent', () => {
+        // Seed q1 has agent response (unread)
+        const q2 = createQuestion(db, 'q2', 'desc');
+        addResponse(db, q2, 'agent', 'agent msg');
+        addResponse(db, q2, 'user', 'user reply'); // q2 last = user (not unread)
+
+        const set = getUnreadQnums(db);
+        expect(set.has(1)).toBe(true);  // q1 last = agent
+        expect(set.has(q2)).toBe(false); // q2 last = user
+    });
+
+    it('getUnreadQnums returns empty set for questions with no responses', () => {
+        const q2 = createQuestion(db, 'empty', 'desc');
+        const set = getUnreadQnums(db);
+        expect(set.has(q2)).toBe(false); // no responses = not unread
+        expect(set.has(1)).toBe(true);   // seed q1 has agent response
+    });
+
+    it('getUnreadQnums handles multiple questions with mixed authors', () => {
+        const q2 = createQuestion(db, 'q2', 'desc');
+        const q3 = createQuestion(db, 'q3', 'desc');
+        addResponse(db, q2, 'agent', 'agent msg'); // q2 last = agent
+        addResponse(db, q3, 'user', 'user msg');   // q3 last = user (but no agent before)
+
+        const set = getUnreadQnums(db);
+        expect(set.has(1)).toBe(true);   // seed agent response
+        expect(set.has(q2)).toBe(true);  // last = agent
+        expect(set.has(q3)).toBe(false); // last = user
     });
 
     // ---- Reprompt tracking ----

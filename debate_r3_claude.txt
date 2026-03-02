@@ -1,0 +1,850 @@
+THIRD-ROUND VERIFICATION ANALYSIS
+Question Review Orchestrator v2
+Analyst: backend-architect (Claude Opus 4.6)
+Date: 2026-03-01
+
+================================================================================
+SECTION A: ROUND 2 FIX VERIFICATION
+================================================================================
+
+R2-1. addResponse() atomicity (responses.ts)
+STATUS: CONFIRMED CORRECT
+
+The transaction wrapping is properly implemented at responses.ts:10-25. The
+INSERT into responses and the UPDATE on questions tracking columns are both
+inside db.transaction(), which delegates to better-sqlite3's transaction()
+method. Key observations:
+
+- db.transaction() at db.ts:67-69 calls the underlying better-sqlite3
+  transaction factory and immediately invokes it, which provides automatic
+  commit on success and rollback on exception.
+- No nested transaction issues: better-sqlite3 uses SAVEPOINT for nested
+  transactions automatically if the db.transaction() is called within another
+  transaction. Since addResponse is also called from applyAction() which is not
+  itself wrapped in a transaction, there is no nesting concern.
+- The column update correctly branches between last_user_response and
+  last_agent_response based on the author parameter.
+- Test coverage is adequate: responses.test.ts tests addResponse updates to
+  last_responder (lines 135-150), and db.test.ts tests transaction rollback
+  behavior (lines 207-219).
+
+Regarding the concern about write lock contention with daemon scan cycle:
+better-sqlite3 uses synchronous operations and the daemon runs single-threaded,
+so there is no lock contention within the Node.js process. The WAL mode with
+5-second busy timeout (db.ts:15-16) handles contention from external processes
+(e.g., qr-tool reads) gracefully.
+
+--------------------------------------------------------------------------------
+
+R2-2. cmdStatus() missing User_Deferred (qr-tool-commands.ts)
+STATUS: CONFIRMED CORRECT
+
+User_Deferred is present in the counts initializer at qr-tool-commands.ts:108
+and in the output formatting at line 121. The output aligns with the other
+status entries in style and spacing. The total is derived from all.length
+(line 117), which is independent of the per-status counts, so there is no
+off-by-one risk.
+
+Tests at qr-tool.test.ts:155 verify User_Deferred appears in the output.
+
+--------------------------------------------------------------------------------
+
+R2-3. blockByGroup() bypasses cycle detection (dependencies.ts)
+STATUS: CONFIRMED CORRECT
+
+blockByGroup() at dependencies.ts:81-94 correctly iterates through candidates
+and calls addBlocker() for each one. Key observations:
+
+(a) Cycles are correctly skipped without throwing. The try/catch at line 88-91
+    catches the Error thrown by addBlocker's cycle detection and silently skips
+    it. The comment "skip if would create cycle or self-ref" is accurate.
+
+(b) Self-blocking is prevented. The SQL query at line 82-85 uses
+    "AND qnum != ?" with the blocked qnum, filtering out the blocked question
+    itself. Test at dependencies.test.ts:200-212 confirms this.
+
+(c) Performance: for typical group sizes (single digits), iterating through
+    addBlocker is fine. Each call runs a recursive CTE query, but SQLite handles
+    this efficiently for small graphs.
+
+(d) The function filters out the blocked qnum via the SQL WHERE clause.
+
+Tests at dependencies.test.ts:214-227 specifically test the cycle-skip behavior
+in blockByGroup.
+
+One observation: the catch block at line 90 catches ALL errors, not just cycle
+errors. If addBlocker threw for a non-cycle reason (e.g., database corruption),
+it would be silently swallowed. However, since addBlocker only throws for
+self-reference and cycle detection, and the self-reference case is already
+filtered out by the SQL, this is practically safe.
+
+--------------------------------------------------------------------------------
+
+R2-4. Schema migration for existing DBs -- SKIPPED
+STATUS: CONFIRMED CORRECT (skip is appropriate)
+
+The assumption remains valid. All schema is created via CREATE TABLE IF NOT
+EXISTS statements (schema.sql lines 1-38), which makes the schema definition
+idempotent. The schema includes all v2 columns (last_user_response,
+last_agent_response, last_responder, last_reprompted_at, created_from) from
+the initial creation. There is no code path that creates a DB with an old
+schema and then expects new columns -- the daemon (daemon.ts:234-236) and TUI
+(app.tsx:75-76) both call db.migrate(schemaPath) on every startup.
+
+Since CREATE TABLE IF NOT EXISTS does NOT alter existing tables, if someone
+somehow had an older version of the schema file and created a DB, then upgraded
+the schema.sql, the new columns would NOT be added. However, this is a
+greenfield system where the schema.sql has been stable with all v2 columns
+from the start, so this is not a practical concern.
+
+--------------------------------------------------------------------------------
+
+R2-5. cmdList() unsafe status cast (qr-tool-commands.ts)
+STATUS: CONFIRMED CORRECT
+
+VALID_STATUSES at qr-tool-commands.ts:42 contains all five status values:
+'Awaiting', 'Active', 'Deferred', 'User_Deferred', 'Resolved'. This exactly
+matches the QuestionStatus type at types.ts:1.
+
+Validation occurs at line 48 before the cast at line 51. The error message
+at line 49 is clear and lists valid statuses. Edge cases: empty string would
+not match any value and would be caught; undefined would be caught by the
+if (options.status) truthiness check at line 47.
+
+--------------------------------------------------------------------------------
+
+R2-6. qr-tool respond hardcodes author (qr-tool-commands.ts, types.ts)
+STATUS: CONFIRMED CORRECT
+
+(a) CLI routing: qr-tool.ts:80-85 registers "respond" command with hardcoded
+    'agent' author, and lines 87-92 register "user-respond" with hardcoded
+    'user' author. Both call cmdRespond with the correct author parameter.
+
+(b) The pending file written by user-respond sets author='user' because
+    cmdRespond at qr-tool-commands.ts:129-131 passes the author parameter
+    through to writePending, which serializes it into the JSON file.
+
+(c) addResponse() at responses.ts:4-26 receives the author from the pending
+    action via applyAction() at pending.ts:86-88 which calls
+    addResponse(db, action.qnum, action.author, action.body). The author
+    field is correctly typed as 'user' | 'agent' in the PendingAction type
+    at types.ts:32.
+
+(d) The last_responder column correctly reflects the author because
+    addResponse (responses.ts:20-23) sets last_responder = author in the
+    UPDATE statement.
+
+(e) The PendingAction type at types.ts:32 correctly has
+    author: 'user' | 'agent', which covers both values.
+
+--------------------------------------------------------------------------------
+
+R2-7. detectNewCommits repeated notifications (daemon.ts)
+STATUS: CONFIRMED CORRECT
+
+At daemon.ts:62-64, after successfully sending the rebase signal via sendKeys,
+createLockfile is called with the updated headCommit. This prevents re-sending
+on subsequent cycles.
+
+(a) createLockfile is called with { ...lock, headCommit: currentHead }, which
+    preserves the paneId and qnum while updating headCommit.
+
+(b) The update happens inside the try block at line 61, so it only occurs on
+    successful sendKeys. If sendKeys throws, the catch at line 66 swallows the
+    error and the lockfile retains the old headCommit, causing a retry next
+    cycle. This is the correct behavior.
+
+(c) Race condition: if the daemon crashes between sendKeys (line 62) and
+    createLockfile (line 64), the lockfile still has the old headCommit. On
+    restart, the message would be re-sent. This is a benign duplication -- the
+    agent receives a second "rebase" notification, which is harmless. The window
+    is tiny (synchronous code between two calls).
+
+--------------------------------------------------------------------------------
+
+R2-8. Spawned agents not receiving initial prompt (daemon.ts, agents.ts)
+STATUS: PARTIAL
+
+The fix is structurally correct but has a timing concern:
+
+(a) The prompt content is correct. buildInitialPrompt (agents.ts:56-79)
+    includes qnum, title, description, main tree path, and qr-tool path.
+
+(b) sendInitialPrompt is called immediately after spawnAgent at daemon.ts:168
+    and 178. spawnAgent uses sendKeys to send the claude CLI command to the
+    tmux pane. sendInitialPrompt then sends the actual question prompt via
+    another sendKeys call.
+
+The timing concern: spawnAgent sends the claude CLI launch command to the
+pane. sendInitialPrompt is called immediately after, which sends the question
+text. There is NO delay between these calls. The claude CLI typically takes
+several seconds to start and begin reading stdin. The sendKeys sends text to
+the tmux pane buffer, which is then read by whatever process is running in
+that pane.
+
+However, tmux's send-keys operates on the terminal buffer. If the shell has
+already started but the claude CLI has not yet taken over stdin, the prompt
+text would be interpreted as a shell command, which would fail harmlessly but
+the prompt would be lost. The shell command sent by spawnAgent includes the
+claude CLI invocation, which is followed by Enter. The subsequent sendKeys
+for the initial prompt also sends Enter. If the shell has not yet executed the
+first command, the second sendKeys text could interleave with the command line.
+
+In practice, tmux buffers keystrokes and delivers them sequentially to the
+pane's PTY. The first sendKeys sends the launch command + Enter. The second
+sendKeys sends the prompt + Enter. Since launch-agent.sh starts the claude
+CLI, the prompt text arrives in the stdin buffer and will be read by the CLI
+when it starts. This is because tmux's PTY buffer holds the text.
+
+The tests at agents.test.ts:387-401 verify that sendInitialPrompt sends content
+to the pane, with a 300ms delay for pane readiness. The daemon does not have
+this delay.
+
+Verdict: The fix addresses the core issue (prompt is now sent) and will work
+in most cases because tmux buffers keystrokes. But there is no explicit
+readiness check or delay, which could cause issues in edge cases where the PTY
+buffer is consumed before claude CLI starts reading.
+
+--------------------------------------------------------------------------------
+
+R2-9. Orphaned agents on manual defer/resolve (daemon.ts)
+STATUS: CONFIRMED CORRECT
+
+The orphan cleanup is implemented at daemon.ts:129-139.
+
+(a) Cleanup runs after pipeline enforcement (line 113-127 kills agents for
+    enforced questions) and before agent spawn/reprompt (line 148-186). This is
+    the correct position -- enforced kills happen first, then orphans from
+    manual user actions are cleaned, and finally spawning happens.
+
+(b) The code checks q.status !== 'Active' at line 134. Awaiting questions
+    with lockfiles are correctly identified as orphans and killed.
+
+(c) The kill + lockfile removal is handled by killAgent (agents.ts:274-280),
+    which kills the pane first, then removes the lockfile. This is effectively
+    atomic for cleanup purposes.
+
+(d) killedOrphans is correctly accumulated at line 136 and reported in the
+    ScanResult.
+
+(e) The guard at line 132 (result.killedByEnforce.includes(lock.qnum))
+    correctly prevents double-killing questions already handled by enforce.
+
+Regarding the concern about Active -> Deferred -> Active in the same cycle via
+autoUnblock: this cannot happen. A question that was Active and enforced to
+Deferred (step 2, line 113-127) gets its agent killed in that same step. The
+autoUnblock phase (inside runPipeline at line 114) might unblock it back to
+Awaiting, and promoteAwaiting might promote it to Active again. But the agent
+was already killed in step 2. By the time we reach orphan cleanup (step 3),
+the lockfile has been removed by the enforce kill. So the orphan check would
+not find it. Then in step 4 (spawn), the question would be spawned fresh.
+This is correct behavior.
+
+No tests specifically target the orphan cleanup, but the daemon test
+"pipeline: blocked Active -> Deferred, agents killed" (daemon.test.ts:131-149)
+tests the enforce-kill path.
+
+--------------------------------------------------------------------------------
+
+R2-10. dist/ may be stale (daemon.sh)
+STATUS: CONFIRMED CORRECT
+
+daemon.sh:23-28 checks if dist/ is missing or if any .ts/.tsx file in src/
+is newer than the dist/ directory. The find command at line 24 uses -newer to
+compare against the dist/ directory itself. If any source file is newer, npm
+run build is executed. Build failure aborts the daemon (exit 1 on line 26).
+
+(a) The staleness check compares src/**/*.ts and src/**/*.tsx mtimes against
+    the dist/ directory's mtime. The find command uses -newer which compares
+    against the directory entry's mtime.
+
+(b) Build failure causes exit 1 via the || { ...; exit 1; } pattern.
+
+(c) The check runs only once at startup (before the while loop at line 33).
+    This is correct -- dist/ only needs to be rebuilt at launch. During the
+    loop, node runs dist/daemon.js directly.
+
+--------------------------------------------------------------------------------
+
+R2-11. Dashboard cursor clamping during render (dashboard.tsx)
+STATUS: CONFIRMED CORRECT
+
+The cursor clamping is implemented at dashboard.tsx:63-66:
+
+    const clampedCursor = Math.min(cursor, Math.max(0, questions.length - 1));
+    useEffect(() => {
+        if (clampedCursor !== cursor) setCursor(clampedCursor);
+    }, [clampedCursor, cursor]);
+
+(a) The useEffect dependencies [clampedCursor, cursor] are correct. The effect
+    only fires when either value changes. Since clampedCursor is derived from
+    cursor and questions.length, this is effectively triggered when the list
+    shrinks.
+
+(b) Infinite loop prevention: The effect only calls setCursor when
+    clampedCursor !== cursor. After setCursor updates cursor to clampedCursor,
+    on the next render clampedCursor === cursor, so the effect becomes a no-op.
+    No infinite loop.
+
+(c) Edge cases:
+    - Empty list: questions.length = 0, Math.max(0, -1) = 0, clampedCursor = 0.
+      This is correct (cursor stays at 0 even when list is empty).
+    - List shrinks below cursor: cursor gets clamped to length-1. Correct.
+
+(d) clampedCursor is used in the render body (line 91, 101, 111, 121, 167)
+    instead of cursor, so the visual state is always valid even before the
+    useEffect fires.
+
+Tests at dashboard.test.tsx:198-223 verify cursor clamping when the list
+shrinks after a status change.
+
+--------------------------------------------------------------------------------
+
+R2-12. hasUnreadAgentResponse vs needsReprompt semantic split -- INVESTIGATED
+STATUS: CONFIRMED CORRECT
+
+(a) Call site analysis:
+    - hasUnreadAgentResponse is used in detail.tsx:40 for the TUI unread
+      marker. This is correct -- it shows whether the latest response is from
+      an agent (unread by user).
+    - needsReprompt is used in daemon.ts:154 for daemon reprompt delivery.
+      This is correct -- it checks if last_responder is 'user', meaning there
+      is a user response to deliver.
+    - getUnreadQnums (bulk version of hasUnreadAgentResponse) is used in
+      dashboard.tsx:54 for the dashboard unread markers.
+
+    No call sites use the wrong function for their context.
+
+(b) hasUnreadAgentResponse is still used in detail.tsx:40. This is appropriate
+    because the detail view shows a single question, so the N+1 concern does
+    not apply (it's a single query). getUnreadQnums is used only by the
+    dashboard, which needs to check many questions.
+
+Regarding importDump: The DB.importDump (db.ts:84-86) uses sqlite3 .dump
+format, which includes all CREATE TABLE and INSERT statements. This recreates
+all columns including tracking columns. Test at db.test.ts:92-144 verifies
+round-trip integrity through export/import. The daemon's scanCycle
+(daemon.ts:173-181) spawns agents for Active questions without lockfiles, so
+after an import, any Active questions would get agents spawned.
+
+--------------------------------------------------------------------------------
+
+R2-13. TUI polling N+1 query (responses.ts, dashboard.tsx)
+STATUS: CONFIRMED CORRECT
+
+(a) The SQL at responses.ts:53-59 correctly finds unread agent responses:
+    - The subquery finds the MAX(id) per qnum from responses.
+    - The outer query joins back to get the full row and filters for
+      author = 'agent'.
+    - MAX(id) is used instead of MAX(created_at) which is correct because id
+      is autoincrement and strictly monotonic, while created_at could have
+      ties.
+    - Questions with zero responses are correctly handled: they would not
+      appear in the GROUP BY result at all, so they are not in the returned
+      set. This is correct -- a question with no responses has no unread
+      agent response.
+
+(b) The dashboard at dashboard.tsx:54 calls getUnreadQnums(db) and stores
+    it as a Set. This is used:
+    - At line 28 to count unread questions (getCounts function).
+    - At line 168 to show unread markers on individual rows.
+    Both uses are correct: Set.has() for per-question marker, iteration for
+    counting.
+
+(c) Other N+1 patterns: The detail view (detail.tsx) does use per-question
+    queries (getQuestion, listResponses, getBlockers, getBlocked,
+    hasUnreadAgentResponse) but this is a single-question view, so these are
+    not N+1 patterns -- they are O(1) queries for the displayed question.
+
+One gap: there are no unit tests for getUnreadQnums. The function is tested
+indirectly through the dashboard component tests (dashboard.test.tsx:97-111)
+but not directly in responses.test.ts.
+
+
+================================================================================
+SECTION B: NEW FINDINGS
+================================================================================
+
+1. ID: 1
+   TYPE: NEW
+   SEVERITY: LOW
+   Location: responses.ts:52-61 (getUnreadQnums)
+   Issue: No direct unit tests for getUnreadQnums()
+
+   The getUnreadQnums function is only imported and tested indirectly via the
+   dashboard component tests. There are no unit-level tests in
+   responses.test.ts that verify:
+   - Empty DB returns empty set
+   - Multiple questions with mixed last-response authors
+   - Question with only user responses (should not be in set)
+   - Question with no responses (should not be in set)
+
+   Fix: Add test cases to responses.test.ts:
+   ```typescript
+   import { getUnreadQnums } from '../responses.js';
+
+   it('getUnreadQnums returns qnums with latest agent response', () => {
+       const q2 = createQuestion(db, 'q2', 'desc');
+       addResponse(db, 1, 'agent', 'agent msg');  // q1 last = agent
+       addResponse(db, q2, 'agent', 'a');
+       addResponse(db, q2, 'user', 'u');            // q2 last = user
+       const set = getUnreadQnums(db);
+       expect(set.has(1)).toBe(true);
+       expect(set.has(q2)).toBe(false);
+   });
+
+   it('getUnreadQnums returns empty set when no responses', () => {
+       // fresh DB with no responses for new questions
+       createQuestion(db, 'empty', 'desc');
+       const set = getUnreadQnums(db);
+       expect(set.has(1)).toBe(true);  // seed has agent response
+       // new question with no responses should not be in set
+   });
+   ```
+
+--------------------------------------------------------------------------------
+
+2. ID: 2
+   TYPE: NEW
+   SEVERITY: MEDIUM
+   Location: pending.ts:16 (writePending)
+   Issue: writePending uses non-atomic write (writeFileSync without temp+rename)
+
+   writePending writes directly to the final filepath via writeFileSync.
+   If the daemon reads the .pending/ directory between the file creation and
+   the write completing (or if the process crashes mid-write), a partial JSON
+   file could be read by processPendingQueue.
+
+   processPendingQueue does handle invalid JSON gracefully (pending.ts:38-42,
+   it catches parse errors and deletes the file), so this is not a crash risk.
+   However, a partial write means the pending action is lost permanently.
+
+   The risk is low because writeFileSync is synchronous and writes small JSON
+   payloads (< 1KB) that are likely to be atomic at the filesystem level for
+   most operating systems and file sizes. But it's not guaranteed.
+
+   Fix: Write to a .tmp suffix first, then rename:
+   ```typescript
+   const tmppath = filepath + '.tmp';
+   writeFileSync(tmppath, JSON.stringify(action), 'utf-8');
+   renameSync(tmppath, filepath);
+   ```
+   renameSync is atomic on POSIX filesystems when source and destination are
+   on the same filesystem (which they are, since they're in the same directory).
+
+--------------------------------------------------------------------------------
+
+3. ID: 3
+   TYPE: NEW
+   SEVERITY: LOW
+   Location: daemon.ts:90 (scanCycle)
+   Issue: No protection against concurrent daemon instances
+
+   daemon.sh starts a loop that runs "node dist/daemon.js" repeatedly. If a
+   second daemon.sh is started (e.g., by a user running it in another terminal),
+   two instances would process the same .pending/ files, potentially causing:
+   - Duplicate response processing (addResponse called twice for same pending)
+   - Race conditions on lockfile creation
+
+   The daemon.sh script does not check for existing instances (no PID file,
+   no flock). WAL mode with busy timeout mitigates database-level races, but
+   pending file processing has no deduplication -- both daemons would read
+   the same file before either deletes it.
+
+   In practice, the processPendingQueue function deletes files after processing
+   (pending.ts:48), so the race window is small. And the safeUnlink at line 64
+   handles the case where the file was already deleted by another process. But
+   addResponse would be called twice, creating duplicate responses.
+
+   Fix: Add a PID file or flock-based guard in daemon.sh:
+   ```bash
+   LOCKFILE="$PROJECT_ROOT/.daemon.lock"
+   exec 9>"$LOCKFILE"
+   flock -n 9 || { echo "[review] Daemon already running"; exit 1; }
+   echo $$ > "$LOCKFILE"
+   ```
+
+--------------------------------------------------------------------------------
+
+4. ID: 4
+   TYPE: NEW
+   SEVERITY: LOW
+   Location: agents.ts:109-114 (createLockfile)
+   Issue: createLockfile is not atomic (crash between write and completion)
+
+   createLockfile uses writeFileSync to write JSON directly to the lockfile
+   path. If the daemon crashes mid-write, the next cycle's readLockfile would
+   read a partial JSON file.
+
+   readLockfile at agents.ts:132-139 does handle this gracefully -- the
+   JSON.parse in the try/catch returns undefined for malformed files.
+   listLockfiles at agents.ts:145-159 similarly skips malformed lockfiles.
+
+   The consequence of a corrupted lockfile is that the agent's pane becomes
+   orphaned (no valid lockfile mapping it to a qnum). The stale lock cleanup
+   would not find it either (since the lockfile is corrupted, not valid). The
+   pane would remain alive but unmanaged.
+
+   Fix: Same temp+rename pattern as finding #2. Low priority since the crash
+   window is tiny and the consequence is limited (orphaned pane requires
+   manual cleanup).
+
+--------------------------------------------------------------------------------
+
+5. ID: 5
+   TYPE: NEW
+   SEVERITY: MEDIUM
+   Location: daemon.ts:90 (scanCycle), no try/catch around steps 1-6
+   Issue: Individual step failures could abort the entire scan cycle
+
+   The scanCycle function does NOT have try/catch around individual steps
+   (pending processing, pipeline, orphan cleanup, etc.). The agent
+   spawn/reprompt loop at lines 151-186 does have a per-question try/catch
+   (lines 183-185), which is good. But:
+
+   - If processPendingQueue throws (line 108), the entire cycle aborts before
+     pipeline runs. processPendingQueue has internal error handling, so this
+     is unlikely.
+   - If runPipeline throws (line 114), the cycle aborts before agent management.
+     runPipeline calls DB operations that could throw (e.g., SQLITE_BUSY from
+     external process).
+   - If detectNewCommits throws (line 189), the cycle aborts before cleanup
+     and dump export. detectNewCommits does have internal try/catch for sendKeys.
+   - If cleanupStaleLocks throws (line 192), the dump export is skipped.
+
+   The main() function at daemon.ts:233-244 has a top-level try/catch, so the
+   daemon loop in daemon.sh would continue (line 34: "|| true"). But one failed
+   cycle means skipping all subsequent steps for that cycle.
+
+   Fix: Wrap each step in its own try/catch within scanCycle, logging errors
+   but allowing subsequent steps to run:
+   ```typescript
+   try { result.pendingProcessed = processPendingQueue(db, pendingDir); }
+   catch (err) { log(`Pending queue error: ${err}`); }
+
+   try { const pipeline = runPipeline(db, config.maxAgents); ... }
+   catch (err) { log(`Pipeline error: ${err}`); }
+   ```
+
+--------------------------------------------------------------------------------
+
+6. ID: 6
+   TYPE: NEW
+   SEVERITY: LOW
+   Location: detail.tsx:90 (handleSubmit calls addResponse directly)
+   Issue: Detail view writes directly to DB, bypassing pending queue
+
+   When a user submits a response in the detail view (detail.tsx:90), it calls
+   addResponse(db, qnum, 'user', trimmed) directly on the database, bypassing
+   the .pending/ queue mechanism.
+
+   This means:
+   - The response is written immediately (good for UX responsiveness).
+   - But it does not go through the daemon's processPendingQueue path, so if
+     the daemon is the only writer expected, this creates a dual-write pattern.
+   - Since both the TUI and daemon share the same SQLite database with WAL mode,
+     this is functionally correct -- SQLite handles concurrent writers with WAL.
+   - The dirty flag IS set by db.run(), so the daemon's dump export will pick up
+     changes on its next cycle.
+
+   The main concern is consistency: the qr-tool CLI writes via .pending/ (going
+   through the daemon), but the TUI writes directly. If the TUI crashes
+   mid-transaction, the response is not persisted (but the user can re-submit).
+
+   This is a design choice, not a bug. The TUI's direct write provides better
+   UX (instant feedback). But it should be documented as intentional.
+
+   Fix: No code change needed. Add a comment in detail.tsx explaining the
+   design decision:
+   ```typescript
+   // Direct DB write (not through .pending/) for immediate user feedback.
+   // The daemon's exportDump will capture this change on its next cycle.
+   addResponse(db, qnum, 'user', trimmed);
+   ```
+
+--------------------------------------------------------------------------------
+
+7. ID: 7
+   TYPE: NEW
+   SEVERITY: LOW
+   Location: config.ts:32 (parseShellConfig regex)
+   Issue: parseShellConfig only matches uppercase variable names
+
+   The regex at config.ts:32 is: /^([A-Z_][A-Z0-9_]*)=(.*)$/
+
+   This only matches variable names starting with [A-Z_] and containing only
+   [A-Z0-9_]. Lowercase variable names (e.g., "max_agents=5") would be
+   silently ignored.
+
+   The round 1 review identified this (item T) and it was skipped as
+   acceptable since config.sh uses ALL_CAPS convention. This remains valid.
+   All config variables in config.sh (lines 6-36) use UPPER_CASE names.
+
+   Re-evaluation: Still acceptable. Shell convention is uppercase for exported
+   variables, and the system's own config files follow this convention.
+
+--------------------------------------------------------------------------------
+
+8. ID: 8
+   TYPE: NEW
+   SEVERITY: LOW
+   Location: daemon.ts:129-139 (orphan cleanup)
+   Issue: No tests for orphan cleanup in scanCycle
+
+   The orphan cleanup logic has no dedicated test coverage. While the enforce-
+   kill path is tested (daemon.test.ts:131-149), the orphan path (where a user
+   manually defers/resolves a question while an agent is running) is not tested.
+
+   Specific untested scenarios:
+   - Agent running for a question that user defers via TUI
+   - Agent running for a question that user resolves via TUI
+   - Lockfile exists but question is Awaiting (was Active, pipeline changed it)
+
+   Fix: Add test cases to daemon.test.ts:
+   ```typescript
+   it('orphan cleanup kills agent for manually deferred question', () => {
+       const q = createQuestion(db, 'test', 'desc');
+       updateStatus(db, q, 'User_Deferred');
+       createLockfile(config, { paneId: '%99999', qnum: q, headCommit: 'a' });
+       db.resetDirty();
+
+       const result = scanCycle(config, db);
+       expect(result.killedOrphans).toContain(q);
+       expect(readLockfile(config, q)).toBeUndefined();
+   });
+   ```
+
+--------------------------------------------------------------------------------
+
+9. ID: 9
+   TYPE: NEW
+   SEVERITY: LOW
+   Location: dashboard.tsx:100-108 and detail.tsx:64-69 (status change actions)
+   Issue: TUI status changes are not wrapped in transactions and do not set
+          dirty flag explicitly -- but this is actually correct
+
+   The TUI status changes (updateStatus at dashboard.tsx:104, 114, 124 and
+   detail.tsx:66, 73, 80) call updateStatus directly, which calls db.run().
+   db.run() at db.ts:51-54 sets this.dirty = true automatically. So the dirty
+   flag is correctly maintained for dump export purposes.
+
+   However, the TUI does NOT trigger dump export itself -- it relies on the
+   daemon's next scan cycle to detect isDirty() and export. If the TUI is
+   used without the daemon running, changes are persisted to the DB but not
+   exported to the .dump.sql file. This is acceptable since the dump is a
+   convenience feature for cross-machine transfer, not a persistence mechanism.
+
+   No fix needed.
+
+--------------------------------------------------------------------------------
+
+10. ID: 10
+    TYPE: NEW
+    SEVERITY: MEDIUM
+    Location: daemon.ts:129-139 (orphan cleanup) and daemon.ts:148-186 (spawn)
+    Issue: Orphan cleanup and spawn may conflict for questions that transition
+           to Active in the same cycle
+
+    Consider this scenario:
+    1. Question Q5 is User_Deferred with a lockfile (agent was running before
+       user deferred it).
+    2. In the current cycle, a pending action changes Q5 back to Awaiting
+       (via processPendingQueue, which calls updateStatus).
+    3. Pipeline promotes Q5 from Awaiting to Active.
+    4. Orphan cleanup runs... but Q5 is now Active (status was changed in
+       step 3). So the orphan check (status !== 'Active') does NOT kill it.
+    5. Spawn/reprompt runs, finds Q5 is Active with an existing lockfile.
+       isAgentRunning returns false (pane may have died while deferred).
+       Wait -- it might return true if the pane is still alive.
+
+    Actually, analyzing more carefully: if the user deferred Q5 via the TUI,
+    the pane was NOT killed by the TUI (the TUI only updates status, it does
+    not manage agents). So the pane could still be alive. In that case:
+    - Orphan cleanup skips it (status is Active after pipeline).
+    - isAgentRunning returns true.
+    - needsReprompt would determine if the agent needs new input.
+
+    This is actually correct behavior. The agent pane survived the deferral
+    and is now re-activated. No bug here.
+
+    Wait, there is one issue: if Q5 was User_Deferred (agent still running),
+    and in this cycle pipeline does NOT touch User_Deferred questions (per
+    autoUnblock at pipeline.ts:33 which only touches Deferred, not
+    User_Deferred), then Q5 stays User_Deferred. Orphan cleanup WOULD kill
+    the agent. This is correct -- User_Deferred means the user explicitly
+    deferred it, and the agent should stop.
+
+    The only edge case is if the user defers and un-defers (via TUI 'a' key
+    to reactivate) within the same daemon cycle. But the TUI writes directly
+    to DB, not through pending queue. So:
+    - User presses 'd' -> Q5 becomes User_Deferred
+    - User presses 'a' -> Q5 becomes Awaiting
+    - Pipeline promotes Q5 to Active
+    - Orphan cleanup: Q5 is Active, so agent is NOT killed. Correct.
+
+    Fix: No fix needed. The logic is correct upon detailed analysis.
+
+--------------------------------------------------------------------------------
+
+11. ID: 11
+    TYPE: NEW
+    SEVERITY: LOW
+    Location: tui/app.tsx:82 (render call)
+    Issue: TUI does not close DB on uncaught exception or SIGINT
+
+    The TUI's app.tsx:82-86 opens the DB and waits for the ink instance to
+    exit before closing it:
+    ```
+    const instance = render(<App db={db} />);
+    instance.waitUntilExit().then(() => { db.close(); });
+    ```
+
+    If the process receives SIGINT (Ctrl+C) or throws an uncaught exception,
+    db.close() may never be called. With WAL mode and better-sqlite3's native
+    binding, the database handles this gracefully (WAL is designed for crash
+    recovery). But leaving the WAL file open means the next process that opens
+    the DB needs to replay the WAL, and the -wal and -shm files persist on
+    disk.
+
+    Fix: Add a process signal handler:
+    ```typescript
+    process.on('SIGINT', () => { db.close(); process.exit(0); });
+    ```
+    Low priority since SQLite's WAL mode handles crashes gracefully.
+
+--------------------------------------------------------------------------------
+
+12. ID: 12
+    TYPE: NEW
+    SEVERITY: LOW
+    Location: responses.ts:42-46 (hasUnreadAgentResponse still used in detail)
+    Issue: Minor efficiency concern -- hasUnreadAgentResponse makes two queries
+
+    hasUnreadAgentResponse calls getLatestResponse, which runs a SELECT query
+    with ORDER BY and LIMIT 1. This is O(1) with the idx_responses_qnum index,
+    so it's efficient for a single question. No issue here.
+
+    Confirmed: hasUnreadAgentResponse is only used in detail.tsx (single
+    question view), where a single query is appropriate.
+
+    Fix: None needed.
+
+--------------------------------------------------------------------------------
+
+13. ID: 13
+    TYPE: NEW
+    SEVERITY: LOW
+    Location: config.ts:32 (parseShellConfig)
+    Issue: Config validation does not check for required config values
+
+    The validate function at config.ts:128-134 only checks:
+    - maxAgents >= 1
+    - projectRoot is not empty
+
+    It does not validate that questionsDir points to an existing directory,
+    that the agentPrompt file exists, or that scanInterval is reasonable.
+
+    Missing validations:
+    - questionsDir directory existence (the daemon creates it implicitly by
+      putting the DB there, but if it's wrong, the daemon crashes later)
+    - scanInterval > 0 (a negative or zero value would cause the daemon loop
+      to spin)
+    - tmuxSession is a valid session name (no special characters that would
+      break tmux commands)
+
+    Fix: Add validation in the validate function:
+    ```typescript
+    if (config.scanInterval < 1) {
+        throw new Error(`scanInterval must be >= 1, got ${config.scanInterval}`);
+    }
+    ```
+    Low priority since these are typically set by the developer, not end users.
+
+--------------------------------------------------------------------------------
+
+14. ID: 14
+    TYPE: REGRESSION
+    SEVERITY: LOW
+    Location: dependencies.ts:88-91 (blockByGroup catch block)
+    Issue: blockByGroup swallows non-cycle errors silently
+
+    The catch block at line 90 catches ALL errors thrown by addBlocker, not
+    just cycle detection errors. While addBlocker currently only throws for
+    self-reference and cycle detection (and self-reference is already filtered
+    by the SQL), a future change to addBlocker could throw for other reasons
+    (e.g., FK violation if the blocker qnum does not exist), and those errors
+    would be silently swallowed.
+
+    In the current codebase, this is safe because:
+    - The candidates list comes from a SELECT on the questions table, so all
+      qnums exist (FK violation is impossible).
+    - Self-blocking is prevented by "qnum != ?" in the SQL.
+    - Only cycle detection errors remain, which should be skipped.
+
+    Fix: Narrow the catch to only skip cycle-related errors:
+    ```typescript
+    try {
+        addBlocker(db, blocked, c.qnum);
+    } catch (err) {
+        if (err instanceof Error && err.message.includes('circular dependency')) {
+            continue; // expected — skip cycles
+        }
+        throw err; // unexpected error — propagate
+    }
+    ```
+    Low priority since the current code is safe for all existing code paths.
+
+
+================================================================================
+SECTION C: OVERALL ASSESSMENT
+================================================================================
+
+Rating: 4 out of 5
+
+The codebase is in good shape after two rounds of fixes. The core architecture
+is well-designed with clear separation of concerns (DB layer, questions module,
+responses module, dependencies module, pipeline, agents, daemon, TUI). The
+pending queue pattern provides a clean boundary between CLI tools and the daemon.
+
+Positive patterns observed:
+
+1. STRONG error handling philosophy. The pending queue's permanent vs transient
+   error classification (pending.ts:76-82) is thoughtful. readLockfile and
+   listLockfiles gracefully handle corrupted files. The daemon's main loop
+   wraps everything in try/catch.
+
+2. GOOD test coverage. ~296 tests cover the core modules thoroughly. The
+   ink-testing-library integration tests for TUI components are particularly
+   well done, testing user interactions end-to-end.
+
+3. CLEAN transaction boundaries. The addResponse and createQuestion transactions
+   are correct. better-sqlite3's synchronous nature eliminates many classes of
+   concurrency bugs.
+
+4. PROPER use of SQLite features. WAL mode, foreign keys, CHECK constraints,
+   recursive CTEs for cycle detection, and index definitions are all correct.
+
+5. GOOD resilience patterns. The daemon continues after spawn failures. The
+   pending queue retries transient errors. Stale lockfile cleanup runs every
+   cycle.
+
+Remaining concerns (minor):
+
+1. No concurrent daemon protection (finding #3). Two daemon instances could
+   cause duplicate processing. Low probability in practice.
+
+2. Pending file and lockfile writes are not atomic (findings #2, #4). The
+   consequence of corruption is handled gracefully, but data loss is possible.
+
+3. scanCycle does not isolate step failures (finding #5). A failure in pipeline
+   processing could skip agent management and dump export.
+
+4. Some test coverage gaps: getUnreadQnums lacks unit tests, orphan cleanup
+   lacks integration tests, and user-respond CLI path lacks tests.
+
+5. The sendInitialPrompt timing (R2-8) relies on tmux PTY buffering rather
+   than an explicit readiness check. This works in practice but is fragile.
+
+None of the remaining issues are critical. The system is production-ready for
+its intended use case (single-developer question review orchestration). The
+SQLite-backed architecture with WAL mode is a good fit for this workload.
