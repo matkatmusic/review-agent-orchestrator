@@ -1,0 +1,89 @@
+import React, { memo } from 'react';
+import { Box, Text } from 'ink';
+import type { View } from './views.js';
+
+export const HEADER_LINES = 3;
+
+export interface HeaderProps {
+    currentView: View;
+    columns: number;
+    activeAgents?: number;
+    unreadCount?: number;
+}
+
+const assertNever = (x: never): never => {
+    throw new Error(`Unhandled view: ${JSON.stringify(x)}`);
+};
+
+function getViewLabel(view: View): string {
+    switch (view.type) {
+        case 'Dashboard':
+            return 'Dashboard';
+        case 'Detail':
+            return `I-${view.inum} Detail`;
+        case 'NewIssue':
+            return 'New Issue';
+        case 'AgentStatus':
+            return 'Agent Status';
+        case 'BlockingMap':
+            return 'Blocking Map';
+        case 'GroupView':
+            return 'Group View';
+        default:
+            return assertNever(view);
+    }
+}
+
+function getSubtitle(view: View): string {
+    switch (view.type) {
+        case 'Dashboard':
+            return 'Overview of all issues and orchestration state';
+        case 'Detail':
+            return `Viewing issue I-${view.inum}`;
+        case 'NewIssue':
+            return 'Create a new issue';
+        case 'AgentStatus':
+            return 'Active agent sessions and pane status';
+        case 'BlockingMap':
+            return 'Dependency and blocking relationships';
+        case 'GroupView':
+            return 'Issues grouped by container';
+        default:
+            return assertNever(view);
+    }
+}
+
+function centeredRule(label: string, width: number): string {
+    const padded = ` ${label} `;
+    const dashCount = Math.max(0, width - padded.length);
+    const left = Math.floor(dashCount / 2);
+    const right = dashCount - left;
+    return '\u2500'.repeat(left) + padded + '\u2500'.repeat(right);
+}
+
+const HeaderComponent: React.FC<HeaderProps> = ({
+    currentView,
+    columns,
+    activeAgents,
+    unreadCount,
+}) => {
+    const title = `Review Agent Orchestrator \u00b7 ${getViewLabel(currentView)}`;
+    const line1 = centeredRule(title, columns);
+
+    const statusParts: string[] = [];
+    if (activeAgents !== undefined) statusParts.push(`Agents: ${activeAgents}`);
+    if (unreadCount !== undefined) statusParts.push(`Unread: ${unreadCount}`);
+    const line2 = statusParts.length > 0 ? statusParts.join('  |  ') : ' ';
+
+    const line3 = getSubtitle(currentView);
+
+    return (
+        <Box flexDirection="column" height={HEADER_LINES}>
+            <Text bold wrap="truncate">{line1}</Text>
+            <Text wrap="truncate">{line2}</Text>
+            <Text dimColor wrap="truncate">{line3}</Text>
+        </Box>
+    );
+};
+
+export const Header = memo(HeaderComponent);

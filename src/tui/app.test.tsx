@@ -148,6 +148,38 @@ describe('App — view routing', () => {
         expect(lastFrame()).toContain('Group View');
     });
 
+    // ---- Header appears on all views ----
+
+    it('header is visible on Dashboard', () => {
+        const { lastFrame } = render(<App />);
+        expect(lastFrame()).toContain('Review Agent Orchestrator');
+        expect(lastFrame()).toContain('Dashboard');
+    });
+
+    it('header updates when navigating to a different view', async () => {
+        const { lastFrame, stdin } = render(<App />);
+        await tick();
+        expect(lastFrame()).toContain('Dashboard');
+
+        stdin.write('s');
+        await tick();
+        expect(lastFrame()).toContain('Review Agent Orchestrator');
+        expect(lastFrame()).toContain('Agent Status');
+    });
+
+    it('header updates on Esc back to previous view', async () => {
+        const { lastFrame, stdin } = render(<App />);
+        await tick();
+
+        stdin.write('n');
+        await tick();
+        expect(lastFrame()).toContain('New Issue');
+
+        stdin.write(ESC);
+        await tick();
+        expect(lastFrame()).toContain('Dashboard');
+    });
+
     // ---- q works from non-Dashboard views ----
 
     it('q exits from any view, not just Dashboard', async () => {

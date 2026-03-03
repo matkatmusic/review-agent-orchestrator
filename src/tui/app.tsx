@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
-import { Box, Text, useInput, useApp } from 'ink';
+import { Box, Text, useInput, useApp, useStdout } from 'ink';
 import type { View } from './views.js';
+import { Header, HEADER_LINES } from './header.js';
 
 interface AppProps {
     initialView?: View;
@@ -9,6 +10,8 @@ interface AppProps {
 
 function App({ initialView, onExit }: AppProps) {
     const { exit } = useApp();
+    const { stdout } = useStdout();
+    const columns = (stdout as import('node:tty').WriteStream)?.columns ?? 80;
     const [viewStack, setViewStack] = useState<View[]>([initialView ?? { type: 'Dashboard' }]);
     const currentView = viewStack[viewStack.length - 1];
 
@@ -77,6 +80,7 @@ function App({ initialView, onExit }: AppProps) {
 
     return (
         <Box flexDirection="column">
+            <Header currentView={currentView} columns={columns} />
             {content}
         </Box>
     );
