@@ -107,11 +107,11 @@ describe('App — view routing', () => {
 
     // ---- All 6 view types navigable ----
 
-    it('can navigate to Detail view', async () => {
+    it('can navigate to Detail view via Dashboard Enter', async () => {
         const { lastFrame, stdin } = render(<App />);
         await tick();
-        // Press 'v' with inum 1 to navigate to Detail (simulated via shortcut)
-        stdin.write('v');
+        // Press Enter on the first issue in Dashboard to open Detail
+        stdin.write('\r');
         await tick();
         expect(lastFrame()).toContain('Detail');
     });
