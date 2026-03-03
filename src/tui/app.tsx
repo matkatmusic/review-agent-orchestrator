@@ -9,6 +9,7 @@ import { Dashboard } from './dashboard.js';
 import { MOCK_ISSUES, MOCK_UNREAD_INUMS, MOCK_MAX_AGENTS } from './mock-data.js';
 import { DetailView, MOCK_DETAIL_DATA } from './detail.js';
 import { AgentStatus } from './agent-status.js';
+import { BlockingMap } from './blocking-map.js';
 
 interface AppProps {
     initialView?: View;
@@ -142,7 +143,7 @@ function App({ initialView, onExit }: AppProps) {
             content = <AgentStatus />;
             break;
         case 'BlockingMap':
-            content = <Text>Blocking Map</Text>;
+            content = <BlockingMap navigate={navigate} />;
             break;
         case 'GroupView':
             content = <Text>Group View</Text>;
