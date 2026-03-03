@@ -1,0 +1,37 @@
+RESEARCH TASK: Ink TUI Key Event Handling Internals
+
+Context: We're building a React/Ink terminal UI app (6 views: Dashboard, Detail, NewIssue, AgentStatus, BlockingMap, GroupView). Ink's useInput hook has no event consumption — all handlers fire for every keypress. We need to implement proper key dispatch with consumption semantics.
+
+A three-model debate identified these critical constraints:
+1. Ink uses an internal EventEmitter (internal_eventEmitter), not raw process.stdin. useInput hooks subscribe to this internal emitter.
+2. Node's EventEmitter has no stopPropagation. You cannot prevent other listeners from firing.
+3. ink-text-input registers its own internal useInput that cannot be externally controlled.
+
+RESEARCH QUESTIONS — answer each with specific, actionable findings:
+
+1. INK useInput INTERNALS: How does Ink's useInput hook work internally? Specifically:
+   - How does it register/deregister on the internal EventEmitter?
+   - What is the exact call order when multiple useInput hooks are registered?
+   - Is there an `isActive` or similar flag that can disable a useInput handler?
+   - What version of Ink are we likely using (check package.json if available)?
+
+2. INK useFocus / useFocusManager: Does Ink have built-in focus management?
+   - What do useFocus() and useFocusManager() provide?
+   - Can useFocus disable/enable useInput handlers based on focus state?
+   - How does Ink's built-in focus interact with useInput?
+
+3. PROVEN PATTERNS: How have other Ink-based TUI apps solved key dispatch?
+   - Search for patterns like "single useInput dispatcher", "key routing", "focus-based input gating"
+   - Are there npm packages that add key consumption to Ink?
+   - How does ink-text-input handle focus? Does it respect Ink's useFocus?
+
+4. ink-text-input SOURCE: What does ink-text-input actually do with keys?
+   - Which keys does it handle (Tab, arrows, Enter, printable chars)?
+   - Does it have an `isFocused` prop or check focus state?
+   - Can it be conditionally disabled?
+
+5. SINGLE DISPATCHER PATTERN: Is it feasible to have ONE useInput at the App level that dispatches to views via refs/callbacks?
+   - Would this work with ink-text-input (which has its own internal useInput)?
+   - What are the tradeoffs vs. multiple useInput hooks with coordination?
+
+Be thorough and specific. Cite source code, documentation, or package versions where possible.

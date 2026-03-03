@@ -1,0 +1,75 @@
+CODEX (gpt-5.3-codex) — P1-5 Key Event System Review
+
+1. DEPTH-BASED DISPATCH
+depth: 0/1/2 is fragile because it is manual, not derived from the actual render tree.
+- Same depth collisions: if two handlers are both depth=1, order becomes registration-order dependent, which can change with mount timing.
+- Dynamic mount/unmount: opening a modal, switching GroupView modes, or conditional regions can reorder handlers unexpectedly.
+- React StrictMode/dev behavior can double-mount effects temporarily, causing duplicate registration bugs if cleanup is imperfect.
+- Refactors break behavior silently: wrapping a component in another layer won't update depth automatically.
+
+Better: use explicit priority + scope IDs, or a true registration stack per focus scope (active scope first, then parent scope).
+
+2. STDIN INTERCEPTION
+The plan's claim that provider "intercepts process.stdin keypresses before Ink's useInput fires" is the biggest risk.
+- Node lets you prependListener, but this is not a stable contract with Ink internals across versions.
+- Even if your listener runs first, Node events have no propagation stop; you cannot prevent other listeners from running.
+- Fighting Ink at stdin level risks breaking Ctrl+C handling, raw mode expectations, paste behavior, and library compatibility.
+
+Safer approach: do not fight stdin. Keep input inside Ink and centralize handling through one app-level dispatcher.
+
+3. TEXTINPUT COEXISTENCE
+The statement "TextInput only mutates text, never navigation" is incorrect in practice.
+- Enter can submit.
+- Arrow keys can move cursor.
+- Tab behavior is library-dependent and often problematic in TUIs.
+- Your "return true for printable chars" does not stop ink-text-input because it is a separate Ink listener.
+
+So this does not actually solve conflicts; it only hides some global shortcuts. You need a focused-input gate at the command layer, or a custom/forked input component with explicit key ownership.
+
+4. FOCUS MANAGEMENT
+A single flat focusedRegion: string is too weak for nested focus.
+- Collisions across views ("list" in multiple views).
+- No representation for leaf focus (e.g., dependency link index within dependency-links).
+- Stale region values when view changes.
+
+Use hierarchical focus state: scope/view + region + optional item index/ID. Keep selection state local to each region where possible.
+
+5. TAB CYCLING
+"Tab fallback if all handlers return false" leaves key questions unresolved.
+- Who registers available regions?
+- Who defines order?
+- How are hidden/disabled/unmounted regions removed?
+- What about Shift+Tab reverse cycling?
+
+Tab order should be defined per active focus scope via region registration (id, order, enabled), not guessed globally.
+
+6. VISUAL INDICATORS
+Ink can do focus indication, but not exactly like GUI borders everywhere.
+- Practical options: Box borderStyle/borderColor, Text with inverse/background color, prefix markers (>), and dim for inactive regions.
+- Color-only indication is weak in low-color terminals; add symbol/label cues.
+- Frequent border/layout changes can flicker in constrained terminals.
+
+So this is feasible, but needs concrete rendering rules, not just "colored border/highlight."
+
+7. MISSING CONCERNS
+Key gaps in the plan:
+- Testing strategy: key routing integration tests per view/mode, especially Esc/Tab/Enter conflicts.
+- Handler lifecycle safety: duplicate registration, stale closures, cleanup on unmount.
+- Error isolation: one handler throw should not break all input.
+- Performance: avoid sorting handlers on every keypress; maintain ordered registry on register/unregister.
+- State transitions: reset/validate focus on view switch.
+- Accessibility: non-color cues and configurable keybindings.
+- System keys: Ctrl+C / SIGINT behavior must be preserved.
+
+8. SIMPLER ALTERNATIVES
+Given 6 views, a full JUCE-style event framework is likely over-engineered.
+A simpler solution:
+- One useInput at app/view-root only.
+- Route by currentView + local mode (list/issues, text-input/conversation/...).
+- Child regions expose command handlers via props/context, but only active region handles keys.
+- Keep an "input lock" flag while typing in text fields to suppress global shortcuts.
+
+This solves double-fire/key stealing with less risk and less infrastructure.
+
+OVERALL ASSESSMENT
+The plan has good goals, but it is currently missing critical pieces and relies on a flawed assumption about stdin interception/consumption. As written, it is likely to be brittle and over-complex for this app size. A scoped keymap/command-router design inside Ink (without low-level stdin interception) is the safer path.

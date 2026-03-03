@@ -1,0 +1,40 @@
+VALIDATION TASK: Review the Keypress Handling Plan
+
+You are reviewing an implementation plan for fixing keypress handling in a React/Ink TUI app. The plan replaces a rejected JUCE-inspired custom event system (P1-5) with a simpler approach using Ink's built-in isActive flag on useInput.
+
+The plan is in keypress_handling.txt at the repo root. Read it and validate against these criteria:
+
+VALIDATION CRITERIA:
+
+1. CORRECTNESS: Does the plan actually solve the three bugs it identifies?
+   - Bug 1: Double-fire Esc (Detail's handler + App's handler both fire)
+   - Bug 2: Key stealing (App shortcuts fire during child view input)
+   - Bug 3: VIEW_OWNED_KEYS maintenance burden
+   Are there any scenarios where the bugs could still occur?
+
+2. INK COMPATIBILITY: Does the plan correctly use Ink's APIs?
+   - Is useInput({ isActive }) used correctly?
+   - Is TextInput's focus prop used correctly?
+   - Are there any Ink-specific gotchas the plan misses?
+
+3. COMPLETENESS: Does the plan cover all 6 views adequately?
+   - Dashboard, Detail, NewIssue, AgentStatus, BlockingMap, GroupView
+   - Are there key conflicts between view-specific and global shortcuts?
+   - Is the GroupView 'n' key conflict resolved correctly?
+
+4. PHASE B FEASIBILITY: Is the deferred focus-region plan for Detail view sound?
+   - Tab cycling between text-input/conversation/dependency-links
+   - TextInput disabled via focus={false} when not in text-input region
+   - Visual indicators using left-edge bar + dimColor
+   - Are there issues with this approach?
+
+5. TESTING: Are the test cases comprehensive?
+   - Any missing edge cases?
+   - Any hard-to-test scenarios?
+
+6. RISKS: What could go wrong during implementation?
+   - Race conditions during view transitions?
+   - Handler cleanup timing?
+   - Performance concerns?
+
+Format your response as numbered sections. Be specific — cite the plan text when identifying issues. End with: PASS (plan is ready to implement), PASS WITH NOTES (minor issues), or FAIL (blocking issues).

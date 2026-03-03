@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
 import { render } from 'ink-testing-library';
-import { NewIssue } from './create.js';
+import { NewIssue } from './newissue.js';
 
 const TAB = '\t';
 const SHIFT_TAB = '\x1b[Z';

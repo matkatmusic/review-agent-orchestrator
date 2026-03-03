@@ -1,0 +1,97 @@
+- [ ] remove useInput from app entirely: 
+    - app.tsx:2,51  
+    - dashboard.tsx:2,70    
+    - detail.tsx:2,111
+    - newissue.tsx:2,65
+    - agent-status.tsx:2,34
+    - blocking-map.tsx:2,103
+    - group-view.tsx:2,72   
+- [ ] Modify app.tsx
+    - Delete VIEW_OWNED_KEYS constant entirely
+- [ ] ensure constructors of all views accept navigation callbacks
+- [ ] add key handling to each view: 
+    - [ ] dashboard.tsx
+    - [ ] detail.tsx
+    - [ ] newissue.tsx
+    - [ ] agent-status.tsx
+    - [ ] blocking-map.tsx
+    - [ ] group-view.tsx
+- [ ] Pass navigation callbacks to all views:
+    - [ ] onNavigate(view: View): push view onto stack
+        - [ ] dashboard.tsx
+        - [ ] detail.tsx
+        - [ ] newissue.tsx
+        - [ ] agent-status.tsx
+        - [ ] blocking-map.tsx
+        - [ ] group-view.tsx
+    - [ ] onBack(): pop view stack
+        - [ ] dashboard.tsx
+        - [ ] detail.tsx
+        - [ ] newissue.tsx
+        - [ ] agent-status.tsx
+        - [ ] blocking-map.tsx
+        - [ ] group-view.tsx
+    - [ ] onQuit(): exit app
+        - [ ] dashboard.tsx
+        - [ ] detail.tsx
+        - [ ] newissue.tsx
+        - [ ] agent-status.tsx
+        - [ ] blocking-map.tsx
+        - [ ] group-view.tsx
+- [ ] implement onBack handling 
+    - [ ] dashboard.tsx
+    - [ ] detail.tsx
+    - [ ] newissue.tsx
+    - [ ] agent-status.tsx
+    - [ ] blocking-map.tsx
+    - [ ] group-view.tsx
+- [ ] implement onQuit handling 
+    - [ ] dashboard.tsx
+    - [ ] detail.tsx
+    - [ ] newissue.tsx
+    - [ ] agent-status.tsx
+    - [ ] blocking-map.tsx
+    - [ ] group-view.tsx
+- [ ] implement onNavigate handling 
+    - [ ] dashboard.tsx
+    - [ ] detail.tsx
+    - [ ] newissue.tsx
+    - [ ] agent-status.tsx
+    - [ ] blocking-map.tsx
+    - [ ] group-view.tsx
+- [ ] implement wiring global shortcuts into useInput (A.3)
+    - [ ] dashboard.tsx
+        - [ ] Already handles n/a/d/r/j/k/return/tab.
+        - [ ] Add: Esc→onBack (no-op on Dashboard since it's the root).
+        - [ ] Keep: n→onNewIssue (already exists).
+        - [ ] Add: s→onNavigate({type:'AgentStatus'})
+        - [ ] Add: b→onNavigate({type:'BlockingMap'})
+        - [ ] Add: g→onNavigate({type:'GroupView'})
+        - [ ] q→onQuit
+    - [ ] detail.tsx
+        - [ ] Already handles Esc→onBack, up/down scroll.
+        - [ ] Has TextInput — DO NOT add single-char shortcuts (s/b/g/q) because they would conflict with text entry.
+        - [ ] Global shortcuts are NOT available during text entry. This is correct
+        - [ ] behavior — you don't want 'q' to quit while typing a response.
+    - [ ] newissue.tsx
+    - [ ] agent-status.tsx
+        - [ ] Already handles j/k/return.
+        - [ ] Add: Esc→onBack, s→no-op (already on this page)
+        - [ ] Add: b→onNavigate({type:'BlockingMap'})
+        - [ ] Add: g→onNavigate({type:'GroupView'})
+        - [ ] Add: n→onNavigate({type:'NewIssue'})
+    - [ ] blocking-map.tsx
+        - [ ] Already handles j/k/return.
+        - [ ]Add: Esc→onBack
+        - [ ]Add: s→onNavigate({type:'AgentStatus'})
+        - [ ]Add: g→onNavigate({type:'GroupView'})
+        - [ ]Add: n→onNavigate({type:'NewIssue'})
+        - [ ]q→onQuit
+    - [ ] group-view.tsx
+        - [ ] Already handles j/k/return/Esc/n/p.
+        - [ ] n conflicts: n=next issue in issues mode, n=new issue in list mode.
+        - [ ] Resolution: in issues mode, n stays as "next". In list mode, n→new.
+        - [ ] Add: Esc→onBack (list mode), already goes back in issues mode.
+        - [ ] Add: s→onNavigate({type:'AgentStatus'})
+        - [ ] Add: b→onNavigate({type:'BlockingMap'})
+        - [ ] q→onQuit

@@ -1,0 +1,212 @@
+P1-5 KEY EVENT SYSTEM — DEBATE SYNTHESIS (Round 2)
+Date: 2026-03-03
+Participants: Gemini (gemini-3-pro-preview), Codex (gpt-5.3-codex), Claude (Opus 4.6 backend-architect)
+
+========================================================================
+UNANIMOUS FINDINGS (all 3 models agree)
+========================================================================
+
+U1. STDIN INTERCEPTION IS NOT FEASIBLE AS DESCRIBED
+    The plan says KeyEventProvider "intercepts process.stdin keypresses before
+    Ink's useInput fires." All three models identify this as the biggest
+    technical risk.
+
+    - Gemini: Node's EventEmitter has no stopPropagation(). Even with
+      prependListener, all other listeners still fire.
+    - Codex: "Fighting Ink at stdin level risks breaking Ctrl+C handling,
+      raw mode expectations, paste behavior."
+    - Claude: Ink doesn't use process.stdin directly. It uses an internal
+      EventEmitter (internal_eventEmitter) that useInput hooks subscribe to.
+      A raw stdin listener would race with Ink's readable handler or cause
+      data loss.
+
+    Consensus: Do not fight stdin. Work within Ink's event system.
+
+    Claude proposes 3 concrete alternatives:
+    (a) Monkey-patch Ink's internal_eventEmitter (fragile, version-dependent)
+    (b) Wrap stdin via Transform stream before Ink's render() (cleanest
+        interception but requires modifying the entry point)
+    (c) Implement useKeyEvent as a wrapper around Ink's useInput with a shared
+        "consumed" coordination context (most Ink-compatible)
+
+    All models converge on a variant of (c) as the safest path.
+
+
+U2. TEXTINPUT COEXISTENCE IS MORE COMPLEX THAN ACKNOWLEDGED
+    The plan claims "they don't conflict because TextInput only mutates text,
+    never navigation." All three models reject this claim.
+
+    - TextInput handles: Return (onSubmit), left/right arrows (cursor), all
+      printable chars, backspace/delete. It ignores: Tab, up/down arrows.
+    - TextInput uses its own internal useInput. No proposed consumption
+      mechanism can prevent TextInput from processing keys independently.
+    - The plan's "return true for printable chars" only prevents global
+      shortcuts from double-firing — it does NOT stop TextInput from also
+      processing those keys.
+
+    Consensus: Accept dual-processing for text entry keys. Design the system
+    so that when focusedRegion === 'text-input', view-level handlers consume
+    all keys TextInput handles (to block app-level shortcuts), but accept that
+    TextInput itself always processes them too. Eventually fork ink-text-input
+    for full control.
+
+
+U3. DEPTH-BASED DISPATCH IS FRAGILE
+    Manual numeric depth (0, 1, 2) is error-prone.
+
+    - Same-depth collisions: order depends on React mount/render order (not
+      guaranteed stable).
+    - Dynamic mount/unmount: temporary dual-handler windows during view
+      transitions.
+    - Silent breakage: wrapping a component in another layer doesn't update
+      depth automatically.
+
+    Consensus: If the depth system is kept, derive depth automatically from
+    context nesting (FocusScope provider) rather than manual numbers.
+
+
+U4. TAB CYCLING MECHANISM IS UNDEFINED
+    All models note the plan says Tab cycles "at the context level" but does
+    not specify:
+    - Who registers available regions?
+    - Who defines cycle order?
+    - How are unmounted regions removed?
+    - What about Shift+Tab for reverse cycling?
+
+    Consensus: Need a useFocusRegion(name, order?) registration hook that
+    adds/removes regions dynamically on mount/unmount.
+
+
+U5. THE PLAN IS OVER-ENGINEERED FOR 6 VIEWS
+    All three models independently conclude that a full JUCE-inspired event
+    system is too much infrastructure for the current app size.
+
+    - Gemini: "heavily over-engineered" — proposes Active View State pattern
+      (each useInput checks if its view is active before processing)
+    - Codex: "over-complex for this app size" — proposes single useInput at
+      app/view-root + routing by currentView + local mode
+    - Claude: "premature" — proposes single useInput + handleKey dispatch as
+      Phase A, upgrade to full system only if needed as Phase B
+
+    Consensus: Build a simpler solution first. Upgrade later if needed.
+
+
+========================================================================
+MAJORITY FINDINGS (2 of 3 models)
+========================================================================
+
+M1. FLAT focusedRegion STRING IS INSUFFICIENT FOR NESTED FOCUS (Gemini + Codex)
+    Both note that "dependency-links" has internal sub-state (which inum is
+    selected). A flat string can't represent this.
+
+    Gemini: suggests hierarchical path or composite object
+    Codex: suggests scope/view + region + optional item index/ID
+
+    Claude disagrees: flat string is fine for the dispatch system. Sub-region
+    state belongs in the component, not in the focus context. "Do not build
+    hierarchical focus."
+
+    Resolution needed: Claude's argument is pragmatic — keep the global focus
+    flat and let components manage internal selection state locally. This is
+    simpler and sufficient.
+
+
+M2. VISUAL INDICATORS NEED CONCRETE SPECIFICATION (Codex + Claude)
+    Both note the plan's "colored border, highlight" is too vague for Ink.
+
+    Codex: Box borderStyle works but color-only is weak; add symbol/label cues
+    Claude: Box borders cost 2 rows + 2 columns of screen space. Recommends
+    left-edge indicator (pipe or triangle) + dimColor, consistent with existing
+    codebase patterns (group-view.tsx line 157 already uses triangle indicator).
+
+    Gemini: dimming requires applying dim={true} to every Text node (Ink
+    doesn't cascade styles through Box).
+
+
+M3. MISSING: TESTING, ERROR HANDLING, STALE CLOSURES (Codex + Claude)
+    Both identify these gaps:
+    - No testing strategy for key dispatch logic
+    - No error isolation (handler throw kills all input)
+    - Stale handler closures (classic React hooks bug — need useRef pattern)
+    - Sort-on-keypress is wasteful (sort on registration change instead)
+    - Ctrl+C must be preserved
+
+
+========================================================================
+UNIQUE INSIGHTS (1 model only)
+========================================================================
+
+I1. Ink's internal_eventEmitter architecture (Claude only)
+    Claude is the only model that investigated Ink's actual source code and
+    identified that useInput subscribes to internal_eventEmitter, not stdin.
+    This makes the plan's stdin interception approach fundamentally incorrect
+    at the implementation level, not just risky.
+
+I2. Active View State as simplest fix (Gemini only)
+    Gemini proposes the simplest possible fix: each useInput handler checks
+    if its view is active before processing. No custom dispatch, no context,
+    no event system. Just a guard clause:
+      useInput((input, key) => {
+         if (activeView !== 'Detail' || activeModal !== null) return;
+         // process keys...
+      });
+
+I3. Two-phase implementation approach (Claude only)
+    Claude proposes building in two phases:
+    Phase A: Single useInput at App level + view handleKey dispatch. Solves
+    double-fire and key-stealing with minimal changes.
+    Phase B: Full useKeyEvent system with focus regions. Only built when
+    Detail view's dependency navigation is actually implemented.
+
+I4. Modal/overlay focus trapping (Gemini only)
+    Gemini notes that a depth-based system doesn't natively trap focus for
+    modals. A modal at depth 2 runs before depth 1, but doesn't prevent the
+    user from tabbing into background components. This matters for error
+    dialogs or confirmation prompts.
+
+I5. Fork ink-text-input for full control (Gemini only)
+    Gemini explicitly recommends forking ink-text-input into the project
+    codebase to add isFocused gating to its internal useInput.
+
+
+========================================================================
+OVERALL VERDICTS
+========================================================================
+
+Gemini:   REJECT — "over-engineered and technically flawed"
+Codex:    REJECT — "missing critical pieces, flawed stdin assumption"
+Claude:   CONDITIONAL — "sound concept, over-engineered scope, premature"
+
+All 3 agree: the goals are correct but the plan as written should not be
+implemented as-is. The stdin interception is technically unfeasible, TextInput
+coexistence is underspecified, and the scope is too large for the current app.
+
+
+========================================================================
+RECOMMENDED PATH FORWARD
+========================================================================
+
+Option A — Minimal Fix (all 3 models support some variant of this):
+  1. Keep useInput everywhere
+  2. Add a shared InputContext with activeView + focusedRegion state
+  3. Each useInput handler checks if it should process (guard clause pattern)
+  4. App-level handler runs AFTER checking if the view consumed the key
+  5. Fork ink-text-input to add focus-aware gating
+  Solves: double-fire, key-stealing, TextInput conflicts
+  Does NOT solve: focus region cycling, visual indicators
+
+Option B — Claude's Two-Phase (more structured):
+  Phase A: Single useInput at App level. Views expose handleKey via ref.
+           App dispatches to current view first, handles globals second.
+  Phase B: Full useKeyEvent system with FocusScope auto-depth, region
+           registration, consumption protocol — built only when Detail
+           view's dependency navigation is needed.
+
+Option C — Revised P1-5 (keep the architecture, fix the implementation):
+  1. Replace stdin interception with useInput wrapper + consumed coordination
+  2. Replace manual depth with FocusScope auto-depth
+  3. Add useFocusRegion registration for Tab cycling
+  4. Add key-by-key TextInput compatibility matrix
+  5. Add TestKeyEventProvider, error isolation, stale-closure guards
+  6. Use left-edge indicators instead of Box borders
+  Keeps the plan's architecture but addresses all identified gaps.

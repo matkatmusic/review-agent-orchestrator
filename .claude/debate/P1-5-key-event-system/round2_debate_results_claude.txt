@@ -1,0 +1,164 @@
+CLAUDE (backend-architect, Opus 4.6) — P1-5 Key Event System Review
+
+1. DEPTH-BASED DISPATCH
+
+The numeric depth approach (0=App, 1=view, 2=sub-region) is a simplification that works only as long as the component hierarchy is shallow and predictable. I see three concrete problems.
+
+Same-depth collision. The plan says nothing about what happens when two handlers register at depth 1. Right now only one view is active at a time (the viewStack in app.tsx line 40 controls this), so collisions at depth 1 seem unlikely -- but only because unmounted views drop their hooks. The moment you have two sibling components both at depth 1 (e.g., if a future view renders two independently-keyed sub-panels), dispatch order becomes undefined. Registration order within a depth level depends on React render order, which is not guaranteed to be stable across renders when keys change.
+
+Dynamic mount/unmount. When a view unmounts, its useKeyEvent cleanup function must deregister the handler. This is straightforward if implemented as a useEffect cleanup. But there is a timing concern: React batches state updates. If a navigation action both unmounts the old view and mounts a new one, there is a render cycle where both handlers may exist simultaneously. If a keypress arrives during this window, the old handler fires on an unmounted component. This needs a guard (isMounted ref pattern or checking a disposed flag).
+
+Rigidity. Depth numbers are manually assigned by each call site. If someone writes useKeyEvent(handler, 1) in a sub-component of a view that is already at depth 1, you get a collision. The plan should either enforce depth via context (a provider automatically increments depth for children) or at minimum document clearly that depth must be unique per handler. A better approach: derive depth automatically from a nesting counter in context, so wrapping a FocusScope component increments depth for everything inside it.
+
+Recommendation: Replace manual numeric depth with an auto-incrementing FocusScope context provider. Each FocusScope increments the depth for its children. This makes depth implicit and prevents misuse.
+
+
+2. STDIN INTERCEPTION
+
+This is the most technically risky part of the plan. After reading Ink's source code, the plan's claim that KeyEventProvider can "intercept process.stdin keypresses before Ink's useInput fires" is not straightforward. Here is why.
+
+Ink does not attach a raw listener to process.stdin in the way the plan assumes. Ink's App component reads from stdin via a "readable" event handler:
+
+    handleReadable = () => {
+        let chunk;
+        while ((chunk = this.props.stdin.read()) !== null) {
+            this.handleInput(chunk);
+            this.internal_eventEmitter.emit('input', chunk);
+        }
+    };
+
+It then emits the parsed input through an internal EventEmitter. The useInput hook listens on this internal_eventEmitter, not on process.stdin directly:
+
+    internal_eventEmitter?.on('input', handleData);
+
+So you cannot simply call process.stdin.on('data', ...) and expect to run before Ink. Ink uses the readable event and reads chunks itself. A competing reader on the same stream would either race with Ink or cause data loss.
+
+Three realistic approaches:
+
+(a) Monkey-patch Ink's internal_eventEmitter. Access the StdinContext via React context (useStdin from ink), get internal_eventEmitter, and prepend a listener using emitter.prependListener('input', ...). Your listener processes the raw buffer, decides whether to consume it, and if consumed, calls something to prevent other listeners from firing. Problem: EventEmitter has no built-in "consume/stop" mechanism. You would need to either remove and re-add Ink's listeners conditionally, or patch emit itself. This is fragile and version-dependent.
+
+(b) Wrap stdin before passing it to Ink's render(). Ink's render() accepts a stdin option. You could create a Transform stream that sits between process.stdin and Ink. Your Transform filters keypresses before Ink ever sees them. This is the cleanest interception point but requires modifying the Ink render call, which is typically in the entry point.
+
+(c) Let Ink fire all handlers, but make your useKeyEvent handlers run inside Ink's useInput (not bypass it). Each useKeyEvent handler is internally a useInput call that communicates with the KeyEventContext to coordinate consumption. The context maintains a "consumed" flag that resets on each input event. Handlers check this flag before acting. This is the most Ink-compatible approach.
+
+Recommendation: Use option (c). Implement useKeyEvent as a wrapper around useInput that registers with a shared context. On each keystroke, the context coordinates dispatch order using a two-phase approach: first collect all handler responses (via a microtask or synchronous registry walk), then only the highest-priority unconsumed handler acts. TextInput's useInput becomes just another handler in this scheme.
+
+
+3. TEXTINPUT COEXISTENCE
+
+The plan's claim that "they don't conflict because TextInput only mutates text, never navigation" is wrong after reading ink-text-input's source code.
+
+Here is what TextInput actually does with special keys:
+
+Tab: TextInput explicitly returns early on Tab. So Tab is dropped by TextInput, which means the plan's Tab cycling can work -- but only because TextInput ignores it, not because there is no conflict.
+
+Arrow keys: TextInput handles leftArrow and rightArrow for cursor movement. It explicitly ignores upArrow and downArrow. So left/right arrows in TextInput will move the cursor AND also fire in any competing useInput handlers. This is a real conflict for the Detail view, where up/down scroll conversation. Up/down are fine (TextInput ignores them), but if a future handler uses left/right, TextInput will also process them.
+
+Enter/Return: TextInput calls onSubmit on Return. The Detail view's useInput also handles Return (or will in the future). Both will fire. In the current code this works because Detail does not act on Return in its useInput, but the plan's useKeyEvent system must account for this: who gets Return first? If the text input's onSubmit fires AND the view's handler also fires, you get double processing.
+
+The fundamental issue: TextInput uses useInput internally and you cannot change that without forking the package. Any useKeyEvent system must either: (1) make TextInput's useInput calls no-ops when the event system handles the key (requires patching), or (2) accept that TextInput processes keys independently and design around it.
+
+Recommendation: Accept that TextInput will always process printable characters and some special keys. The useKeyEvent system should be designed so that when focusedRegion === 'text-input', the view-level handler returns true for all keys that TextInput handles (printable chars, left/right, backspace, delete, return) to prevent them from bubbling to app-level handlers. This is effectively what the plan suggests but needs to be more explicit about which exact keys to consume. Consider forking ink-text-input eventually to replace its internal useInput with useKeyEvent.
+
+
+4. FOCUS MANAGEMENT
+
+A flat string for focusedRegion is sufficient for the current application but will break as soon as any region has internal sub-focus.
+
+The plan's own example exposes this: Detail view has 'dependency-links' as a focus region, and the TODO comment in detail.tsx (lines 135-139) says "arrow keys select an inum and Enter navigates to it." That means dependency-links has internal state (which inum is selected). The focusedRegion string tells you that dependency-links has focus, but it does not tell you which inum within that region is highlighted.
+
+This is not a reason to make focus hierarchical -- it is a reason to keep focus flat at the event-system level but let each region manage its own internal focus state independently. The key event system only needs to know "which region owns the keypress." What happens inside that region is the region's own state (a cursor index, a selected inum, etc.), managed by the component itself.
+
+Recommendation: Keep focusedRegion as a flat string. Document that each region manages its own internal selection/cursor state. The focus context only tracks which region has dispatch priority.
+
+
+5. TAB CYCLING
+
+The plan says "Tab cycles between regions at the context level after all handlers return false." Three things are undefined.
+
+Who defines the cycle order? The plan does not specify. If Tab handling is a fallback in the KeyEventContext, the context needs to know the ordered list of available regions. This order must come from somewhere -- either hardcoded per view or registered by each region component.
+
+Who defines which regions exist? Regions come and go with component mount/unmount. The context needs a registration mechanism: each focusable region calls useFocusRegion('name') on mount, which registers it, and deregisters on unmount. The cycle order could be registration order (which follows render order) or an explicit priority number.
+
+How does the context know what is available? It does not, unless regions register themselves. The plan mentions useFocus() returning { focusedRegion, setFocusedRegion, cycleFocus }, but cycleFocus needs a list to cycle through. That list must be built dynamically.
+
+The create.tsx component (NewIssue) already has its own Tab handling that cycles between form fields. This would conflict with the context-level Tab fallback. The plan says "Map activeField to focusedRegion" but if each field is a separate focusedRegion, that means 4 regions for NewIssue, each registering with the context. This works but is more complex than the current implementation.
+
+Recommendation: Add a useFocusRegion(name, order?) hook that registers a region name and optional sort order with the context on mount, and deregisters on unmount. cycleFocus iterates through registered regions in order. For NewIssue, each field registers as a region. The plan needs to specify this registration mechanism explicitly.
+
+
+6. VISUAL INDICATORS
+
+The plan says "colored border, highlight, unfocused regions dimmed." This is partially practical in Ink and partially not.
+
+What works: Ink supports the dimColor prop (used extensively in the current code -- see detail.tsx line 153, group-view.tsx line 143). Text color changes are trivial. You can dim unfocused regions by wrapping them in <Text dimColor>...</Text>. You can highlight the focused region with a distinct color (cyan is already used for selection highlighting).
+
+What does not work well: Ink's Box component supports borderStyle ('single', 'double', 'round', etc.) and borderColor. So you CAN add borders. But borders consume terminal real estate -- a single-line border adds 2 columns and 2 rows. In a terminal that might be 80x24, losing 4 rows to borders is significant. The current layout already accounts for rows carefully (detail.tsx lines 105-108 compute conversationHeight by subtracting header and input area lines).
+
+Practical approach: Use a left-edge indicator (a vertical bar or arrow character) rather than a full box border. This costs 1-2 columns, not 4 rows. Something like:
+
+    Focused region:   "| Conversation text here"  (cyan vertical bar)
+    Unfocused region: "  Input field here"         (dimmed)
+
+This is exactly what the current code already does for list selection (group-view.tsx line 157 uses a triangle indicator). Extend this pattern to focus regions.
+
+Recommendation: Do not use Box borders for focus indication. Use a colored left-margin indicator character (pipe or triangle) for the focused region and dimColor for unfocused regions. This is consistent with existing UI patterns in the codebase and costs minimal screen space.
+
+
+7. MISSING CONCERNS
+
+Testing. The plan does not mention how to test the key event system. The current codebase has test files (blocking-map.test.tsx, group-view.test.tsx). Key dispatch logic needs unit tests that verify: (a) child-first ordering, (b) consumption stops propagation, (c) mount/unmount properly registers and deregisters handlers, (d) Tab cycling works with dynamic region sets. These tests need a TestKeyEventProvider that lets tests inject keypresses programmatically without process.stdin.
+
+Error handling. What happens if a handler throws? The dispatch loop should catch errors per-handler to prevent one broken handler from killing all key processing. Log the error and continue to the next handler.
+
+Performance. The plan says handlers are sorted by descending depth. If this sort happens on every keypress, it is wasteful. The handler list changes only on mount/unmount, so sort once on registration change, not on every dispatch. Use a ref to cache the sorted list and invalidate it only when handlers are added or removed.
+
+Stale handler closures. This is a classic React hooks bug. If a useKeyEvent handler closes over state that changes between renders, the handler in the registry may be stale. The implementation must use a ref to hold the latest handler callback (the useRef + useEffect pattern) so the registry always calls the current handler.
+
+Ctrl+C handling. Ink has special handling for Ctrl+C (exit on ctrl+c). The key event system must not accidentally consume Ctrl+C before Ink's handler runs, or the user cannot exit the app.
+
+Recommendation: Add to the plan: (1) TestKeyEventProvider for tests, (2) try/catch in dispatch loop, (3) sort-on-change not sort-on-keypress, (4) useRef for latest handler pattern, (5) explicit Ctrl+C passthrough.
+
+
+8. ALTERNATIVE APPROACHES
+
+The original problems are specific and finite:
+
+Problem 1: Double-fire Esc. Detail's Esc handler fires AND App's Esc handler fires. Solution: App already has VIEW_OWNED_KEYS. The issue is that this is manually maintained and incomplete.
+
+Problem 2: Key stealing. App-level shortcuts (q, n, s, b, g) fire even when a child view needs those keys. Solution: the same VIEW_OWNED_KEYS approach covers this, but it is a maintenance burden.
+
+Simpler alternative: Instead of building a full event dispatch system, keep useInput everywhere but add a single shared "consumed" ref.
+
+The problem with this approach is that useInput listener order is not guaranteed. So "consumed" might be checked by App before the child sets it.
+
+A slightly better alternative: eliminate useInput in views entirely. Have only one useInput at the App level. Dispatch keys to the current view via a callback:
+
+    useInput((input, key) => {
+        const consumed = currentViewRef.current?.handleKey(input, key);
+        if (consumed) return;
+        // ...global shortcuts
+    });
+
+Each view exposes a handleKey method via useImperativeHandle or a ref. App calls it, and if the view consumed the key, App skips its own handling. This gives you strict ordering (view always runs first, App always runs second) without an event system.
+
+This is simpler and solves both original problems. It does not handle the focus-region sub-dispatch within Detail view, but that could be added as internal logic within Detail's handleKey.
+
+However, this "single useInput + dispatch" approach has its own drawbacks: it couples App to the view interface (every view must implement handleKey), it puts key routing logic in App rather than in the views, and it makes views less self-contained. The plan's useKeyEvent approach is more extensible and keeps key handling local to each view.
+
+My assessment: the "single useInput + dispatch" pattern is the right starting point. Build it as the minimal viable solution. If it proves insufficient when adding focus regions to Detail view, upgrade to the full useKeyEvent system. Do not build the full system upfront.
+
+
+OVERALL ASSESSMENT
+
+The plan is architecturally sound in its goals but under-specified in its implementation details. It identifies the right problems and proposes the right conceptual solution (child-first dispatch with consumption). But it has three critical gaps:
+
+(1) STDIN interception mechanism is not feasible as described. Ink uses an internal EventEmitter, not raw stdin listeners. The implementation must either work within Ink's useInput system or intercept the internal EventEmitter. This is the biggest technical risk.
+
+(2) TextInput coexistence is more complex than acknowledged. TextInput handles Return, left/right arrows, backspace, delete, and all printable characters. The plan needs an explicit key-by-key compatibility matrix.
+
+(3) The plan is over-engineered for 6 views. A simpler "single dispatcher" pattern solves the immediate problems. The full event system should be a second iteration if the simpler approach proves insufficient.
+
+The plan is not wrong -- it is premature. Build the minimal solution first (single useInput at App level, view-level handleKey dispatch), validate it against the Detail view's focus-region needs, and upgrade to the full useKeyEvent system only if the simple approach cannot handle it.
+
+Verdict: Sound concept, over-engineered scope, missing critical implementation details. Recommend a two-phase approach: Phase A solves double-fire and key-stealing with minimal changes, Phase B adds the full event system with focus regions when Detail view's dependency navigation is implemented.

@@ -43,8 +43,8 @@ describe('BlockingMap — rendering', () => {
     it('displays issue titles', () => {
         const { lastFrame } = render(<BlockingMap navigate={vi.fn()} />);
         const frame = lastFrame()!;
-        // Mock issues should show their titles
-        expect(frame).toContain('Set up CI pipeline');
+        // Mock issues should show their titles from canonical mock-data
+        expect(frame).toContain('migrate_ServerDerivedFields');
     });
 
     it('displays issue statuses', () => {
@@ -67,9 +67,9 @@ describe('BlockingMap — rendering', () => {
     it('shows isolated issues section for issues with no dependencies', () => {
         const { lastFrame } = render(<BlockingMap navigate={vi.fn()} />);
         const frame = lastFrame()!;
-        // I-7 "Update README" has no dependencies — shown separately
+        // I-7 "legacy_api_removal" and I-8 "initial_setup_task" have no dependencies — shown separately
         expect(frame).toContain('I-7');
-        expect(frame).toContain('Update README');
+        expect(frame).toContain('legacy_api_removal');
     });
 
     // ---- Diamond dependency (I-6 blocked by both I-3 and I-5) ----

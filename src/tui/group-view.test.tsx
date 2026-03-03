@@ -31,10 +31,10 @@ describe('GroupView', () => {
     it('shows issue counts for containers', () => {
         const { lastFrame } = render(<GroupView />);
         const frame = lastFrame()!;
-        // Inbox has 1/3, Sprint has 0/3, Frontend has 1/1
+        // Inbox has 1/3 (inum 8 Resolved), Sprint has 0/3, Frontend has 0/1, Backlog has 0/1
         expect(frame).toContain('1/3');
         expect(frame).toContain('0/3');
-        expect(frame).toContain('1/1');
+        expect(frame).toContain('0/1');
     });
 
     it('shows progress as resolved/total', () => {
@@ -329,13 +329,11 @@ describe('GroupView', () => {
 
     // ---- Empty states ----
 
-    it('shows empty message for container with no issues', async () => {
+    it('shows single issue for container with one issue', async () => {
         const { lastFrame, stdin } = render(<GroupView />);
         await tick();
 
-        // Navigate to Backlog (4th container, index 3 — has no issues)
-        stdin.write('j');
-        await tick();
+        // Navigate to Frontend (3rd container, index 2 — has 1 issue)
         stdin.write('j');
         await tick();
         stdin.write('j');
@@ -344,7 +342,8 @@ describe('GroupView', () => {
         await tick();
         const frame = lastFrame()!;
 
-        expect(frame).toContain('No issues');
+        expect(frame).toContain('Frontend');
+        expect(frame).toMatch(/I-\s*4/);
     });
 
     // ---- onNavigate callback ----
@@ -369,12 +368,12 @@ describe('GroupView', () => {
         stdin.write('\r');
         await tick();
 
-        // Press Enter on first issue (inum 2 — Active "Implement auth module")
+        // Press Enter on first issue (inum 1 — Active "migrate_ServerDerivedFields")
         stdin.write('\r');
         await tick();
 
         expect(onNavigate).toHaveBeenCalledOnce();
-        expect(onNavigate).toHaveBeenCalledWith(2);
+        expect(onNavigate).toHaveBeenCalledWith(1);
     });
 
     // ---- onBack callback ----
@@ -421,9 +420,10 @@ describe('GroupView', () => {
         expect(frame).toContain('Backlog');
     });
 
-    it('shows 0/0 for empty container', () => {
+    it('all containers have issues assigned', () => {
         const { lastFrame } = render(<GroupView />);
         const frame = lastFrame()!;
-        expect(frame).toContain('0/0');
+        // No container should be 0/0 — all have at least one issue
+        expect(frame).not.toContain('0/0');
     });
 });

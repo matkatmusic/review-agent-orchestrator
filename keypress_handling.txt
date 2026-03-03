@@ -1,0 +1,582 @@
+Keypress Handling Plan — TUI Views
+====================================
+
+Date: 2026-03-03
+Replaces: P1-5 (JUCE-inspired custom event system — rejected by debate)
+Status: NEEDS IMPLEMENTATION
+
+
+Background
+----------
+
+P1-5 proposed building a custom key event system modeled on JUCE's
+ComponentPeer::handleKeyPress. A three-model debate (Gemini, Codex, Claude)
+unanimously rejected the plan as over-engineered and technically flawed:
+
+  1. stdin interception is not feasible — Ink uses an internal EventEmitter,
+     not raw process.stdin. Node's EventEmitter has no stopPropagation.
+  2. TextInput coexistence was underspecified — ink-text-input registers its
+     own useInput that cannot be externally suppressed.
+  3. Manual depth numbers (0/1/2) are fragile and error-prone.
+  4. Tab cycling mechanism was undefined.
+  5. A full event system is over-engineered for 6 views.
+
+Subsequent research into Ink's actual source code (v5.2.1) revealed that Ink
+already provides the mechanisms needed to solve the problem. No custom event
+system is required.
+
+Full debate record:   .claude/debate/P1-5-key-event-system/round2_synthesis.txt
+Research findings:    .claude/debate/P1-5-key-event-system/discover_prompt.txt
+
+
+Key Findings from Ink Source Code
+---------------------------------
+
+1. useInput has a built-in isActive option.
+   Signature: useInput(handler, { isActive?: boolean })
+   When isActive === false, the handler is completely deregistered from
+   Ink's internal EventEmitter. Not just silenced — the listener is removed
+   entirely. No handler fires, no raw mode is set.
+   Source: node_modules/ink/build/hooks/use-input.js lines 33-44, 89-91
+
+2. Ink has built-in focus management.
+   useFocus({ id?, isActive?, autoFocus? }) => { isFocused: boolean, focus() }
+   useFocusManager() => { focusNext(), focusPrevious(), focus(id), enableFocus(), disableFocus() }
+   Tab key automatically calls focusNext(). Shift+Tab calls focusPrevious().
+   Focus cycles through registered components in render order.
+   Source: node_modules/ink/build/hooks/use-focus.js, use-focus-manager.js
+
+3. ink-text-input has a focus prop.
+   <TextInput focus={boolean} .../>
+   Internally maps to: useInput(handler, { isActive: focus })
+   When focus={false}, TextInput's handler is fully deregistered.
+   TextInput ignores: upArrow, downArrow, ctrl+c, tab, shift+tab
+   TextInput handles: return (onSubmit), leftArrow, rightArrow, backspace,
+   delete, all printable characters.
+   Source: node_modules/ink-text-input/build/index.js lines 48-106
+
+4. The standard Ink ecosystem pattern is:
+   const { isFocused } = useFocus();
+   useInput(handler, { isActive: isFocused });
+   This is how ink-select-input and other ecosystem packages work.
+
+
+The Problem (restated)
+----------------------
+
+Ink's useInput registers handlers on a flat internal EventEmitter. When
+multiple components call useInput, ALL handlers fire for EVERY keypress.
+There is no propagation, no bubbling, no consumption.
+
+This caused these specific bugs:
+
+  Bug 1 — Double-fire Esc: pressing Esc in Detail view fired both Detail's
+  handler (calling onBack) and App's handler (calling goBack). Two pops.
+
+  Bug 2 — Key stealing: App-level global shortcuts (q for Quit, n for New,
+  s for Agents, b for Blocking, g for Groups) fired even when a child view
+  needed those keys (n for next in GroupView, any key for text entry in
+  Detail/NewIssue).
+
+  Bug 3 — Workaround fragility: VIEW_OWNED_KEYS requires manual maintenance,
+  cannot prevent sibling/grandchild double-firing, and NewIssue must list
+  every typeable character to prevent global shortcuts during text entry.
+
+
+Solution: isActive-Gated Input
+------------------------------
+
+Use Ink's built-in isActive flag to ensure that only the current view's
+useInput handler is registered at any given time. All other handlers are
+completely deregistered.
+
+Core principle: instead of consuming events after they fire (impossible in
+Ink), prevent handlers from being registered in the first place.
+
+Architecture:
+
+  App (depth 0)
+    useInput(globalHandler, { isActive: true })    ← always active
+    └── Dashboard
+          useInput(dashHandler, { isActive: currentView === 'Dashboard' })
+    └── Detail
+          useInput(detailHandler, { isActive: currentView === 'Detail' })
+          └── TextInput focus={focusedRegion === 'text-input'}
+    └── NewIssue
+          useInput(createHandler, { isActive: currentView === 'NewIssue' })
+          └── TextInput focus={activeField === i}
+    └── AgentStatus
+          useInput(agentHandler, { isActive: currentView === 'AgentStatus' })
+    └── BlockingMap
+          useInput(mapHandler, { isActive: currentView === 'BlockingMap' })
+    └── GroupView
+          useInput(groupHandler, { isActive: currentView === 'GroupView' })
+
+When currentView === 'Dashboard':
+  - Dashboard's useInput is active (registered on EventEmitter)
+  - Detail's useInput is inactive (deregistered entirely)
+  - NewIssue's useInput is inactive
+  - etc.
+  - App's useInput is always active (for global shortcuts that no view handles)
+
+This eliminates double-firing because only one view handler exists at a time.
+It eliminates key stealing because deregistered handlers cannot fire.
+It eliminates VIEW_OWNED_KEYS because there is nothing to gate.
+
+
+Implementation
+--------------
+
+Phase A: Basic isActive Gating
+  Goal: Eliminate double-fire and key-stealing. Delete VIEW_OWNED_KEYS.
+
+  Step A.1 — Pass isActive to views
+    Modify App to pass an isActive prop to each view component:
+
+      <Dashboard isActive={currentView.type === 'Dashboard'} ... />
+      <DetailView isActive={currentView.type === 'Detail'} ... />
+      <NewIssue isActive={currentView.type === 'NewIssue'} ... />
+
+    Views are always rendered (so they preserve state across navigation), but
+    only the active view registers its useInput handler.
+
+    Wait — the current architecture conditionally renders views (switch
+    statement in app.tsx lines 92-155). This means only one view exists in
+    the React tree at a time. When App unmounts Dashboard and mounts Detail,
+    Dashboard's useInput is automatically cleaned up.
+
+    This means the double-fire bug is NOT between sibling views — it is
+    between the CURRENT VIEW and APP. Both have useInput registered. The
+    current view's handler AND app.tsx's handler both fire.
+
+    Therefore the fix is simpler: move global shortcuts INTO each view, and
+    remove app.tsx's useInput entirely. OR: keep app.tsx's useInput but
+    gate it with isActive so it only handles keys the current view does not.
+
+    The cleanest approach: views handle ALL their keys (including Esc for
+    back navigation). App handles ONLY keys that no view handles — and the
+    set of such keys depends on which view is active.
+
+    Revised approach: App's useInput stays, but App does not handle any keys
+    that the current view might handle. Instead of VIEW_OWNED_KEYS, views
+    return whether they handled the key via a callback pattern.
+
+    Simplest correct approach:
+    ─────────────────────────
+    1. Remove useInput from App entirely.
+    2. Each view handles ALL keys it needs, including global navigation.
+    3. Views call props like onBack, onQuit, onNavigate for actions that
+       affect App state.
+    4. Global shortcuts (q/s/b/g/n) are passed as callbacks from App to
+       the current view. Each view wires them into its own useInput.
+
+    This gives each view full control over its input. No double-firing is
+    possible because only one view is rendered at a time, and App has no
+    useInput.
+
+    Trade-off: every view must wire up global shortcuts. This is 5 extra
+    lines per view (q→quit, s→agents, b→blocking, g→groups, Esc→back)
+    but eliminates the entire class of problems.
+
+    Alternative: App keeps a single useInput that handles ONLY the keys
+    that never conflict: 'q' for quit. All navigation is done by views.
+    This is even simpler — 'q' is never needed by any view except as quit.
+
+    CHOSEN APPROACH:
+    App has NO useInput. Zero. Views are fully self-contained.
+    Each non-text-entry view calls handleGlobalKey (which includes q).
+    Text-entry views (Detail, NewIssue) do not call handleGlobalKey.
+    Views receive navigation callbacks from App as props.
+
+    (Resolved after validation review: keeping App's useInput for 'q'
+    would reintroduce the double-fire pattern for text-entry views.
+    Moving q into handleGlobalKey eliminates the problem entirely.)
+
+  Step A.2 — Modify app.tsx
+    - Delete VIEW_OWNED_KEYS constant entirely
+    - Delete App's useInput entirely (no handler at all)
+
+    - ensure constructors of all views accept navigation callbacks
+    - Pass navigation callbacks to all views:
+        onNavigate(view: View): push view onto stack
+        onBack(): pop view stack
+        onQuit(): exit app
+    - Each view wires them in its own useInput handler.
+
+  Step A.3 — Modify each view
+    Each view adds global navigation shortcuts to its useInput handler.
+    These keys are: Esc (back), s (agents), b (blocking), g (groups).
+
+    Dashboard.tsx:
+      Already handles n/a/d/r/j/k/return/tab.
+      Add: Esc→onBack (no-op on Dashboard since it's the root).
+      Keep: n→onNewIssue (already exists).
+      Add: s→onNavigate({type:'AgentStatus'})
+      Add: b→onNavigate({type:'BlockingMap'})
+      Add: g→onNavigate({type:'GroupView'})
+      q→onQuit
+
+    detail.tsx:
+      Already handles Esc→onBack, up/down scroll.
+      Has TextInput — DO NOT add single-char shortcuts (s/b/g/q) because
+      they would conflict with text entry.
+      Global shortcuts are NOT available during text entry. This is correct
+      behavior — you don't want 'q' to quit while typing a response.
+
+    newissue.tsx:
+      Already handles Esc→onCancel, Return→submit, Tab→cycle fields.
+      Has TextInput — same as Detail, no single-char shortcuts.
+
+    AgentStatus.tsx:
+      Already handles j/k/return.
+      Add: Esc→onBack, s→no-op (already on this page)
+      Add: b→onNavigate({type:'BlockingMap'})
+      Add: g→onNavigate({type:'GroupView'})
+      Add: n→onNavigate({type:'NewIssue'})
+      q→onQuit
+
+    BlockingMap.tsx:
+      Already handles j/k/return.
+      Add: Esc→onBack
+      Add: s→onNavigate({type:'AgentStatus'})
+      Add: g→onNavigate({type:'GroupView'})
+      Add: n→onNavigate({type:'NewIssue'})
+      q→onQuit
+
+    GroupView.tsx:
+      Already handles j/k/return/Esc/n/p.
+      n conflicts: n=next issue in issues mode, n=new issue in list mode.
+      Resolution: in issues mode, n stays as "next". In list mode, n→new.
+      Add: Esc→onBack (list mode), already goes back in issues mode.
+      Add: s→onNavigate({type:'AgentStatus'})
+      Add: b→onNavigate({type:'BlockingMap'})
+      q→onQuit
+
+  Step A.4 — Extract shared key handler
+    To avoid repeating global shortcut wiring in every view, extract a
+    helper function:
+
+      // src/tui/global-keys.ts
+      export function handleGlobalKey(
+          input: string,
+          key: Key,
+          currentView: ViewType,
+          callbacks: {
+              onBack?: () => void;
+              onQuit?: () => void;
+              onNavigate?: (view: View) => void;
+          }
+      ): boolean {
+          if (key.escape) { callbacks.onBack?.(); return true; }
+          if (input === 'q') { callbacks.onQuit?.(); return true; }
+          // Skip same-view navigation to prevent duplicate stack entries
+          if (input === 's' && currentView !== 'AgentStatus') {
+              callbacks.onNavigate?.({type:'AgentStatus'}); return true;
+          }
+          if (input === 'b' && currentView !== 'BlockingMap') {
+              callbacks.onNavigate?.({type:'BlockingMap'}); return true;
+          }
+          if (input === 'g' && currentView !== 'GroupView') {
+              callbacks.onNavigate?.({type:'GroupView'}); return true;
+          }
+          if (input === 'n') { callbacks.onNavigate?.({type:'NewIssue'}); return true; }
+          return false;
+      }
+
+      Note: handleGlobalKey takes currentView to prevent same-view
+      navigation. Pressing 'b' while on BlockingMap is a no-op (does not
+      push a duplicate BlockingMap onto the view stack). Pressing 'n'
+      always navigates to NewIssue regardless of current view (NewIssue
+      is a form, not a toggle). Dashboard is the root and not navigated
+      to via shortcut.
+
+    Each view calls this at the END of its useInput handler (after checking
+    its own keys first), so view-specific keys take priority:
+
+      useInput((input, key) => {
+          // View-specific keys first
+          if (key.return) { ... return; }
+          if (input === 'j') { ... return; }
+          // Then global shortcuts (only if view didn't handle it)
+          handleGlobalKey(input, key, { onBack, onQuit, onNavigate });
+      });
+
+    Views with text entry (Detail, NewIssue) do NOT call handleGlobalKey
+    because all keys go to text input.
+
+
+Phase B: Focus Regions in Detail View
+  Goal: Add Tab-cycling between regions in Detail view (text-input,
+  conversation, dependency-links). Add visual focus indicators.
+
+  This phase is deferred until Detail view's dependency navigation
+  is implemented. When built, use this approach:
+
+  Step B.1 — Detail view focus regions
+    Three regions: 'text-input', 'conversation', 'dependency-links'
+
+    State: const [focusedRegion, setFocusedRegion] = useState('text-input');
+
+    Tab cycles: text-input → conversation → dependency-links → text-input
+    Shift+Tab cycles in reverse.
+
+    TextInput receives: focus={focusedRegion === 'text-input'}
+    When focusedRegion !== 'text-input', TextInput's internal useInput is
+    deregistered (via focus={false}). This means:
+    - Arrow keys can scroll conversation or navigate dependency links
+    - Single-char keys can be used as shortcuts (not swallowed by TextInput)
+    - Enter can navigate to a dependency link (not swallowed by onSubmit)
+
+    When focusedRegion === 'text-input', TextInput's internal useInput is
+    active. This means:
+    - All printable chars go to text entry
+    - Enter submits the message
+    - Up/down arrows: TextInput ignores these, so Detail's handler scrolls
+
+    Detail's useInput handler switches behavior based on focusedRegion:
+
+      useInput((input, key) => {
+          // Tab cycling (always available — TextInput ignores Tab)
+          if (key.tab) {
+              const regions = ['text-input', 'conversation', 'dependency-links'];
+              const idx = regions.indexOf(focusedRegion);
+              const next = key.shift
+                  ? (idx - 1 + regions.length) % regions.length
+                  : (idx + 1) % regions.length;
+              setFocusedRegion(regions[next]);
+              return;
+          }
+
+          if (focusedRegion === 'text-input') {
+              // Only handle non-text keys (Esc, arrows for scroll)
+              if (key.escape) { onBack?.(); return; }
+              if (key.upArrow) { scrollUp(); return; }
+              if (key.downArrow) { scrollDown(); return; }
+              // All other keys go to TextInput (which is focus={true})
+              return;
+          }
+
+          if (focusedRegion === 'conversation') {
+              if (key.upArrow) { scrollUp(); return; }
+              if (key.downArrow) { scrollDown(); return; }
+              if (key.escape) { onBack?.(); return; }
+              // Global shortcuts available when not typing
+              handleGlobalKey(input, key, { onBack, onQuit, onNavigate });
+              return;
+          }
+
+          if (focusedRegion === 'dependency-links') {
+              if (key.upArrow) { selectPrevDep(); return; }
+              if (key.downArrow) { selectNextDep(); return; }
+              if (key.return) { navigateToDep(); return; }
+              if (key.escape) { onBack?.(); return; }
+              handleGlobalKey(input, key, { onBack, onQuit, onNavigate });
+              return;
+          }
+      }, { isActive: isActive });   // isActive from parent (view is current)
+
+  Step B.2 — Visual focus indicators
+    Use left-edge indicators and dimColor, consistent with existing patterns.
+
+    Focused region:    cyan left-edge bar "│" + normal text colors
+    Unfocused region:  no bar + dimColor on all text
+
+    Example (conversation focused):
+
+      │ [agent] 2026-02-28 20:31
+      │ Should we use typed accessors or...
+        ─────────────────────────────────
+        > Type response here...           (dimmed)
+        Blocked by: (none) | Blocks: I-14 (dimmed)
+
+    Example (text-input focused):
+
+        [agent] 2026-02-28 20:31          (dimmed)
+        Should we use typed accessors...  (dimmed)
+        ─────────────────────────────────
+      │ > Type response here...
+        Blocked by: (none) | Blocks: I-14 (dimmed)
+
+    Example (dependency-links focused):
+
+        [agent] 2026-02-28 20:31          (dimmed)
+        Should we use typed accessors...  (dimmed)
+        ─────────────────────────────────
+        > Type response here...           (dimmed)
+      │ Blocked by: ▸I-3 | Blocks: I-14, I-15
+
+    This uses 1 column for the indicator. No Box borders (which cost 4 rows).
+    Consistent with existing triangle indicator pattern in group-view.tsx
+    and dashboard.tsx.
+
+  Step B.3 — Dependency link sub-focus
+    Within the 'dependency-links' region, track which link is selected:
+
+      const [selectedDepIdx, setSelectedDepIdx] = useState(0);
+      const allDeps = [...blockedBy, ...blocks]; // flattened list
+
+    Left/right arrows cycle through deps (horizontal layout matches the
+    visual: "Blocked by: I-3 | Blocks: I-14, I-15"). Enter navigates to
+    the selected dep's Detail view. Clamp selectedDepIdx when allDeps
+    changes (e.g., if deps are added/removed). Guard empty lists.
+
+    Note: The B.1 handler uses up/down for dependency selection because
+    the handler switches on focusedRegion, and up/down is the standard
+    navigation pattern for all regions. However, since dependency links
+    render horizontally, left/right is more natural. Use left/right for
+    dep cycling when in 'dependency-links' region. Update B.1 handler
+    accordingly:
+      if (key.leftArrow) { selectPrevDep(); return; }
+      if (key.rightArrow) { selectNextDep(); return; }
+
+    Visual: selected dep rendered in cyan + bold, others normal.
+
+      Blocked by: I-3 | Blocks: ▸I-14, I-15
+                                  ^^^^^ selected
+
+
+Phase C: NewIssue Tab Cycling (Enhancement)
+  The current NewIssue view already handles Tab/Shift+Tab to cycle between
+  form fields. No changes needed — this already works correctly because
+  NewIssue manages its own activeField state and conditionally renders
+  TextInput with focus={activeField === i} for each field.
+
+  No phase C work required.
+
+
+Files Changed
+-------------
+
+Phase A:
+  Modify: src/tui/app.tsx
+    - Delete VIEW_OWNED_KEYS
+    - Delete App's useInput entirely
+    - Pass onBack/onQuit/onNavigate callbacks to views
+
+  Create: src/tui/global-keys.ts
+    - handleGlobalKey() shared helper
+
+  Modify: src/tui/dashboard.tsx
+    - Add global navigation shortcuts (s/b/g) and q-to-quit
+    - Add onNavigate/onQuit props
+
+  Modify: src/tui/detail.tsx
+    - No global shortcuts (text entry view)
+    - Keep Esc→onBack
+    - Phase B adds focus regions
+
+  Modify: src/tui/create.tsx
+    - No global shortcuts (text entry view)
+    - Already handles Esc→onCancel
+
+  Modify: src/tui/agent-status.tsx
+    - Add global navigation shortcuts and q-to-quit
+    - Add onBack/onNavigate/onQuit props
+
+  Modify: src/tui/blocking-map.tsx
+    - Add global navigation shortcuts and q-to-quit
+    - Add onBack/onNavigate/onQuit props
+
+  Modify: src/tui/group-view.tsx
+    - Add global navigation shortcuts (context-dependent: n=new only in
+      list mode, n=next in issues mode)
+    - Add onNavigate/onQuit props
+
+  Modify: src/tui/footer.tsx
+    - Update VIEW_SHORTCUTS to reflect new shortcut availability per view
+    - AgentStatus, BlockingMap: add [Esc] Back, [n] New, [q] Quit, and
+      cross-navigation shortcuts
+    - GroupView: update to show context-dependent shortcuts
+
+Phase B (deferred):
+  Modify: src/tui/detail.tsx
+    - Add focusedRegion state
+    - Add Tab cycling between regions
+    - Add visual focus indicators
+    - Add dependency link navigation
+    - Pass focus={focusedRegion === 'text-input'} to TextInput
+
+
+Testing Strategy
+----------------
+
+Phase A tests:
+  - Verify that pressing 'q' on Dashboard quits the app
+  - Verify that pressing 'q' in Detail view does NOT quit (text entry)
+  - Verify that pressing 'q' fires exactly once (no double-quit)
+  - Verify that pressing 'n' on Dashboard navigates to NewIssue
+  - Verify that pressing 'n' in GroupView issues mode moves to next issue
+  - Verify that pressing 'n' in GroupView list mode navigates to NewIssue
+  - Verify that pressing Esc in Detail returns to previous view (once, not twice)
+  - Verify that pressing Esc in GroupView issues mode returns to list (not parent)
+  - Verify that pressing Esc from AgentStatus/BlockingMap returns to prior view
+  - Verify that global shortcuts (s/b/g) work from Dashboard, AgentStatus,
+    BlockingMap, GroupView list mode
+  - Verify that global shortcuts do NOT fire in NewIssue or Detail
+  - Verify same-view shortcuts are no-ops (pressing 'b' on BlockingMap,
+    's' on AgentStatus, 'g' on GroupView does not push duplicate view)
+  - Verify footer shows correct shortcuts for each view after changes
+
+Phase B tests (deferred):
+  - Verify Tab cycles through regions in correct order
+  - Verify Shift+Tab cycles in reverse
+  - Verify TextInput is disabled when focusedRegion !== 'text-input'
+  - Verify arrow keys scroll conversation when focusedRegion === 'conversation'
+  - Verify arrow keys navigate deps when focusedRegion === 'dependency-links'
+  - Verify Enter on a dep navigates to that issue's Detail view
+  - Verify visual indicators render correctly for each focused region
+
+
+Why This Works (vs P1-5)
+-------------------------
+
+P1-5 tried to build event consumption on top of Ink's EventEmitter,
+which has no consumption mechanism. This plan avoids the problem entirely
+by using Ink's built-in isActive flag to prevent handlers from being
+registered in the first place.
+
+  P1-5: "intercept stdin before Ink" → impossible (Ink uses internal emitter)
+  This: use isActive to deregister handlers → built into Ink, proven
+
+  P1-5: "custom depth-based dispatch" → fragile, manual, error-prone
+  This: conditional rendering means only one view exists → automatic
+
+  P1-5: "coexist with TextInput" → cannot stop TextInput's useInput
+  This: TextInput focus={false} deregisters its useInput → built into package
+
+  P1-5: "custom focus context with region tracking" → over-engineered
+  This: simple focusedRegion state per view → minimal, local, no framework
+
+  P1-5: "eliminate VIEW_OWNED_KEYS" → yes ✓
+  This: eliminate VIEW_OWNED_KEYS → yes ✓ (via moving keys into views)
+
+The solution is ~50 lines of shared code (global-keys.ts) plus small
+modifications to each view. No new framework, no context providers, no
+custom hooks. It works because it uses the mechanisms Ink already provides.
+
+
+Open Questions
+--------------
+
+1. RESOLVED: App has NO useInput. handleGlobalKey handles q.
+   (Validated by all 3 models — keeping App's useInput for q
+   reintroduces double-fire for text-entry views.)
+
+2. When implementing Phase B focus regions, should we use Ink's built-in
+   useFocus/useFocusManager for Tab cycling within Detail, or manage it
+   manually with local state? Ink's Tab handling is global (cycles through
+   ALL useFocus components in the tree), which would be unwanted if other
+   views also register focusable components. Manual state is local and
+   predictable.
+   → Recommendation: Manual state. Ink's useFocus is designed for component-
+     level focus (like a form with multiple inputs), not region-level focus
+     within a single view. Local state gives full control without
+     framework-level side effects.
+
+3. GroupView 'n' key conflict: in list mode, 'n' should be "new issue"
+   (global shortcut). In issues mode, 'n' is "next issue" (view-specific).
+   How to handle cleanly?
+   → Recommendation: GroupView's useInput checks mode first. In list mode,
+     call handleGlobalKey (which maps n→NewIssue). In issues mode, handle
+     n as next issue directly, then call handleGlobalKey for other keys
+     (but NOT for 'n').

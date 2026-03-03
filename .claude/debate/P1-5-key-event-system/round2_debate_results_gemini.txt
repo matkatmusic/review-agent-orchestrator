@@ -1,0 +1,71 @@
+GEMINI (gemini-3-pro-preview) — P1-5 Key Event System Review
+
+### 1. DEPTH-BASED DISPATCH
+The plan to use a numeric depth parameter (0=App, 1=view, 2=sub-region) is brittle and detached from the actual React component hierarchy.
+
+Risks/Problems:
+- Same Depth Collisions: If two components register at depth 1 (e.g., a sibling sidebar and main content area), the execution order depends entirely on their mount order (registration order). In React, useEffect (where registration likely happens) fires bottom-up, but conditional rendering makes this highly unpredictable. Race conditions will occur where the wrong sibling intercepts the key.
+- Dynamic Depth: As components mount, unmount, or move, maintaining absolute depth numbers becomes a maintenance nightmare. A developer might add a new sub-component and accidentally assign it depth 1 instead of 3, breaking the event chain.
+- Lack of Spatial Awareness: Depth numbers don't represent the branch of the UI tree, only the level. If a modal opens at depth 2, it shouldn't just run before depth 1; it should completely block depth 1 events for background components. A simple numeric sort doesn't handle modal trapping natively.
+
+### 2. STDIN INTERCEPTION
+The plan states KeyEventProvider "intercepts process.stdin keypresses before Ink's useInput fires."
+
+Risks/Problems:
+- Node.js EventEmitter limitations: Node's process.stdin is a standard EventEmitter. While you can use process.stdin.prependListener('data', ...) to put your handler first, Node EventEmitter does not have a stopPropagation() method. Even if your custom listener runs first and returns true, Node will still synchronously execute Ink's internal data listeners immediately after.
+- Fighting the Framework: Ink's useInput internally manages raw mode and terminal escaping. By trying to build a secondary interceptor alongside Ink's, you risk breaking terminal state (e.g., leaving raw mode on exit) or creating duplicate key events.
+
+### 3. TEXTINPUT COEXISTENCE
+The plan claims coexistence works because "our useKeyEvent handles navigation, TextInput handles text entry."
+
+Risks/Problems:
+- This is factually incorrect and the biggest technical flaw in the plan. ink-text-input registers its own useInput hook internally.
+- Because standard Ink useInput hooks cannot be "stopped" by your custom KeyEventProvider (as explained in point 2), ink-text-input will hear every keypress.
+- If the user presses the Left Arrow key, your custom system might consume it to switch tabs, but ink-text-input will simultaneously see the Left Arrow and move its text cursor.
+- If the user presses Enter, your system might consume it to submit a form, but ink-text-input might also fire its onSubmit prop. You cannot selectively mute ink-text-input without replacing it entirely or heavily patching it.
+
+### 4. FOCUS MANAGEMENT
+The plan proposes a flat string focusedRegion: string (e.g., 'dependency-links').
+
+Risks/Problems:
+- A flat string is insufficient for nested interactions. The Detail view has dependency-links, but that region contains a list of issues. Once focus is in dependency-links, you need to know which link is focused.
+- You will inevitably end up with compound strings like 'dependency-links:ISSUE-123' or having to manage secondary local state alongside the global state, defeating the purpose of a unified focus manager. Focus should ideally support a hierarchical path or a composite object ({ region: 'list', activeItemId: '123' }).
+
+### 5. TAB CYCLING
+The context handles Tab cycling "after all handlers return false."
+
+Risks/Problems:
+- Missing Registry: The KeyEventContext has no way of knowing what the available regions are, what order they should be in, or if they are currently mounted. If focusedRegion is currently 'text-input', how does the Context know that 'conversation' is the next logical step unless every view dynamically registers its focusable sequence into a global registry?
+- View Transitions: When switching from Dashboard to Detail view, the Context needs to automatically clear the old cycle list and focus the first available region in the new view. The plan does not describe how the Context acquires this layout awareness.
+
+### 6. VISUAL INDICATORS
+"Focused region gets colored border/highlight. Unfocused regions dimmed."
+
+Risks/Problems:
+- Ink Limitations: Ink does not have a CSS Box Model. Drawing actual borders around dynamic text content requires calculating the exact width/height of the content, which Ink hides from the developer. Using ink-box is possible but highly prone to layout breakage when terminal windows resize.
+- Dimming Propagation: To "dim" a region, you must apply dim={true} to every <Text> node inside it. Ink does not automatically cascade text styles through generic container components like <Box>. This will require wrapping every text element in a custom themed component or passing a isFocused prop down through every component branch.
+
+### 7. MISSING CONCERNS
+Several critical architectural pieces are missing from the plan:
+- Global Shortcuts vs. Text Input: The plan says to return true for printable characters when in 'text-input'. But what about Ctrl+C or Ctrl+Q? If the text input blindly consumes, you might break the ability to quit the app while typing.
+- Cleanup and Leaks: Registration of custom event handlers in React useEffect requires rigorous cleanup functions. If a view unmounts without unregistering its depth-1 handler, the app will crash or memory leak on the next keypress.
+- Modal Overlays: How does the system handle a modal popup (like an error dialog)? A depth system doesn't natively trap focus; the user could potentially tab behind the modal into the underlying view.
+
+### 8. ALTERNATIVE APPROACHES
+Given this is a specific 6-view TUI and not a general-purpose UI library, building a fully JUCE-inspired bubbling event system is heavily over-engineered.
+
+Simpler Solutions:
+- Active View State (The simplest fix): Instead of checking keys (VIEW_OWNED_KEYS), check the state. Have a global context provide activeView and activeModal. Inside DetailView.tsx:
+    useInput((input, key) => {
+       if (activeView !== 'Detail' || activeModal !== null) return;
+       // process keys...
+    });
+  This completely eliminates sibling/grandchild double-firing because inactive views simply ignore the input. It requires zero custom event dispatchers.
+- Themed Input Wrapper: Fork or copy ink-text-input into your own codebase (src/tui/components/TextInput.tsx). Modify its internal useInput to respect your activeView or isFocused prop so it stays silent when it shouldn't be listening.
+
+### OVERALL ASSESSMENT
+The P1-5 plan is over-engineered and technically flawed given the constraints of Ink and standard Node.js EventEmitters.
+
+While the goal (stopping propagation and managing focus) is correct, the execution (custom interceptors, numeric depths, coexistence with Ink's built-in hooks) will lead to severe bugs, particularly because standard ink-text-input will completely bypass the custom consumed/ignored logic.
+
+Recommendation: Reject the P1-5 architectural plan. Pivot to a simpler "Context-Aware State" pattern where standard Ink useInput hooks remain, but are gated by a simple useFocusState() check at the top of each handler. Bring ink-text-input internally as a local component so you can control its useInput gating as well.

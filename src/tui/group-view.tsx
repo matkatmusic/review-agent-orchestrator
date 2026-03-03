@@ -1,33 +1,8 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';
-import type { Container, Issue } from '../types.js';
+import type { Issue } from '../types.js';
 import { statusToColor } from './status-color.js';
-
-// ---- Mock data (Phase 1 — static, no DB) ----
-
-const MOCK_ISSUES: Issue[] = [
-    { inum: 1, title: 'Set up project scaffolding', description: '', status: 'Resolved', created_at: '', resolved_at: '2025-01-01', issue_revision: 1, agent_last_read_at: null, user_last_viewed_at: null },
-    { inum: 2, title: 'Implement auth module', description: '', status: 'Active', created_at: '', resolved_at: null, issue_revision: 1, agent_last_read_at: null, user_last_viewed_at: null },
-    { inum: 3, title: 'Write database schema', description: '', status: 'Awaiting', created_at: '', resolved_at: null, issue_revision: 1, agent_last_read_at: null, user_last_viewed_at: null },
-    { inum: 4, title: 'Design API endpoints', description: '', status: 'Blocked', created_at: '', resolved_at: null, issue_revision: 1, agent_last_read_at: null, user_last_viewed_at: null },
-    { inum: 5, title: 'Add CI pipeline', description: '', status: 'Deferred', created_at: '', resolved_at: null, issue_revision: 1, agent_last_read_at: null, user_last_viewed_at: null },
-    { inum: 6, title: 'Deploy staging environment', description: '', status: 'Active', created_at: '', resolved_at: null, issue_revision: 1, agent_last_read_at: null, user_last_viewed_at: null },
-    { inum: 7, title: 'Create user dashboard', description: '', status: 'Resolved', created_at: '', resolved_at: '2025-01-15', issue_revision: 1, agent_last_read_at: null, user_last_viewed_at: null },
-];
-
-const MOCK_CONTAINERS: Container[] = [
-    { id: 1, name: 'Inbox', type: 'group', parent_id: null, description: '', status: 'Open', created_at: '', closed_at: null },
-    { id: 2, name: 'Backend Sprint 1', type: 'sprint', parent_id: null, description: 'Core backend work', status: 'Open', created_at: '', closed_at: null },
-    { id: 3, name: 'Frontend', type: 'group', parent_id: null, description: '', status: 'Open', created_at: '', closed_at: null },
-    { id: 4, name: 'Backlog', type: 'group', parent_id: null, description: '', status: 'Open', created_at: '', closed_at: null },
-];
-
-// Map container IDs to their issues (sorted by status priority, then inum)
-const MOCK_CONTAINER_ISSUES: Record<number, Issue[]> = {
-    1: [MOCK_ISSUES[1]!, MOCK_ISSUES[2]!, MOCK_ISSUES[0]!],          // Inbox: Active, Awaiting, Resolved
-    2: [MOCK_ISSUES[5]!, MOCK_ISSUES[3]!, MOCK_ISSUES[4]!],          // Sprint 1: Active, Blocked, Deferred
-    3: [MOCK_ISSUES[6]!],                                             // Frontend: Resolved
-};
+import { MOCK_CONTAINERS, MOCK_CONTAINER_ISSUES } from './mock-data.js';
 
 // ---- Progress bar ----
 

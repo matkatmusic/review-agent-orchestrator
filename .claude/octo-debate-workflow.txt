@@ -1,0 +1,26 @@
+/octo:debate — Multi-Agent Invocation Workflow
+
+When invoking the /octo:debate skill, execute agents via Bash with the following steps:
+
+Step 1: Write the debate prompt to a file in the repo root folder /Debates/
+  Save the debate prompt to <topic>_debate_prompt.txt in the repo.
+
+Step 2: Launch agents in parallel using Bash
+
+  gemini -m <preferred_model> < <topic>_debate_prompt.txt
+
+  codex exec -m <preferred_model> -c 'model_reasoning_effort="high"' < <topic>_debate_prompt.txt
+
+  cat <topic>_debate_prompt.txt | claude --agent octo:personas:backend-architect
+
+Step 3: Capture results
+  Write each agent's debate output into a separate file in the repo root folder /Debates/:
+    <topic>_debate_results_gemini.txt
+    <topic>_debate_results_codex.txt
+    <topic>_debate_results_claude.txt
+
+Step 4: Summarize
+  Read all 3 result files and produce a unified summary of the debate.
+
+Gemini preferred model: gemini-3-pro-preview
+Codex preferred model: gpt-5.3-codex

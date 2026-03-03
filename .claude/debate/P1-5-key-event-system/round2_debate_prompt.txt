@@ -1,0 +1,84 @@
+DEBATE PROMPT: Review the P1-5 Key Event System Plan
+
+You are reviewing a design plan for replacing Ink's useInput with a JUCE-inspired key event system in a React/Ink terminal UI app. Your job is to identify issues, risks, missing pieces, and improvements. Be specific and constructive. Reference the plan details below.
+
+== CONTEXT ==
+
+This is a TUI (terminal user interface) built with React and Ink (https://github.com/vadimdemedes/ink). The app is an issue tracker with 6 views: Dashboard, Detail, NewIssue, AgentStatus, BlockingMap, GroupView.
+
+The problem: Ink's useInput hook registers handlers on a flat process.stdin listener list. Every registered handler fires for every keypress -- no propagation, no bubbling, no consumption. This caused:
+- Double-fire Esc: pressing Esc in Detail view fired both Detail's handler and App's handler
+- Key stealing: App-level global shortcuts (q, n, s, b, g) fired even when child views needed those keys
+- The current workaround (VIEW_OWNED_KEYS) is a manual Record<ViewType, ReadonlySet<string>> that must be maintained per view and can't prevent sibling/grandchild double-firing
+
+== CURRENT CODE ==
+
+App component (app.tsx) uses VIEW_OWNED_KEYS to check if a key is "owned" by the current view before processing it at the App level:
+
+```typescript
+const VIEW_OWNED_KEYS: Record<ViewType, ReadonlySet<string>> = {
+    Dashboard:   new Set(['n', 'a', 'd', 'r', 'j', 'k', 'return', 'tab']),
+    Detail:      new Set(['escape', 'return', 'd', 'r', 'b', 'w', 's']),
+    NewIssue:    new Set(['return', 'tab', 'escape', 'n', 'a', 'b', 'd', 'g', 'j', 'k', 'p', 'q', 'r', 's', 'w']),
+    AgentStatus: new Set(['j', 'k', 'return']),
+    BlockingMap: new Set(['j', 'k', 'b', 'return']),
+    GroupView:   new Set(['j', 'k', 'n', 'p', 'g', 'return', 'escape']),
+};
+```
+
+Each view component (detail.tsx, group-view.tsx, etc.) uses its own useInput handler. All handlers fire on every keypress. The VIEW_OWNED_KEYS pattern only prevents App from double-processing -- it doesn't prevent sibling handlers from firing.
+
+Detail view (detail.tsx) has a TextInput from ink-text-input that registers its own internal useInput. Detail also has scrollable conversation (up/down arrows), and TODO comments about making dependency links (blocked-by/blocks) navigable via Tab focus.
+
+GroupView (group-view.tsx) has two modes: 'list' (container list) and 'issues' (drilled-in issue list). Esc in issues mode goes back to list mode. Esc in list mode calls onBack.
+
+== PROPOSED PLAN (P1-5) ==
+
+Replace useInput with a JUCE-inspired key event system. Core design:
+
+1. Boolean return = consumed: Every useKeyEvent handler returns true (consumed, stop) or false (ignored, bubble up). No event object mutation, no stopPropagation -- just a return value.
+
+2. Child-first dispatch: A KeyEventContext provider at the App level intercepts process.stdin keypresses before Ink's useInput fires. It walks an ordered handler list registered by useKeyEvent hooks. Handlers ordered child-first by registration depth (0=App, 1=view, 2=sub-region). First true return stops the loop.
+
+3. Focus tracking via context: KeyEventContext tracks a focusedRegion: string (e.g., 'text-input', 'conversation', 'dependency-links', 'list'). Each useKeyEvent handler receives focusedRegion as a parameter. Tab cycles between regions within a view.
+
+4. Visual focus indicator: Focused region gets colored border/highlight. Unfocused regions dimmed.
+
+5. TextInput coexistence: ink-text-input has its own internal useInput that can't be replaced. Plan is to coexist -- our useKeyEvent handles navigation, TextInput handles text entry. When focusedRegion === 'text-input', the view's handler returns true for all printable chars to suppress global shortcuts. Fallback: build custom text input if conflicts arise.
+
+6. Eliminates VIEW_OWNED_KEYS entirely.
+
+Implementation scope:
+- New file: src/tui/key-event-context.tsx
+  - KeyEventProvider (React context wrapping App)
+  - useKeyEvent(handler: KeyHandler, depth: number) hook
+  - useFocus() hook returning { focusedRegion, setFocusedRegion, cycleFocus }
+  - Dispatch: iterate handlers by descending depth, stop on first true. Tab fallback if all return false.
+
+- Modify app.tsx: Wrap in KeyEventProvider, replace useInput + VIEW_OWNED_KEYS with useKeyEvent at depth 0
+- Modify all view components: Replace useInput with useKeyEvent at depth 1
+- Modify detail.tsx: Add focus regions ('text-input', 'conversation', 'dependency-links'), Tab cycling, depth 2 handlers
+- Modify create.tsx: Map activeField to focusedRegion, Tab cycling via context
+- Delete VIEW_OWNED_KEYS
+
+== DEBATE QUESTIONS ==
+
+Please analyze this plan and provide your assessment on each of these specific areas:
+
+1. DEPTH-BASED DISPATCH: The plan uses numeric depth (0, 1, 2) instead of actual component tree traversal. What problems could arise? What happens when two handlers register at the same depth? What about dynamic depth (components that mount/unmount)?
+
+2. STDIN INTERCEPTION: The plan says KeyEventProvider "intercepts process.stdin keypresses before Ink's useInput fires." How would this actually work? Can you prepend a listener to process.stdin that runs before Ink's listeners? What are the risks of fighting with Ink's event handling?
+
+3. TEXTINPUT COEXISTENCE: ink-text-input registers its own useInput internally. The plan says "they don't conflict because TextInput only mutates text, never navigation." Is this true? What about: Tab key (TextInput might swallow it), arrow keys (TextInput has cursor movement), Enter key (TextInput has onSubmit)?
+
+4. FOCUS MANAGEMENT: focusedRegion is a flat string. Is this sufficient for nested focus (e.g., Detail view has conversation, text-input, dependency-links -- but dependency-links itself has individual inums that can be selected)? Should focus be hierarchical?
+
+5. TAB CYCLING: Tab cycles between regions "at the context level after all handlers return false." But who defines the cycle order? Who defines which regions exist for the current view? How does the context know which regions are available when views mount/unmount?
+
+6. VISUAL INDICATORS: "Colored border, highlight. Unfocused regions dimmed." In a terminal with Ink, how practical is this? Ink doesn't have real borders for arbitrary regions. What terminal rendering approach would actually work?
+
+7. MISSING CONCERNS: What has the plan NOT addressed that it should? Think about: testing, error handling, performance (handler sorting on every keypress), accessibility, state management edge cases.
+
+8. ALTERNATIVE APPROACHES: Is there a simpler way to solve the original problem (double-fire, key stealing) without building a full event system? Would a simpler solution be better given this is a 6-view TUI, not a general-purpose framework?
+
+Format your response as numbered sections matching the questions above. Be specific -- cite the plan text when pointing out issues. End with an overall assessment: is this plan sound, over-engineered, or missing critical pieces?

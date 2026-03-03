@@ -3,27 +3,7 @@ import { Box, Text, useInput } from 'ink';
 import type { View } from './views.js';
 import type { Issue, Dependency } from '../types.js';
 import { statusToColor } from './status-color.js';
-
-// ── Mock Data (Phase 1 — static, replaced by DB queries in Phase 2.6) ──
-
-const MOCK_ISSUES: Issue[] = [
-    { inum: 1, title: 'Set up CI pipeline', description: '', status: 'Active', created_at: '', resolved_at: null, issue_revision: 0, agent_last_read_at: null, user_last_viewed_at: null },
-    { inum: 2, title: 'Design database schema', description: '', status: 'Awaiting', created_at: '', resolved_at: null, issue_revision: 0, agent_last_read_at: null, user_last_viewed_at: null },
-    { inum: 3, title: 'Implement auth module', description: '', status: 'Blocked', created_at: '', resolved_at: null, issue_revision: 0, agent_last_read_at: null, user_last_viewed_at: null },
-    { inum: 4, title: 'Write API endpoints', description: '', status: 'Blocked', created_at: '', resolved_at: null, issue_revision: 0, agent_last_read_at: null, user_last_viewed_at: null },
-    { inum: 5, title: 'Build data layer', description: '', status: 'Blocked', created_at: '', resolved_at: null, issue_revision: 0, agent_last_read_at: null, user_last_viewed_at: null },
-    { inum: 6, title: 'Integration testing', description: '', status: 'Blocked', created_at: '', resolved_at: null, issue_revision: 0, agent_last_read_at: null, user_last_viewed_at: null },
-    { inum: 7, title: 'Update README', description: '', status: 'Deferred', created_at: '', resolved_at: null, issue_revision: 0, agent_last_read_at: null, user_last_viewed_at: null },
-];
-
-// I-1 blocks I-3, I-4 | I-2 blocks I-5 | I-3 blocks I-6 | I-5 blocks I-6 (diamond on I-6)
-const MOCK_DEPS: Dependency[] = [
-    { blocker_inum: 1, blocked_inum: 3 },
-    { blocker_inum: 1, blocked_inum: 4 },
-    { blocker_inum: 2, blocked_inum: 5 },
-    { blocker_inum: 3, blocked_inum: 6 },
-    { blocker_inum: 5, blocked_inum: 6 },
-];
+import { MOCK_ISSUES, MOCK_DEPS } from './mock-data.js';
 
 // ── Tree Building ──
 
