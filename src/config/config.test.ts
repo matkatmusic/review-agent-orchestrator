@@ -110,4 +110,37 @@ describe('config', () => {
         const config = loadConfig(tmpDir);
         expect(config.codeRoot).toBe('/absolute/path');
     });
+
+    it('throws for tmuxSession with special characters', () => {
+        writeFileSync(join(tmpDir, 'config.json'), JSON.stringify({
+            tmuxSession: 'bad session:0.1',
+        }));
+
+        expect(() => loadConfig(tmpDir)).toThrow('tmuxSession must contain only');
+    });
+
+    it('accepts valid tmuxSession with hyphens and underscores', () => {
+        writeFileSync(join(tmpDir, 'config.json'), JSON.stringify({
+            tmuxSession: 'my-session_v2',
+        }));
+
+        const config = loadConfig(tmpDir);
+        expect(config.tmuxSession).toBe('my-session_v2');
+    });
+
+    it('throws for invalid terminalApp', () => {
+        writeFileSync(join(tmpDir, 'config.json'), JSON.stringify({
+            terminalApp: 'Hyper',
+        }));
+
+        expect(() => loadConfig(tmpDir)).toThrow('terminalApp must be one of');
+    });
+
+    it('accepts all valid terminalApp values', () => {
+        for (const app of ['Terminal', 'Terminal.app', 'iTerm', 'iTerm2', 'none']) {
+            writeFileSync(join(tmpDir, 'config.json'), JSON.stringify({ terminalApp: app }));
+            const config = loadConfig(tmpDir);
+            expect(config.terminalApp).toBe(app);
+        }
+    });
 });

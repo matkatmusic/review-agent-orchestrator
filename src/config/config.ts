@@ -50,6 +50,8 @@ export function loadConfig(projectRoot: string): Config {
     return config;
 }
 
+const VALID_TERMINAL_APPS = ['Terminal', 'Terminal.app', 'iTerm', 'iTerm2', 'none'];
+
 function validate(config: Config): void {
     if (config.maxAgents < 1) {
         throw new Error(`maxAgents must be >= 1, got ${config.maxAgents}`);
@@ -59,5 +61,15 @@ function validate(config: Config): void {
     }
     if (config.teardownTimeout < 1) {
         throw new Error(`teardownTimeout must be >= 1, got ${config.teardownTimeout}`);
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(config.tmuxSession)) {
+        throw new Error(
+            `tmuxSession must contain only [a-zA-Z0-9_-], got: ${config.tmuxSession}`
+        );
+    }
+    if (!VALID_TERMINAL_APPS.includes(config.terminalApp)) {
+        throw new Error(
+            `terminalApp must be one of ${VALID_TERMINAL_APPS.join(', ')}, got: ${config.terminalApp}`
+        );
     }
 }
