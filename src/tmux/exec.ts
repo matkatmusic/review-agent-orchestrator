@@ -54,7 +54,7 @@ export const defaultExec: ShellExecutor = (
                 const err = (stderr ?? '').trimEnd();
 
                 if (error) {
-                    const timedOut = (error as NodeJS.ErrnoException).killed === true;
+                    const timedOut = (error as NodeJS.ErrnoException & { killed?: boolean }).killed === true;
                     reject(new ShellError(
                         timedOut
                             ? `Command timed out after ${timeoutMs}ms: ${cmd}`
