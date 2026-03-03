@@ -180,6 +180,32 @@ describe('App — view routing', () => {
         expect(lastFrame()).toContain('Dashboard');
     });
 
+    // ---- Footer shows correct shortcuts per view ----
+
+    it('footer shows Dashboard shortcuts on default view', () => {
+        const { lastFrame } = render(<App />);
+        const frame = lastFrame()!;
+        expect(frame).toContain('[Enter]');
+        expect(frame).toContain('View');
+        expect(frame).toContain('[q]');
+        expect(frame).toContain('Quit');
+    });
+
+    it('footer updates when navigating to NewIssue', async () => {
+        const { lastFrame, stdin } = render(<App />);
+        await tick();
+        stdin.write('n');
+        await tick();
+        const frame = lastFrame()!;
+        expect(frame).toContain('[Enter]');
+        expect(frame).toContain('Create');
+        expect(frame).toContain('[Esc]');
+        expect(frame).toContain('Cancel');
+        // Dashboard-only shortcuts should not appear
+        expect(frame).not.toContain('Quit');
+        expect(frame).not.toContain('Activate');
+    });
+
     // ---- q works from non-Dashboard views ----
 
     it('q exits from any view, not just Dashboard', async () => {

@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { Box, Text, useInput, useApp, useStdout } from 'ink';
 import type { View } from './views.js';
 import { Header, HEADER_LINES } from './header.js';
+import { Footer } from './footer.js';
 
 interface AppProps {
     initialView?: View;
@@ -82,6 +83,7 @@ function App({ initialView, onExit }: AppProps) {
         <Box flexDirection="column">
             <Header currentView={currentView} columns={columns} />
             {content}
+            <Footer viewType={currentView.type} />
         </Box>
     );
 }
