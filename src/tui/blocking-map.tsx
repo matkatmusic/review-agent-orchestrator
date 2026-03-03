@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { View } from './views.js';
-import type { Issue, IssueStatus, Dependency } from '../types.js';
+import type { Issue, Dependency } from '../types.js';
+import { statusToColor } from './status-color.js';
 
 // ── Mock Data (Phase 1 — static, replaced by DB queries in Phase 2.6) ──
 
@@ -23,18 +24,6 @@ const MOCK_DEPS: Dependency[] = [
     { blocker_inum: 3, blocked_inum: 6 },
     { blocker_inum: 5, blocked_inum: 6 },
 ];
-
-// ── Status Colors ──
-
-function statusColor(status: IssueStatus): string {
-    switch (status) {
-        case 'Active': return 'green';
-        case 'Awaiting': return 'blue';
-        case 'Blocked': return 'red';
-        case 'Deferred': return 'yellow';
-        case 'Resolved': return 'gray';
-    }
-}
 
 // ── Tree Building ──
 
@@ -174,7 +163,7 @@ function BlockingMapComponent({ navigate }: BlockingMapProps) {
                             <Text dimColor>{row.prefix}</Text>
                             <Text bold color={isSelected ? 'white' : undefined}>I-{row.issue.inum}</Text>
                             <Text> {row.issue.title} </Text>
-                            <Text color={statusColor(row.issue.status)}>[{row.issue.status}]</Text>
+                            <Text color={statusToColor(row.issue.status)}>[{row.issue.status}]</Text>
                         </Box>
                     </React.Fragment>
                 );
@@ -186,9 +175,6 @@ function BlockingMapComponent({ navigate }: BlockingMapProps) {
                 </Box>
             )}
 
-            <Box marginTop={1} borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false}>
-                <Text dimColor> [Enter] View issue  [j/k] Navigate  [Esc] Back </Text>
-            </Box>
         </Box>
     );
 }

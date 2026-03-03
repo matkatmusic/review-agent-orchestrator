@@ -307,37 +307,8 @@ describe('Dashboard', () => {
         expect(i1Line).not.toContain('\u2731');
     });
 
-    // ---- Footer shortcuts ----
-
-    it('shows Enter shortcut', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
-        expect(lastFrame()!).toContain('[Enter]');
-    });
-
-    it('shows New shortcut', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
-        expect(lastFrame()!).toContain('[n]');
-    });
-
-    it('shows Activate shortcut', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
-        expect(lastFrame()!).toContain('[a]');
-    });
-
-    it('shows Defer shortcut', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
-        expect(lastFrame()!).toContain('[d]');
-    });
-
-    it('shows Resolve shortcut', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
-        expect(lastFrame()!).toContain('[r]');
-    });
-
-    it('shows Quit shortcut', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
-        expect(lastFrame()!).toContain('[q]');
-    });
+    // Footer shortcuts are rendered centrally by App-level Footer component
+    // and tested in footer.test.tsx
 
     // ---- Keyboard actions ----
 

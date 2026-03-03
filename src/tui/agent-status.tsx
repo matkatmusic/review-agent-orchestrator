@@ -52,9 +52,6 @@ const AgentStatusComponent: React.FC<AgentStatusProps> = ({
                 <Box marginTop={1} justifyContent="center">
                     <Text dimColor>No active agents</Text>
                 </Box>
-                <Box marginTop={1} borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false}>
-                    <Text dimColor> [Esc] Back </Text>
-                </Box>
             </Box>
         );
     }
@@ -97,22 +94,15 @@ const AgentStatusComponent: React.FC<AgentStatusProps> = ({
                             {agent.paneId.padEnd(8)}
                         </Text>
                         <Text color={agent.alive ? 'green' : 'red'}>
-                            {statusIcon}
+                            {(statusIcon + ' ').padEnd(8)}
                         </Text>
                         <Text color={selected ? 'cyan' : undefined}>
-                            {''.padEnd(7)}
                             {time}
                         </Text>
                     </Box>
                 );
             })}
 
-            {/* Footer */}
-            <Box marginTop={1} borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false}>
-                <Text dimColor>
-                    {' [Enter] Focus pane  [Esc] Back '}
-                </Text>
-            </Box>
         </Box>
     );
 };

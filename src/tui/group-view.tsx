@@ -1,6 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';
-import type { Container, Issue, IssueStatus } from '../types.js';
+import type { Container, Issue } from '../types.js';
+import { statusToColor } from './status-color.js';
 
 // ---- Mock data (Phase 1 — static, no DB) ----
 
@@ -28,18 +29,6 @@ const MOCK_CONTAINER_ISSUES: Record<number, Issue[]> = {
     3: [MOCK_ISSUES[6]!],                                             // Frontend: Resolved
 };
 
-// ---- Status colors ----
-
-function statusColor(status: IssueStatus): string {
-    switch (status) {
-        case 'Active': return 'green';
-        case 'Awaiting': return 'yellow';
-        case 'Blocked': return 'red';
-        case 'Deferred': return 'gray';
-        case 'Resolved': return 'blue';
-    }
-}
-
 // ---- Progress bar ----
 
 function progressBar(resolved: number, total: number, width: number = 10): string {
@@ -50,19 +39,37 @@ function progressBar(resolved: number, total: number, width: number = 10): strin
 
 // ---- Types ----
 
-type GroupMode =
+export type GroupMode =
     | { mode: 'list'; cursor: number }
     | { mode: 'issues'; containerId: number; cursor: number; listCursor: number };
+
+export const GROUP_MODE_INITIAL: GroupMode = { mode: 'list', cursor: 0 };
 
 export interface GroupViewProps {
     onBack?: () => void;
     onNavigate?: (inum: number) => void;
+    /** Externally managed state — preserved across navigation */
+    groupMode?: GroupMode;
+    onGroupModeChange?: (mode: GroupMode) => void;
 }
 
 // ---- Component ----
 
-export function GroupView({ onBack, onNavigate }: GroupViewProps) {
-    const [state, setState] = useState<GroupMode>({ mode: 'list', cursor: 0 });
+export function GroupView({ onBack, onNavigate, groupMode, onGroupModeChange }: GroupViewProps) {
+    const [internalState, setInternalState] = useState<GroupMode>(GROUP_MODE_INITIAL);
+    const state = groupMode ?? internalState;
+    const setState = useCallback((updater: GroupMode | ((prev: GroupMode) => GroupMode)) => {
+        if (onGroupModeChange) {
+            // External state: apply updater function against current state
+            if (typeof updater === 'function') {
+                onGroupModeChange(updater(groupMode ?? GROUP_MODE_INITIAL));
+            } else {
+                onGroupModeChange(updater);
+            }
+        } else {
+            setInternalState(updater);
+        }
+    }, [onGroupModeChange, groupMode]);
 
     const containers = MOCK_CONTAINERS;
 
@@ -188,11 +195,6 @@ export function GroupView({ onBack, onNavigate }: GroupViewProps) {
                     )}
                 </Box>
 
-                <Box marginTop={1} borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false}>
-                    <Text dimColor>
-                        {' [Enter] View issues  [\u2191\u2193] Navigate  [Esc] Back '}
-                    </Text>
-                </Box>
             </Box>
         );
     }
@@ -216,7 +218,7 @@ export function GroupView({ onBack, onNavigate }: GroupViewProps) {
                 ) : (
                     currentIssues.map((issue, i) => {
                         const selected = i === state.cursor;
-                        const sColor = statusColor(issue.status);
+                        const sColor = statusToColor(issue.status);
                         return (
                             <Box key={issue.inum}>
                                 <Text color={selected ? 'cyan' : undefined} bold={selected}>
@@ -237,11 +239,6 @@ export function GroupView({ onBack, onNavigate }: GroupViewProps) {
                 )}
             </Box>
 
-            <Box marginTop={1} borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false}>
-                <Text dimColor>
-                    {' [Enter] View  [n] Next  [p] Prev  [\u2191\u2193] Navigate  [Esc] Back '}
-                </Text>
-            </Box>
         </Box>
     );
 }

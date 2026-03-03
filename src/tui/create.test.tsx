@@ -49,14 +49,8 @@ describe('NewIssue — rendering', () => {
         expect(titleLine).toMatch(/[▸>]/);
     });
 
-    it('displays footer shortcuts', () => {
-        const { lastFrame } = render(
-            <NewIssue onCreated={vi.fn()} onCancel={vi.fn()} />
-        );
-        const frame = lastFrame()!;
-        expect(frame).toContain('Enter');
-        expect(frame).toContain('Esc');
-    });
+    // Footer shortcuts are rendered centrally by App-level Footer component
+    // and tested in footer.test.tsx
 });
 
 describe('NewIssue — field navigation', () => {

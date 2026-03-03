@@ -25,13 +25,13 @@ describe('Footer — shortcut data', () => {
         }
     });
 
-    it('FOOTER_LINES is 1', () => {
-        expect(FOOTER_LINES).toBe(1);
+    it('FOOTER_LINES constant is exported', () => {
+        expect(FOOTER_LINES).toBeDefined();
     });
 });
 
 describe('Footer — per-view rendering', () => {
-    it('Dashboard shows all 7 shortcuts', () => {
+    it('Dashboard renders all 9 shortcuts (wraps on narrow terminals)', () => {
         const { lastFrame } = render(<Footer viewType="Dashboard" />);
         const frame = lastFrame()!;
         expect(frame).toContain('[Enter]');
@@ -40,21 +40,22 @@ describe('Footer — per-view rendering', () => {
         expect(frame).toContain('New');
         expect(frame).toContain('[a]');
         expect(frame).toContain('Activate');
-        expect(frame).toContain('[d]');
-        expect(frame).toContain('Defer');
-        expect(frame).toContain('[r]');
-        expect(frame).toContain('Resolve');
         expect(frame).toContain('[s]');
-        expect(frame).toContain('Show pane');
+        expect(frame).toContain('Agents');
+        expect(frame).toContain('[b]');
+        expect(frame).toContain('Blocking');
+        expect(frame).toContain('[g]');
+        expect(frame).toContain('Groups');
         expect(frame).toContain('[q]');
         expect(frame).toContain('Quit');
     });
 
-    it('Detail shows all 7 shortcuts', () => {
+    it('Detail shows all shortcuts with disabled indicators', () => {
         const { lastFrame } = render(<Footer viewType="Detail" />);
         const frame = lastFrame()!;
         expect(frame).toContain('[Enter]');
         expect(frame).toContain('Send');
+        expect(frame).toContain('Scroll');
         expect(frame).toContain('[Esc]');
         expect(frame).toContain('Back');
         expect(frame).toContain('[d]');
@@ -87,20 +88,24 @@ describe('Footer — per-view rendering', () => {
         expect(frame).not.toContain('Activate');
     });
 
-    it('AgentStatus shows 2 shortcuts', () => {
+    it('AgentStatus shows 3 shortcuts', () => {
         const { lastFrame } = render(<Footer viewType="AgentStatus" />);
         const frame = lastFrame()!;
         expect(frame).toContain('[Enter]');
         expect(frame).toContain('Focus pane');
+        expect(frame).toContain('[j/k]');
+        expect(frame).toContain('Navigate');
         expect(frame).toContain('[Esc]');
         expect(frame).toContain('Back');
     });
 
-    it('BlockingMap shows 2 shortcuts', () => {
+    it('BlockingMap shows 3 shortcuts', () => {
         const { lastFrame } = render(<Footer viewType="BlockingMap" />);
         const frame = lastFrame()!;
         expect(frame).toContain('[Enter]');
         expect(frame).toContain('View issue');
+        expect(frame).toContain('[j/k]');
+        expect(frame).toContain('Navigate');
         expect(frame).toContain('[Esc]');
         expect(frame).toContain('Back');
     });

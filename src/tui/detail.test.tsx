@@ -249,26 +249,8 @@ describe('DetailView', () => {
         expect(onSend).not.toHaveBeenCalled();
     });
 
-    // ---- Footer shortcuts ----
-
-    it('displays footer shortcuts', () => {
-        const { lastFrame } = render(<DetailView {...defaultProps} />);
-        const frame = lastFrame()!;
-        expect(frame).toContain('Enter');
-        expect(frame).toContain('Esc');
-        expect(frame).toContain('Back');
-        expect(frame).toContain('Scroll');
-    });
-
-    it('displays action shortcuts in footer', () => {
-        const { lastFrame } = render(<DetailView {...defaultProps} />);
-        const frame = lastFrame()!;
-        expect(frame).toContain('Defer');
-        expect(frame).toContain('Resolve');
-        expect(frame).toContain('Block');
-        expect(frame).toContain('Rebase');
-        expect(frame).toContain('Show pane');
-    });
+    // Footer shortcuts are rendered centrally by App-level Footer component
+    // and tested in footer.test.tsx
 
     // ---- Edge cases ----
 

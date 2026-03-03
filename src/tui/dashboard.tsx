@@ -170,12 +170,6 @@ export function Dashboard({
                 )}
             </Box>
 
-            {/* Footer shortcuts */}
-            <Box marginTop={1} borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false}>
-                <Text dimColor>
-                    {' [Enter] View  [n] New  [a] Activate  [d] Defer  [r] Resolve  [s] Show pane  [q] Quit '}
-                </Text>
-            </Box>
         </Box>
     );
 }

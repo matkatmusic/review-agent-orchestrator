@@ -118,11 +118,6 @@ function NewIssue({ onCreated, onCancel }: NewIssueProps) {
                 </Box>
             )}
 
-            <Box marginTop={1}>
-                <Text dimColor>
-                    [Enter] Create  [Esc] Cancel  [Tab] Next field  [Shift+Tab] Previous field
-                </Text>
-            </Box>
         </Box>
     );
 }

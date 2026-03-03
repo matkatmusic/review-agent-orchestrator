@@ -10,7 +10,21 @@ import { MOCK_ISSUES, MOCK_UNREAD_INUMS, MOCK_MAX_AGENTS } from './mock-data.js'
 import { DetailView, MOCK_DETAIL_DATA } from './detail.js';
 import { AgentStatus } from './agent-status.js';
 import { BlockingMap } from './blocking-map.js';
-import { GroupView } from './group-view.js';
+import { GroupView, GROUP_MODE_INITIAL } from './group-view.js';
+import type { GroupMode } from './group-view.js';
+
+// Keys each view handles internally. The App-level handler will not
+// process any key listed here for the active view, preventing conflicts.
+import type { ViewType } from './views.js';
+
+const VIEW_OWNED_KEYS: Record<ViewType, ReadonlySet<string>> = {
+    Dashboard:   new Set(['n', 'a', 'd', 'r', 'j', 'k', 'return', 'tab']),
+    Detail:      new Set(['return', 'd', 'r', 'b', 'w', 's']),
+    NewIssue:    new Set(['return', 'tab', 'escape', 'n', 'a', 'b', 'd', 'g', 'j', 'k', 'p', 'q', 'r', 's', 'w']),
+    AgentStatus: new Set(['j', 'k', 'return']),
+    BlockingMap: new Set(['j', 'k', 'b', 'return']),
+    GroupView:   new Set(['j', 'k', 'n', 'p', 'g', 'return', 'escape']),
+};
 
 interface AppProps {
     initialView?: View;
@@ -24,6 +38,7 @@ function App({ initialView, onExit }: AppProps) {
     const rows = (stdout as import('node:tty').WriteStream)?.rows ?? 24;
     const [viewStack, setViewStack] = useState<View[]>([initialView ?? { type: 'Dashboard' }]);
     const currentView = viewStack[viewStack.length - 1];
+    const [groupMode, setGroupMode] = useState<GroupMode>(GROUP_MODE_INITIAL);
 
     const navigate = useCallback((view: View) => {
         setViewStack(prev => [...prev, view]);
@@ -33,16 +48,20 @@ function App({ initialView, onExit }: AppProps) {
         setViewStack(prev => (prev.length > 1 ? prev.slice(0, -1) : prev));
     }, []);
 
-    // Disable global shortcuts when a view with its own input handling is active
-    const viewOwnsInput = currentView.type === 'NewIssue';
-
     useInput((input, key) => {
-        // Views with text input handle their own character keys.
-        // Only Esc (back) is handled at the App level for those views.
-        if (currentView.type === 'Detail') {
-            if (key.escape) {
-                goBack();
-            }
+        const ownedKeys = VIEW_OWNED_KEYS[currentView.type];
+
+        // Check owned keys FIRST — if the view handles this key, skip it here.
+        // This prevents App from stealing keys that views need internally
+        // (e.g. Esc in GroupView for issues→list, or 'n' in GroupView for next).
+        if (key.escape && ownedKeys.has('escape')) return;
+        if (key.return && ownedKeys.has('return')) return;
+        if (key.tab && ownedKeys.has('tab')) return;
+        if (input && ownedKeys.has(input)) return;
+
+        // Global keys — only reached if the current view doesn't own them
+        if (key.escape) {
+            goBack();
             return;
         }
 
@@ -52,30 +71,7 @@ function App({ initialView, onExit }: AppProps) {
             return;
         }
 
-        if (key.escape) {
-            goBack();
-            return;
-        }
-
-        // When Dashboard is active, it handles its own shortcuts (n, Enter,
-        // a, d, r, j, k, Tab, arrows). Only global nav shortcuts that
-        // Dashboard does NOT handle are forwarded here.
-        if (currentView.type === 'Dashboard') {
-            switch (input) {
-                case 's':
-                    navigate({ type: 'AgentStatus' });
-                    break;
-                case 'b':
-                    navigate({ type: 'BlockingMap' });
-                    break;
-                case 'g':
-                    navigate({ type: 'GroupView' });
-                    break;
-            }
-            return;
-        }
-
-        // Placeholder shortcuts for other views (refined as views are built)
+        // Global navigation shortcuts — only reached if the view doesn't own the key
         switch (input) {
             case 'n':
                 navigate({ type: 'NewIssue' });
@@ -90,7 +86,7 @@ function App({ initialView, onExit }: AppProps) {
                 navigate({ type: 'GroupView' });
                 break;
         }
-    }, { isActive: !viewOwnsInput });
+    });
 
     let content: React.ReactNode;
     switch (currentView.type) {
@@ -147,13 +143,25 @@ function App({ initialView, onExit }: AppProps) {
             content = <BlockingMap navigate={navigate} />;
             break;
         case 'GroupView':
-            content = <GroupView onBack={goBack} onNavigate={(inum) => navigate({ type: 'Detail', inum })} />;
+            content = (
+                <GroupView
+                    onBack={goBack}
+                    onNavigate={(inum) => navigate({ type: 'Detail', inum })}
+                    groupMode={groupMode}
+                    onGroupModeChange={setGroupMode}
+                />
+            );
             break;
     }
 
     return (
         <Box flexDirection="column">
-            <Header currentView={currentView} columns={columns} />
+            <Header
+                currentView={currentView}
+                columns={columns}
+                activeAgents={MOCK_ISSUES.filter(i => i.status === 'Active').length}
+                unreadCount={MOCK_UNREAD_INUMS.size}
+            />
             {content}
             <Footer viewType={currentView.type} />
         </Box>

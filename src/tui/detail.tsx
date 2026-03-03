@@ -127,6 +127,12 @@ export function DetailView({
         ? blocks.map(n => `I-${n}`).join(', ')
         : '(none)';
 
+    // TODO: Make "Blocked by" and "Blocks" issue numbers navigable.
+    // Pressing Tab could cycle focus between: text input → blocked-by links → blocks links.
+    // When focused on a dependency link, arrow keys select an inum and Enter navigates to it.
+    // Alternative: left/right arrows cycle through dependency inums in the header while
+    // up/down continue to scroll conversation.
+
     return (
         <Box flexDirection="column">
             {/* Issue info header */}
@@ -162,10 +168,6 @@ export function DetailView({
                 />
             </Box>
 
-            {/* Footer shortcuts */}
-            <Text dimColor wrap="truncate">
-                [Enter] Send  [Esc] Back  [d] Defer  [r] Resolve  [b] Block  [w] Rebase  [s] Show pane  [↑↓] Scroll
-            </Text>
         </Box>
     );
 }
@@ -238,6 +240,115 @@ export const MOCK_DETAIL_DATA: Record<number, DetailMockData> = {
         },
         responses: [],
         blockedBy: [1],
+        blocks: [],
+        group: 'Inbox',
+    },
+    3: {
+        issue: {
+            inum: 3,
+            title: 'Implement auth module',
+            description: 'Core authentication module',
+            status: 'Blocked',
+            created_at: '2025-01-16T08:00:00Z',
+            resolved_at: null,
+            issue_revision: 1,
+            agent_last_read_at: null,
+            user_last_viewed_at: null,
+        },
+        responses: [
+            { id: 10, inum: 3, author: 'user', body: 'Blocked until CI pipeline is ready.', created_at: '2025-01-16T08:05:00Z' },
+        ],
+        blockedBy: [1],
+        blocks: [6],
+        group: 'Inbox',
+    },
+    4: {
+        issue: {
+            inum: 4,
+            title: 'Write API endpoints',
+            description: 'REST API endpoint implementation',
+            status: 'Blocked',
+            created_at: '2025-01-17T09:00:00Z',
+            resolved_at: null,
+            issue_revision: 1,
+            agent_last_read_at: null,
+            user_last_viewed_at: null,
+        },
+        responses: [],
+        blockedBy: [1],
+        blocks: [],
+        group: 'Backend Sprint 1',
+    },
+    5: {
+        issue: {
+            inum: 5,
+            title: 'Build data layer',
+            description: 'Database abstraction and data access layer',
+            status: 'Blocked',
+            created_at: '2025-01-18T10:00:00Z',
+            resolved_at: null,
+            issue_revision: 1,
+            agent_last_read_at: null,
+            user_last_viewed_at: null,
+        },
+        responses: [
+            { id: 20, inum: 5, author: 'user', body: 'Waiting on database schema design.', created_at: '2025-01-18T10:05:00Z' },
+            { id: 21, inum: 5, author: 'agent', body: '(analysis) Reviewing schema options and ORM strategies.', created_at: '2025-01-18T10:30:00Z' },
+        ],
+        blockedBy: [2],
+        blocks: [6],
+        group: 'Backend Sprint 1',
+    },
+    6: {
+        issue: {
+            inum: 6,
+            title: 'Integration testing',
+            description: 'End-to-end integration test suite',
+            status: 'Blocked',
+            created_at: '2025-01-19T11:00:00Z',
+            resolved_at: null,
+            issue_revision: 1,
+            agent_last_read_at: null,
+            user_last_viewed_at: null,
+        },
+        responses: [],
+        blockedBy: [3, 5],
+        blocks: [],
+        group: 'Inbox',
+    },
+    7: {
+        issue: {
+            inum: 7,
+            title: 'Update README',
+            description: 'Documentation updates',
+            status: 'Deferred',
+            created_at: '2025-01-20T12:00:00Z',
+            resolved_at: null,
+            issue_revision: 1,
+            agent_last_read_at: null,
+            user_last_viewed_at: null,
+        },
+        responses: [],
+        blockedBy: [],
+        blocks: [],
+        group: 'Backlog',
+    },
+    8: {
+        issue: {
+            inum: 8,
+            title: 'initial_setup_task',
+            description: 'Initial project setup',
+            status: 'Resolved',
+            created_at: '2026-01-08T00:00:00Z',
+            resolved_at: '2026-01-10T00:00:00Z',
+            issue_revision: 3,
+            agent_last_read_at: null,
+            user_last_viewed_at: null,
+        },
+        responses: [
+            { id: 30, inum: 8, author: 'agent', body: '(implementation) Project scaffolding complete.', created_at: '2026-01-09T10:00:00Z' },
+        ],
+        blockedBy: [],
         blocks: [],
         group: 'Inbox',
     },

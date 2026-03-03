@@ -55,16 +55,8 @@ describe('AgentStatus', () => {
         }
     });
 
-    // ---- Footer shortcuts ----
-
-    it('shows footer with keyboard shortcuts', () => {
-        const { lastFrame } = render(<AgentStatus />);
-        const frame = lastFrame()!;
-        expect(frame).toContain('[Enter]');
-        expect(frame).toContain('Focus pane');
-        expect(frame).toContain('[Esc]');
-        expect(frame).toContain('Back');
-    });
+    // Footer shortcuts are rendered centrally by App-level Footer component
+    // and tested in footer.test.tsx
 
     // ---- Cursor navigation ----
 

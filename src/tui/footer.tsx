@@ -21,17 +21,20 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
         { key: 'a',     label: 'Activate' },
         { key: 'd',     label: 'Defer' },
         { key: 'r',     label: 'Resolve' },
-        { key: 's',     label: 'Show pane' },
+        { key: 's',     label: 'Agents' },
+        { key: 'b',     label: 'Blocking' },
+        { key: 'g',     label: 'Groups' },
         { key: 'q',     label: 'Quit' },
     ],
     Detail: [
         { key: 'Enter', label: 'Send' },
+        { key: '\u2191\u2193', label: 'Scroll' },
         { key: 'Esc',   label: 'Back' },
-        { key: 'd',     label: 'Defer' },
-        { key: 'r',     label: 'Resolve' },
-        { key: 'b',     label: 'Block' },
-        { key: 'w',     label: 'Rebase worktree' },
-        { key: 's',     label: 'Show pane' },
+        { key: 'd',     label: 'Defer', disabled: true },
+        { key: 'r',     label: 'Resolve', disabled: true },
+        { key: 'b',     label: 'Block', disabled: true },
+        { key: 'w',     label: 'Rebase', disabled: true },
+        { key: 's',     label: 'Show pane', disabled: true },
     ],
     NewIssue: [
         { key: 'Enter', label: 'Create' },
@@ -39,10 +42,12 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
     ],
     AgentStatus: [
         { key: 'Enter', label: 'Focus pane' },
+        { key: 'j/k',   label: 'Navigate' },
         { key: 'Esc',   label: 'Back' },
     ],
     BlockingMap: [
         { key: 'Enter', label: 'View issue' },
+        { key: 'j/k',   label: 'Navigate' },
         { key: 'Esc',   label: 'Back' },
     ],
     GroupView: [
@@ -57,8 +62,8 @@ const FooterComponent: React.FC<FooterProps> = ({ viewType }) => {
     const shortcuts = VIEW_SHORTCUTS[viewType];
 
     return (
-        <Box height={FOOTER_LINES}>
-            <Text wrap="truncate">
+        <Box>
+            <Text wrap="wrap">
                 {shortcuts.map((s, i) => {
                     const separator = i > 0 ? '  ' : '';
                     if (s.disabled) {

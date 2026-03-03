@@ -324,30 +324,8 @@ describe('GroupView', () => {
         expect(afterOvershoot).toBe(atLast);
     });
 
-    // ---- Footer shortcuts ----
-
-    it('container list mode shows correct footer shortcuts', () => {
-        const { lastFrame } = render(<GroupView />);
-        const frame = lastFrame()!;
-
-        expect(frame).toContain('[Enter]');
-        expect(frame).toContain('[Esc]');
-        expect(frame).toContain('Navigate');
-    });
-
-    it('drilled-in mode shows navigation shortcuts', async () => {
-        const { lastFrame, stdin } = render(<GroupView />);
-        await tick();
-
-        stdin.write('\r');
-        await tick();
-        const frame = lastFrame()!;
-
-        expect(frame).toContain('[n]');
-        expect(frame).toContain('[p]');
-        expect(frame).toContain('[Esc]');
-        expect(frame).toContain('[Enter]');
-    });
+    // Footer shortcuts are rendered centrally by App-level Footer component
+    // and tested in footer.test.tsx
 
     // ---- Empty states ----
 

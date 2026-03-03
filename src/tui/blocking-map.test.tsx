@@ -194,16 +194,5 @@ describe('BlockingMap — Enter navigates to detail', () => {
     });
 });
 
-describe('BlockingMap — footer shortcuts', () => {
-    it('shows Enter shortcut hint', () => {
-        const { lastFrame } = render(<BlockingMap navigate={vi.fn()} />);
-        const frame = lastFrame()!;
-        expect(frame).toMatch(/\[Enter\].*View/i);
-    });
-
-    it('shows Esc shortcut hint', () => {
-        const { lastFrame } = render(<BlockingMap navigate={vi.fn()} />);
-        const frame = lastFrame()!;
-        expect(frame).toMatch(/\[Esc\].*Back/i);
-    });
-});
+// Footer shortcuts are rendered centrally by App-level Footer component
+// and tested in footer.test.tsx
