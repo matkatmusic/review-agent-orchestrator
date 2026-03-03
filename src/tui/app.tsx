@@ -3,6 +3,8 @@ import { Box, Text, useInput, useApp, useStdout } from 'ink';
 import type { View } from './views.js';
 import { Header, HEADER_LINES } from './header.js';
 import { Footer } from './footer.js';
+import { NewIssue } from './create.js';
+import type { NewIssueData } from './create.js';
 
 interface AppProps {
     initialView?: View;
@@ -23,6 +25,9 @@ function App({ initialView, onExit }: AppProps) {
     const goBack = useCallback(() => {
         setViewStack(prev => (prev.length > 1 ? prev.slice(0, -1) : prev));
     }, []);
+
+    // Disable global shortcuts when a view with its own input handling is active
+    const viewOwnsInput = currentView.type === 'NewIssue';
 
     useInput((input, key) => {
         if (input === 'q') {
@@ -55,7 +60,7 @@ function App({ initialView, onExit }: AppProps) {
                 navigate({ type: 'GroupView' });
                 break;
         }
-    });
+    }, { isActive: !viewOwnsInput });
 
     let content: React.ReactNode;
     switch (currentView.type) {
@@ -66,7 +71,15 @@ function App({ initialView, onExit }: AppProps) {
             content = <Text>Detail I{currentView.inum}</Text>;
             break;
         case 'NewIssue':
-            content = <Text>New Issue</Text>;
+            content = (
+                <NewIssue
+                    onCreated={(_data: NewIssueData) => {
+                        // Phase 2 will wire this to DB — for now just navigate back
+                        goBack();
+                    }}
+                    onCancel={goBack}
+                />
+            );
             break;
         case 'AgentStatus':
             content = <Text>Agent Status</Text>;
