@@ -1,0 +1,111 @@
+You are a senior software architect reviewing a design document and implementation plan for an "Issue Review Orchestrator" — a repo-level ticketing system that spawns AI agents (Claude Code) in tmux panes to work on issues in isolated git worktrees, orchestrated by a Node.js/TypeScript TUI built with Ink and backed by SQLite.
+
+Your task: evaluate whether this plan is sound or ignoring obvious/hidden failure points. Be specific, cite the design where relevant, and keep your response concise (aim for ~800-1200 words). Structure your response as:
+
+1. **SOUND DECISIONS** (3-5 bullet points) — what's well-designed
+2. **HIDDEN FAILURE POINTS** (5-8 bullet points) — risks the plan doesn't address or underestimates
+3. **IMPLEMENTATION ORDER RISKS** (3-5 bullet points) — phase ordering problems
+4. **VERDICT** — overall assessment in 2-3 sentences
+
+---
+
+## DESIGN DOCUMENT (v2.1.md) — KEY SECTIONS
+
+### Context
+Complete rewrite of a v1 bash-based system. V1 failures: `is_blocked()` failed, agents spawned despite unresolved blockers, XML tag format was brittle. V2.1 replaces file-based issues with SQLite DB + TUI.
+
+### Architecture
+- **Single process** — TUI + orchestrator scan loop in one Ink app. `scanCycle` runs on a `useEffect` timer (1-2s interval).
+- **Session recovery on startup** — reconcile existing tmux panes against `agent_sessions` DB table, re-adopt alive panes, clean up dead ones.
+- **SQLite WAL mode** — concurrent reads/writes from main process and agent CLI tool (`aidi`).
+
+### Issue Statuses (5 states)
+- **Awaiting** — candidate for work, nothing blocking it. No agent, no worktree.
+- **Active** — user explicitly activated via TUI. Agent spawned, worktree created. Capped by `MAX_AGENTS`.
+- **Blocked** — depends on another issue. Auto-transitions to Awaiting when blockers resolve.
+- **Deferred** — user chose to postpone. Manual move only.
+- **Resolved** — done. Pane killed, worktree applied. Can be reopened.
+
+### Status Transitions
+- Awaiting -> Active: user triggers from TUI, disabled when active count >= MAX_AGENTS.
+- Active -> Blocked: agent self-detects or user sets. Agent commits to branch, worktree removed, pane killed.
+- Active -> Deferred: user choice. Agent commits to branch, worktree removed, pane killed.
+- Active -> Resolved: rebase check, apply worktree to active branch (unstaged), agent deleted.
+- Blocked -> Awaiting: automatic when all blockers resolve (background scan).
+- Any -> Deferred: user choice.
+
+### Agent Communication (two channels)
+- **Ticket channel (formal, logged)**: user writes in TUI -> saved to DB -> orchestrator rewrites `issue.md` in worktree -> sends short tmux signal -> agent reads `issue.md`.
+- **Direct channel (informal, ephemeral)**: user types in tmux pane. NOT logged unless user says "log that".
+- Strict separation. Only user responses trigger signals to agent.
+
+### Agent Context
+- `CLAUDE.md` written (untracked) into each worktree — agent behavioral instructions.
+- `issue.md` written (untracked) into each worktree — full issue state. Orchestrator rewrites entire file on every user response.
+- `aidi` CLI for writes to DB, reads of OTHER issues, creating sub-issues.
+- `issue.md` is the agent's source of truth for its own issue. Agent does NOT read own issue from DB.
+
+### Worktree Lifecycle
+- On activate: create worktree (or re-create from existing branch if resuming).
+- On block/defer: agent commits all work to `worktree-I<#>` branch, worktree removed, pane killed.
+- On resolve: rebase check, apply to active branch as unstaged changes, worktree removed, agent deleted.
+- Rebase: manual TUI command only, not automatic.
+
+### Database Schema (SQLite WAL)
+Tables: metadata, issues (5 statuses), responses (user/agent), dependencies (blocker/blocked), containers (group/sprint with parent_id), issue_containers (many-to-many join), agent_sessions (pane tracking).
+
+### Groups & Organization
+- Unified `containers` table with self-referencing `parent_id` for tree structure.
+- Many-to-many via `issue_containers` join table with per-container `sort_order`.
+- Default 'Inbox' group for uncategorized issues.
+
+### Install & Setup
+- Git submodule. `install.sh` checks all deps, asks before installing, runs npm install + build + DB init.
+
+---
+
+## IMPLEMENTATION ORDER (v2.1.implementation_order.md)
+
+- **Phase 0**: Project scaffolding (npm init, config module, DB module with WAL, CRUD layer)
+- **Phase 1**: TUI UX shell with static mock data (tmux auto-launch, 6 views, keyboard nav) — NO DB, NO agents
+- **Phase 2**: Wire TUI to DB (live queries, status changes, scan cycle with auto-unblock + dump export)
+- **Phase 3**: Worktree management (create, resume from branch, teardown with commit-to-branch)
+- **Phase 4**: Block cascade (blocking active issue tears down its worktree)
+- **Phase 5**: Agent spawning — bare `claude` in worktree, no instructions, session recovery
+- **Phase 6**: Agent permissions (per-worktree .claude/settings.json, empirical verification)
+- **Phase 7**: Agent deletion on status change + pane visibility management
+- **Phase 8**: Git commit handling (detect new commits, flag "needs rebase", no auto-action)
+- **Phase 9**: Rebase worktree TUI command
+- **Phase 10**: Agent spawning WITH instructions (CLAUDE.md, issue.md, initial prompt, signal mechanism)
+- **Phase 11**: Resolve flow (rebase check, apply unstaged, conflict handling)
+- **Phase 12**: Install script
+- **Phase 13**: aidi CLI (agent-issue-db-interface with symlink)
+
+---
+
+## DISCUSSION CONTEXT (key tradeoffs from v2.1.discussion.md)
+
+### Why single process?
+~50 fewer lines, no process coordination bugs. Crash risk mitigated by session recovery. Open question: whether Ink render loop could delay scan cycle under load.
+
+### Why commit-to-branch on block/defer?
+Enables cross-machine resumption. User's reasoning: "that is how you use git." Rejected: keeping worktrees around (disk accumulation), stash-based (fragile).
+
+### Why two communication channels?
+V1 ate tokens with verbose re-prompts. User's metaphor: "Jira ticket replies + walking over to agent's desk." Strict separation avoids logging noise.
+
+### Why issue.md full rewrite (not append)?
+Ensures file always matches DB state. Append could diverge on edits/deletions.
+
+### Why per-worktree permissions?
+User challenged assumption that agents inherit project root settings. Each worktree gets its own .claude/settings.json. Exact permission set determined empirically.
+
+### Why manual rebase only?
+User explicitly rejected auto-rebase. Scan cycle flags "needs rebase" but takes no action.
+
+### Why unified containers table?
+User asked "which allows most variability?" Tree structure with self-referencing parent_id won over separate tables.
+
+---
+
+Now evaluate: Is this plan sound, or is it ignoring obvious/hidden failure points? Be specific and concise.
