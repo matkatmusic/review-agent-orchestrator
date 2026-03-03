@@ -1,4 +1,9 @@
 config.local.sh
+config.local.json
 dist/
 node_modules/
 .pending/
+*.db
+*.db-wal
+*.db-shm
+package-lock.json

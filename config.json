@@ -1,0 +1,9 @@
+{
+    "maxAgents": 6,
+    "tmuxSession": "issue-review",
+    "scanInterval": 2,
+    "terminalApp": "Terminal",
+    "agentPrompt": "prompts/review-agent.md",
+    "codeRoot": "",
+    "teardownTimeout": 60
+}
