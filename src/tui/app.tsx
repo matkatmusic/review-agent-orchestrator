@@ -5,6 +5,8 @@ import { Header, HEADER_LINES } from './header.js';
 import { Footer } from './footer.js';
 import { NewIssue } from './create.js';
 import type { NewIssueData } from './create.js';
+import { Dashboard } from './dashboard.js';
+import { MOCK_ISSUES, MOCK_UNREAD_INUMS, MOCK_MAX_AGENTS } from './mock-data.js';
 
 interface AppProps {
     initialView?: View;
@@ -41,12 +43,26 @@ function App({ initialView, onExit }: AppProps) {
             return;
         }
 
-        // Navigation shortcuts (available from any view for now — per-view
-        // shortcuts will be refined when real view components are built)
+        // When Dashboard is active, it handles its own shortcuts (n, Enter,
+        // a, d, r, j, k, Tab, arrows). Only global nav shortcuts that
+        // Dashboard does NOT handle are forwarded here.
+        if (currentView.type === 'Dashboard') {
+            switch (input) {
+                case 's':
+                    navigate({ type: 'AgentStatus' });
+                    break;
+                case 'b':
+                    navigate({ type: 'BlockingMap' });
+                    break;
+                case 'g':
+                    navigate({ type: 'GroupView' });
+                    break;
+            }
+            return;
+        }
+
+        // Placeholder shortcuts for other views (refined as views are built)
         switch (input) {
-            case 'v':
-                navigate({ type: 'Detail', inum: 1 });
-                break;
             case 'n':
                 navigate({ type: 'NewIssue' });
                 break;
@@ -65,7 +81,18 @@ function App({ initialView, onExit }: AppProps) {
     let content: React.ReactNode;
     switch (currentView.type) {
         case 'Dashboard':
-            content = <Text>Dashboard</Text>;
+            content = (
+                <Dashboard
+                    issues={MOCK_ISSUES}
+                    unreadInums={MOCK_UNREAD_INUMS}
+                    maxAgents={MOCK_MAX_AGENTS}
+                    onSelect={(inum) => navigate({ type: 'Detail', inum })}
+                    onNewIssue={() => navigate({ type: 'NewIssue' })}
+                    onActivate={() => {}}
+                    onDefer={() => {}}
+                    onResolve={() => {}}
+                />
+            );
             break;
         case 'Detail':
             content = <Text>Detail I{currentView.inum}</Text>;
