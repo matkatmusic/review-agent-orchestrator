@@ -8,6 +8,7 @@ import type { NewIssueData } from './create.js';
 import { Dashboard } from './dashboard.js';
 import { MOCK_ISSUES, MOCK_UNREAD_INUMS, MOCK_MAX_AGENTS } from './mock-data.js';
 import { DetailView, MOCK_DETAIL_DATA } from './detail.js';
+import { AgentStatus } from './agent-status.js';
 
 interface AppProps {
     initialView?: View;
@@ -138,7 +139,7 @@ function App({ initialView, onExit }: AppProps) {
             );
             break;
         case 'AgentStatus':
-            content = <Text>Agent Status</Text>;
+            content = <AgentStatus />;
             break;
         case 'BlockingMap':
             content = <Text>Blocking Map</Text>;
