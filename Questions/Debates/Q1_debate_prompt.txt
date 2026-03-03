@@ -12,47 +12,65 @@ Your task: evaluate whether this plan is sound or ignoring obvious/hidden failur
 ## DESIGN DOCUMENT (v2.1.md) — KEY SECTIONS
 
 ### Context
-Complete rewrite of a v1 bash-based system. V1 failures: `is_blocked()` failed, agents spawned despite unresolved blockers, XML tag format was brittle. V2.1 replaces file-based issues with SQLite DB + TUI.
+Complete rewrite of a v1 bash-based system. V1 failures: `is_blocked()` failed, agents spawned despite unresolved blockers, XML tag format was brittle. V2.1 replaces file-based issues with SQLite DB + TUI. A prior three-model review (Claude, Gemini, Codex) identified 15 issues; 14 have been resolved and folded into the design. One remains unresolved (D9: git index.lock contention across shared .git directory).
 
 ### Architecture
 - **Single process** — TUI + orchestrator scan loop in one Ink app. `scanCycle` runs on a `useEffect` timer (1-2s interval).
 - **Session recovery on startup** — reconcile existing tmux panes against `agent_sessions` DB table, re-adopt alive panes, clean up dead ones.
-- **SQLite WAL mode** — concurrent reads/writes from main process and agent CLI tool (`aidi`).
+- **SQLite WAL mode** with `PRAGMA busy_timeout=5000` on both orchestrator and aidi connections — concurrent reads/writes from main process and agent CLI tool.
+- **Single-flight scan guard** — boolean flag, skip scan cycle if previous still running. Prevents overlapping cycles.
+- **BEGIN IMMEDIATE transactions** — each status transition wrapped in explicit SQLite transaction to guard against concurrent aidi writes.
+- **Debounced dump export** — `issues.dump.sql` exported after 5s of no further DB changes, not every cycle.
 
 ### Issue Statuses (5 states)
 - **Awaiting** — candidate for work, nothing blocking it. No agent, no worktree.
 - **Active** — user explicitly activated via TUI. Agent spawned, worktree created. Capped by `MAX_AGENTS`.
-- **Blocked** — depends on another issue. Auto-transitions to Awaiting when blockers resolve.
+- **Blocked** — depends on another issue. Auto-transitions to Awaiting when all blockers resolve.
 - **Deferred** — user chose to postpone. Manual move only.
-- **Resolved** — done. Pane killed, worktree applied. Can be reopened.
+- **Resolved** — done. Pane killed, worktree applied. Can be reopened (→ Awaiting, may re-block dependents).
 
 ### Status Transitions
-- Awaiting -> Active: user triggers from TUI, disabled when active count >= MAX_AGENTS.
-- Active -> Blocked: agent self-detects or user sets. Agent commits to branch, worktree removed, pane killed.
-- Active -> Deferred: user choice. Agent commits to branch, worktree removed, pane killed.
-- Active -> Resolved: rebase check, apply worktree to active branch (unstaged), agent deleted.
-- Blocked -> Awaiting: automatic when all blockers resolve (background scan).
-- Any -> Deferred: user choice.
+- Awaiting → Active: user triggers from TUI, disabled when active count >= MAX_AGENTS.
+- Active → Blocked: agent self-detects or user sets. Orchestrator signals agent to commit and stop, polls for clean working tree, then removes worktree and kills pane.
+- Active → Deferred: user choice. Same teardown as Active → Blocked.
+- Active → Resolved: rebase check, apply worktree to active branch (unstaged), agent deleted.
+- Blocked → Awaiting: automatic when all blockers resolve (background scan).
+- **Auto re-block**: if a resolved blocker is reopened and the dependency row still exists, dependents auto-transition back to Blocked. Dependency rows are the source of truth.
+- **Cycle detection**: `wouldCreateCycle` recursive CTE at `addBlock` time rejects direct and transitive cycles.
+- Any → Deferred: user choice.
 
 ### Agent Communication (two channels)
-- **Ticket channel (formal, logged)**: user writes in TUI -> saved to DB -> orchestrator rewrites `issue.md` in worktree -> sends short tmux signal -> agent reads `issue.md`.
+- **Ticket channel (formal, logged)**: user writes response in TUI → saved to DB → orchestrator sends `C-c` to agent pane and polls until idle (v1's `cancel_and_send` pattern) → orchestrator rewrites `issue.md` in worktree → sends short tmux signal (e.g., `"I7: new reply"`) → agent reads `issue.md` → agent runs `aidi ack <inum>` to confirm receipt (sets `agent_last_read_at` in DB). Orchestrator retries signal if ack not received within N seconds.
 - **Direct channel (informal, ephemeral)**: user types in tmux pane. NOT logged unless user says "log that".
-- Strict separation. Only user responses trigger signals to agent.
+- Strict separation. Only user responses trigger signals to agent. Interrupt-before-rewrite eliminates file read race conditions.
 
 ### Agent Context
-- `CLAUDE.md` written (untracked) into each worktree — agent behavioral instructions.
-- `issue.md` written (untracked) into each worktree — full issue state. Orchestrator rewrites entire file on every user response.
-- `aidi` CLI for writes to DB, reads of OTHER issues, creating sub-issues.
+- `CLAUDE.md` written (untracked) into each worktree — agent behavioral instructions. Includes routine commit instructions (commit after each logical unit) and commit-on-signal instructions (when receiving teardown signal, commit all work immediately and stop).
+- `issue.md` written (untracked) into each worktree — structured header (inum, title, status, description, blocked_by, blocks) followed by full conversation history. Orchestrator rewrites entire file on every user response.
+- `aidi` CLI for writes to DB, reads of OTHER issues, creating sub-issues, acknowledging receipt.
 - `issue.md` is the agent's source of truth for its own issue. Agent does NOT read own issue from DB.
 
 ### Worktree Lifecycle
 - On activate: create worktree (or re-create from existing branch if resuming).
-- On block/defer: agent commits all work to `worktree-I<#>` branch, worktree removed, pane killed.
-- On resolve: rebase check, apply to active branch as unstaged changes, worktree removed, agent deleted.
+- On block/defer: orchestrator signals agent to commit and stop via `cancel_and_send`, polls for clean working tree (`git status --porcelain`). Agent handles ALL git operations in its worktree — orchestrator never touches worktree git state. Clean → worktree removed, pane killed. Dirty → wait. User can force-kill as escape hatch.
+- On resolve: agent rebases onto active HEAD (resolves its own conflicts, escalates to user if it fails). Apply worktree changes to active branch as unstaged using empirically selected strategy (4 strategies evaluated in Phase 11). Worktree removed, agent deleted.
 - Rebase: manual TUI command only, not automatic.
 
 ### Database Schema (SQLite WAL)
-Tables: metadata, issues (5 statuses), responses (user/agent), dependencies (blocker/blocked), containers (group/sprint with parent_id), issue_containers (many-to-many join), agent_sessions (pane tracking).
+```sql
+PRAGMA journal_mode=WAL;
+PRAGMA busy_timeout=5000;
+```
+Tables: metadata, issues (5 statuses + `agent_last_read_at` column), responses (user/agent), dependencies (blocker/blocked with cycle detection), containers (group/sprint with parent_id), issue_containers (many-to-many join), agent_sessions (pane tracking).
+
+### Agent Permissions
+- Per-worktree `/.claude/settings.json`, not inherited from project root.
+- V1 battle-tested baseline: `Read(*)`, `Edit(*)`, `Write(*)`, `Glob(*)`, `Grep(*)`, `Bash(git *)`, `Bash(ls *)`, `Bash(find *)`, `Bash(mv *)`, `Bash(cp *)`, `Bash(grep *)`, `Bash(cat *)`, `Bash(echo *)`, `Bash(tmux *)`.
+- V2.1 additions: `Bash(aidi *)`, `Bash(agent-issue-db-interface *)`.
+- `defaultMode: acceptEdits`. Empirical verification iterates from this baseline.
+
+### aidi CLI (agent-issue-db-interface)
+Commands: `aidi respond <inum> "<body>"`, `aidi read <inum>`, `aidi read <inum> --latest`, `aidi block <inum> --by <blocker>`, `aidi create "<title>" "<desc>"`, `aidi status <inum>`, `aidi ack <inum>`. Own DB connection with WAL + busy_timeout=5000.
 
 ### Groups & Organization
 - Unified `containers` table with self-referencing `parent_id` for tree structure.
@@ -66,45 +84,59 @@ Tables: metadata, issues (5 statuses), responses (user/agent), dependencies (blo
 
 ## IMPLEMENTATION ORDER (v2.1.implementation_order.md)
 
-- **Phase 0**: Project scaffolding (npm init, config module, DB module with WAL, CRUD layer)
+- **Phase 0**: Project scaffolding (npm init, config module, DB module with WAL + busy_timeout, CRUD layer with cycle detection, **aidi CLI** built here as Phase 0.5)
 - **Phase 1**: TUI UX shell with static mock data (tmux auto-launch, 6 views, keyboard nav) — NO DB, NO agents
-- **Phase 2**: Wire TUI to DB (live queries, status changes, scan cycle with auto-unblock + dump export)
-- **Phase 3**: Worktree management (create, resume from branch, teardown with commit-to-branch)
-- **Phase 4**: Block cascade (blocking active issue tears down its worktree)
-- **Phase 5**: Agent spawning — bare `claude` in worktree, no instructions, session recovery
-- **Phase 6**: Agent permissions (per-worktree .claude/settings.json, empirical verification)
-- **Phase 7**: Agent deletion on status change + pane visibility management
+- **Phase 2**: Wire TUI to DB (live queries, status changes, scan cycle with single-flight guard + BEGIN IMMEDIATE + auto-unblock + auto re-block + ack retry + debounced dump export)
+- **Phase 3**: Worktree management (create with issue.md header spec, resume from branch, teardown via signal-then-poll — agent commits, orchestrator verifies clean tree)
+- **Phase 4**: Block cascade (blocking active issue signals agent, polls, tears down worktree)
+- **Phase 5**: Agent spawning — bare `claude` in worktree, no instructions, session recovery (tmux smoke test)
+- **Phase 6**: Agent permissions (per-worktree .claude/settings.json with v1 baseline + defaultMode: acceptEdits, empirical verification)
+- **Phase 7**: Agent deletion on status change (signal agent to commit and stop before killing pane) + pane visibility management
 - **Phase 8**: Git commit handling (detect new commits, flag "needs rebase", no auto-action)
 - **Phase 9**: Rebase worktree TUI command
-- **Phase 10**: Agent spawning WITH instructions (CLAUDE.md, issue.md, initial prompt, signal mechanism)
-- **Phase 11**: Resolve flow (rebase check, apply unstaged, conflict handling)
+- **Phase 10**: Agent spawning WITH instructions (CLAUDE.md with routine + on-signal commit instructions, issue.md, initial prompt, cancel_and_send + signal + aidi ack mechanism)
+- **Phase 11**: Resolve flow (evaluate 4 apply strategies empirically, agent rebases and resolves conflicts, apply unstaged, conflict escalation to user)
 - **Phase 12**: Install script
-- **Phase 13**: aidi CLI (agent-issue-db-interface with symlink)
 
 ---
 
 ## DISCUSSION CONTEXT (key tradeoffs from v2.1.discussion.md)
 
 ### Why single process?
-~50 fewer lines, no process coordination bugs. Crash risk mitigated by session recovery. Open question: whether Ink render loop could delay scan cycle under load.
+~50 fewer lines, no process coordination bugs. Crash risk mitigated by session recovery. Scan cycle blocking mitigated by single-flight guard + synchronous better-sqlite3 (<1ms queries). Git/tmux calls stay synchronous for now with documented migration path to async if TUI becomes sluggish.
 
 ### Why commit-to-branch on block/defer?
-Enables cross-machine resumption. User's reasoning: "that is how you use git." Rejected: keeping worktrees around (disk accumulation), stash-based (fragile).
+Enables cross-machine resumption. User's reasoning: "that is how you use git." Rejected: keeping worktrees around (disk accumulation), stash-based (fragile). Agent handles all git ops in its worktree — orchestrator signals and polls for clean tree, never touches worktree git state.
+
+### Why cancel_and_send before issue.md rewrite?
+V1's proven pattern: send C-c to agent pane, poll until idle (check for "Ctrl-C" text, retry up to 5 times), then send message. Guarantees agent is stopped during file rewrite — eliminates race condition without needing atomic file writes.
+
+### Why aidi ack?
+Agent runs `aidi ack <inum>` after reading issue.md, setting `agent_last_read_at` in DB. Orchestrator compares against latest user response timestamp. If ack not received within N seconds, retry signal. Provides delivery guarantee and enables bidirectional unread indicators.
 
 ### Why two communication channels?
 V1 ate tokens with verbose re-prompts. User's metaphor: "Jira ticket replies + walking over to agent's desk." Strict separation avoids logging noise.
 
 ### Why issue.md full rewrite (not append)?
-Ensures file always matches DB state. Append could diverge on edits/deletions.
+Ensures file always matches DB state. Append could diverge on edits/deletions. Structured header (inum, title, status, description, blocked_by, blocks) gives agent self-identification context.
 
 ### Why per-worktree permissions?
-User challenged assumption that agents inherit project root settings. Each worktree gets its own .claude/settings.json. Exact permission set determined empirically.
+User challenged assumption that agents inherit project root settings. Each worktree gets its own .claude/settings.json. V1's battle-tested permission set as baseline, iterated empirically.
 
 ### Why manual rebase only?
 User explicitly rejected auto-rebase. Scan cycle flags "needs rebase" but takes no action.
 
 ### Why unified containers table?
 User asked "which allows most variability?" Tree structure with self-referencing parent_id won over separate tables.
+
+### Why agent handles all git ops?
+Principle established through D3/D12 resolution: agent has context about its changes, orchestrator does not. Agent commits routinely (after each logical unit) and on signal (teardown). Orchestrator signals and verifies via `git status --porcelain`, never runs git commands in the worktree. On resolve, agent rebases onto active HEAD and resolves its own conflicts (v1 pattern).
+
+### Why 4 resolve strategies evaluated empirically?
+V1 evolved through 5 approaches before stabilizing on rebase-then-format-patch, but v1 amended to a single commit. V2.1 agents have multiple commits. Four strategies (diff, format-patch, pre-squash+format-patch, format-patch+3way) tested against multi-commit branches to find the most stable.
+
+### Unresolved: D9 — Git index.lock contention
+Multiple agents in worktrees + orchestrator running git commands risks `.git/index.lock` collisions. Worktrees share the same underlying `.git` directory. No mitigation designed yet.
 
 ---
 

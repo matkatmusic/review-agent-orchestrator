@@ -1,0 +1,131 @@
+You are a senior software architect performing a SECOND-ROUND review of a design document and implementation plan for an "Issue Review Orchestrator" — a repo-level ticketing system that spawns AI agents (Claude Code) in tmux panes to work on issues in isolated git worktrees, orchestrated by a Node.js/TypeScript TUI built with Ink and backed by SQLite.
+
+CONTEXT: A prior three-model review (Claude Opus 4.6, Gemini 3 Pro Preview, GPT-5.3 Codex) identified 15 design issues. 14 have been resolved and folded into the design below. One remains unresolved (D9: git index.lock contention). Your job is to evaluate the UPDATED design — has it addressed the prior concerns adequately? Are there NEW issues introduced by the resolutions? Any remaining gaps?
+
+Your task: evaluate whether this updated plan is sound or still has failure points. Be specific, cite the design where relevant, and keep your response concise (aim for ~800-1200 words). Structure your response as:
+
+1. **PRIOR ISSUES — ADEQUATELY RESOLVED?** (review the 14 resolutions below — flag any that are incomplete or introduced new problems)
+2. **NEW FAILURE POINTS** (3-6 bullet points) — risks introduced by the resolutions or missed entirely in both rounds
+3. **IMPLEMENTATION ORDER** (2-4 bullet points) — any remaining phase ordering concerns
+4. **VERDICT** — overall readiness assessment in 2-3 sentences
+
+---
+
+## PRIOR DEBATE RESOLUTIONS (D1-D15)
+
+**D1. Scan cycle blocking** — RESOLVED: Single-flight guard (boolean flag, skip if previous running) + debounced dump export (5s) + synchronous better-sqlite3 (<1ms). Git/tmux calls stay sync for now; migrate to async if TUI sluggish.
+
+**D2. aidi CLI phase ordering** — RESOLVED: Moved from Phase 13 to Phase 0.5. Built alongside CRUD layer.
+
+**D3. Resolve flow git mechanics** — RESOLVED: V1's stable approach was rebase-then-format-patch but v1 amended to one commit. V2.1 agents have multiple commits. Phase 11 evaluates 4 strategies empirically: (A) rebase+diff, (B) rebase+format-patch, (C) rebase+pre-squash+format-patch, (D) rebase+format-patch+3way. Agent handles its own rebase conflicts (has context), escalates to user only if it fails.
+
+**D4. Signal reliability** — RESOLVED: Two-part fix. (1) cancel_and_send ensures signal delivered to idle agent. (2) Agent runs `aidi ack <inum>` after reading issue.md, setting `agent_last_read_at`. Orchestrator retries if ack not received within N seconds.
+
+**D5. issue.md race condition** — RESOLVED: cancel_and_send (C-c + poll until idle) before rewriting file. Agent guaranteed stopped during rewrite. No atomic writes needed.
+
+**D6. Dependency graph edge cases** — RESOLVED: (1) Cycle detection via recursive CTE at addBlock time. (2) Auto re-block: reopened blocker re-blocks dependents if dependency row exists. (3) Deferred blocker treated as unresolved.
+
+**D7. Phase 5 bare agent spawn** — RESOLVED: Accepted as tmux smoke test. Agent behavioral testing deferred to Phase 10.
+
+**D8. Mock data double work** — RESOLVED: Not an issue — better-sqlite3 is synchronous, no sync-to-async transition.
+
+**D9. Git index.lock contention** — UNRESOLVED. Multiple agents in worktrees share underlying .git directory. Orchestrator running git commands every 1-2s risks collisions.
+
+**D10. Branch accumulation** — RESOLVED: TODOs added for auto-delete on merge detection + manual delete command.
+
+**D11. aidi identity** — RESOLVED: Every aidi command takes inum as explicit argument. issue.md has structured header (inum, title, status, description, blocked_by, blocks).
+
+**D12. Teardown commit protocol** — RESOLVED: Agent handles ALL git ops. Orchestrator signals via cancel_and_send ("commit your work and stop"), polls for clean tree (git status --porcelain). CLAUDE.md instructs routine commits + commit-on-signal.
+
+**D13. Single-flight locking** — RESOLVED: (1) Single-flight guard from D1. (2) BEGIN IMMEDIATE transactions for status transitions.
+
+**D14. SQLite busy_timeout** — RESOLVED: PRAGMA busy_timeout=5000 on both orchestrator and aidi connections.
+
+**D15. Deferred permissions** — RESOLVED: V1 battle-tested baseline (Read, Edit, Write, Glob, Grep, git, ls, find, mv, cp, grep, cat, echo, tmux) + aidi + defaultMode: acceptEdits. Empirical verification in Phase 6.
+
+---
+
+## UPDATED DESIGN DOCUMENT (v2.1.md) — KEY SECTIONS
+
+### Architecture
+- **Single process** — TUI + orchestrator scan loop in one Ink app. `scanCycle` runs on a `useEffect` timer (1-2s interval).
+- **Session recovery on startup** — reconcile existing tmux panes against `agent_sessions` DB table, re-adopt alive panes, clean up dead ones.
+- **SQLite WAL mode** with `PRAGMA busy_timeout=5000` on both orchestrator and aidi connections.
+- **Single-flight scan guard** — skip cycle if previous still running.
+- **BEGIN IMMEDIATE transactions** — each status transition wrapped in explicit SQLite transaction.
+- **Debounced dump export** — after 5s of no further DB changes.
+
+### Issue Statuses (5 states)
+- **Awaiting** — candidate for work. No agent, no worktree.
+- **Active** — user activated via TUI. Agent spawned, worktree created. Capped by MAX_AGENTS.
+- **Blocked** — depends on another issue. Auto-transitions to Awaiting when blockers resolve.
+- **Deferred** — user postponed. Manual move only.
+- **Resolved** — done. Pane killed, worktree applied. Can reopen (→ Awaiting, may re-block dependents).
+
+### Status Transitions
+- Awaiting → Active: user triggers, disabled at MAX_AGENTS.
+- Active → Blocked: orchestrator signals agent to commit and stop, polls for clean tree, removes worktree, kills pane.
+- Active → Deferred: same teardown as Blocked.
+- Active → Resolved: agent rebases, apply strategy selected in Phase 11, agent deleted.
+- Blocked → Awaiting: automatic when all blockers resolve.
+- **Auto re-block**: reopened blocker re-blocks dependents if dependency row exists.
+- **Cycle detection**: recursive CTE at addBlock time rejects direct and transitive cycles.
+
+### Agent Communication (two channels)
+- **Ticket channel**: user writes in TUI → DB → cancel_and_send (C-c + poll until idle) → rewrite issue.md → send signal → agent reads → agent runs `aidi ack <inum>`. Retry if ack not received within N seconds.
+- **Direct channel**: user types in tmux pane. NOT logged unless "log that".
+- Strict separation. Interrupt-before-rewrite eliminates race conditions.
+
+### Agent Context
+- **CLAUDE.md**: behavioral instructions + routine commit instructions (after each logical unit) + commit-on-signal instructions (teardown signal → commit immediately and stop).
+- **issue.md**: structured header (inum, title, status, description, blocked_by, blocks) + full conversation history. Full rewrite on every user response.
+- **aidi CLI**: respond, read, block (with cycle detection), create, status, ack. Own DB connection with WAL + busy_timeout=5000.
+
+### Worktree Lifecycle
+- On activate: create worktree (or resume from existing branch).
+- On block/defer: signal agent to commit and stop via cancel_and_send, poll for clean tree (git status --porcelain). Agent handles ALL git ops — orchestrator never touches worktree git state. Clean → remove worktree + kill pane. Dirty → wait. Force-kill escape hatch.
+- On resolve: agent rebases onto active HEAD (resolves own conflicts, escalates if fails). Apply using empirically selected strategy. Remove worktree, delete agent.
+- Rebase: manual TUI command only.
+
+### Agent Permissions
+- Per-worktree settings.json: Read(*), Edit(*), Write(*), Glob(*), Grep(*), Bash(git/ls/find/mv/cp/grep/cat/echo/tmux *), Bash(aidi *), Bash(agent-issue-db-interface *). defaultMode: acceptEdits.
+
+### Database Schema
+```sql
+PRAGMA journal_mode=WAL;
+PRAGMA busy_timeout=5000;
+```
+Tables: metadata, issues (5 statuses + agent_last_read_at), responses, dependencies, containers (group/sprint + parent_id), issue_containers, agent_sessions.
+
+---
+
+## UPDATED IMPLEMENTATION ORDER
+
+- **Phase 0**: Scaffolding (0.1 npm init, 0.2 config, 0.3 DB with WAL+busy_timeout+agent_last_read_at, 0.4 CRUD with cycle detection, **0.5 aidi CLI with all 7 commands**)
+- **Phase 1**: TUI UX shell with static mock data (6 views, keyboard nav) — NO DB, NO agents
+- **Phase 2**: Wire TUI to DB (live queries, scan cycle with single-flight guard + BEGIN IMMEDIATE + auto-unblock + auto re-block + ack retry + debounced dump)
+- **Phase 3**: Worktree management (create with issue.md header spec, resume from branch, teardown via signal-then-poll)
+- **Phase 4**: Block cascade (signal + poll + teardown for cascading blocks)
+- **Phase 5**: Agent spawning — bare claude, no instructions, session recovery (tmux smoke test)
+- **Phase 6**: Agent permissions (v1 baseline + aidi + defaultMode: acceptEdits, empirical verification)
+- **Phase 7**: Agent deletion (signal agent to commit/stop before killing pane) + pane visibility
+- **Phase 8**: Git commit handling (flag "needs rebase", no auto-action)
+- **Phase 9**: Rebase worktree TUI command
+- **Phase 10**: Agent with instructions (CLAUDE.md with commit instructions, issue.md, cancel_and_send + signal + ack)
+- **Phase 11**: Resolve flow (evaluate 4 apply strategies, agent rebases, conflict escalation)
+- **Phase 12**: Install script
+
+---
+
+## DISCUSSION CONTEXT (key tradeoffs)
+
+- **Single process**: ~50 fewer lines, session recovery mitigates crash risk. Scan cycle blocking mitigated by single-flight guard + sync better-sqlite3.
+- **cancel_and_send**: V1's proven pattern — C-c, poll until idle, then send. Eliminates race conditions.
+- **aidi ack**: Delivery guarantee + bidirectional unread indicators.
+- **Agent handles all git ops**: Agent has context, orchestrator doesn't. Signals and verifies, never directly commits.
+- **4 resolve strategies**: Empirical evaluation because v2.1 differs from v1 (multiple commits vs single amended commit).
+- **Auto re-block**: Dependency rows are source of truth. Reopened blocker re-blocks dependents automatically.
+
+---
+
+Now evaluate: Has this updated plan adequately addressed the prior 14 issues? Are there new failure points? Is it ready for implementation?
