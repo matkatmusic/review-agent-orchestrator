@@ -7,6 +7,7 @@ import { NewIssue } from './create.js';
 import type { NewIssueData } from './create.js';
 import { Dashboard } from './dashboard.js';
 import { MOCK_ISSUES, MOCK_UNREAD_INUMS, MOCK_MAX_AGENTS } from './mock-data.js';
+import { DetailView, MOCK_DETAIL_DATA } from './detail.js';
 
 interface AppProps {
     initialView?: View;
@@ -17,6 +18,7 @@ function App({ initialView, onExit }: AppProps) {
     const { exit } = useApp();
     const { stdout } = useStdout();
     const columns = (stdout as import('node:tty').WriteStream)?.columns ?? 80;
+    const rows = (stdout as import('node:tty').WriteStream)?.rows ?? 24;
     const [viewStack, setViewStack] = useState<View[]>([initialView ?? { type: 'Dashboard' }]);
     const currentView = viewStack[viewStack.length - 1];
 
@@ -32,6 +34,15 @@ function App({ initialView, onExit }: AppProps) {
     const viewOwnsInput = currentView.type === 'NewIssue';
 
     useInput((input, key) => {
+        // Views with text input handle their own character keys.
+        // Only Esc (back) is handled at the App level for those views.
+        if (currentView.type === 'Detail') {
+            if (key.escape) {
+                goBack();
+            }
+            return;
+        }
+
         if (input === 'q') {
             onExit?.();
             exit();
@@ -94,9 +105,27 @@ function App({ initialView, onExit }: AppProps) {
                 />
             );
             break;
-        case 'Detail':
-            content = <Text>Detail I{currentView.inum}</Text>;
+        case 'Detail': {
+            const mockData = MOCK_DETAIL_DATA[currentView.inum];
+            if (mockData) {
+                content = (
+                    <DetailView
+                        inum={currentView.inum}
+                        issue={mockData.issue}
+                        responses={mockData.responses}
+                        blockedBy={mockData.blockedBy}
+                        blocks={mockData.blocks}
+                        group={mockData.group}
+                        columns={columns}
+                        rows={rows}
+                        onBack={goBack}
+                    />
+                );
+            } else {
+                content = <Text color="red">Issue I-{currentView.inum} not found</Text>;
+            }
             break;
+        }
         case 'NewIssue':
             content = (
                 <NewIssue
