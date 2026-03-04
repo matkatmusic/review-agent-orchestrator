@@ -5,12 +5,14 @@ export function create(
     db: DB,
     inum: number,
     author: 'user' | 'agent',
-    body: string
+    body: string,
+    type: string = 'none'
 ): number {
     const result = db.run(
-        'INSERT INTO responses (inum, author, body) VALUES (?, ?, ?)',
+        'INSERT INTO responses (inum, author, type, body) VALUES (?, ?, ?, ?)',
         inum,
         author,
+        type,
         body
     );
     return Number(result.lastInsertRowid);

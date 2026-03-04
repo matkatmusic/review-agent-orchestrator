@@ -31,10 +31,41 @@ export interface Issue {
     user_last_viewed_at: string | null;
 }
 
+export enum ResponseType {
+    Question,
+    Implementation,
+    Clarification,
+    Analysis,
+    Fix,
+    Other,
+    None,
+}
+
+export const ResponseTypeStringsMap = new Map<ResponseType, string>([
+    [ResponseType.Question, "Question"],
+    [ResponseType.Implementation, "Implementation"],
+    [ResponseType.Clarification, "Clarification"],
+    [ResponseType.Analysis, "Analysis"],
+    [ResponseType.Fix, "Fix"],
+    [ResponseType.Other, "Other"],
+    [ResponseType.None, "None"],
+]);
+
+export enum AuthorType {
+    User,
+    Agent,
+}
+
+export const AuthorTypeStringsMap = new Map<AuthorType, string>([
+    [AuthorType.User, "You"],
+    [AuthorType.Agent, "Agent"],
+]);
+
 export interface Response {
     id: number;
     inum: number;
-    author: 'user' | 'agent';
+    author: AuthorType;
+    type: ResponseType;
     body: string;
     created_at: string;
 }

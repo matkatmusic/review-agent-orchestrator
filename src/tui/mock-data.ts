@@ -1,5 +1,5 @@
 import type { Issue, Response as IssueResponse, Dependency, Container } from '../types.js';
-import { IssueStatus } from "../types.js"
+import { IssueStatus, ResponseType, AuthorType } from "../types.js"
 
 // ---- Canonical issue list (single source of truth) ----
 
@@ -67,48 +67,48 @@ export const MOCK_DETAIL_DATA: Record<number, DetailMockData> = {
         issue: issueByInum(1),
         responses: [
             {
-                id: 1, inum: 1, author: 'user',
+                id: 1, inum: 1, author: AuthorType.User, type: ResponseType.None,
                 body: 'Please migrate the server-derived fields to the new schema.',
                 created_at: '2026-01-01T10:05:00Z',
             },
             {
-                id: 2, inum: 1, author: 'agent',
-                body: '(analysis) Examining the existing field definitions and planning migration.\n\nKey areas:\n1. Identify all server-derived fields\n2. Map to new schema columns\n3. Write migration script',
+                id: 2, inum: 1, author: AuthorType.Agent, type: ResponseType.Analysis,
+                body: 'Examining the existing field definitions and planning migration.\n\nKey areas:\n1. Identify all server-derived fields\n2. Map to new schema columns\n3. Write migration script',
                 created_at: '2026-01-01T10:10:00Z',
             },
             {
-                id: 3, inum: 1, author: 'user',
+                id: 3, inum: 1, author: AuthorType.User, type: ResponseType.None,
                 body: 'Make sure to handle backward compatibility during the transition.',
                 created_at: '2026-01-01T11:00:00Z',
             },
             {
-                id: 4, inum: 1, author: 'agent',
-                body: '(implementation) Added dual-write logic so old and new schemas stay in sync during rollout.\n\nChanges:\n- src/schema/migration.ts: Field mapping\n- src/schema/dual-write.ts: Transition logic',
+                id: 4, inum: 1, author: AuthorType.Agent, type: ResponseType.Implementation,
+                body: 'Added dual-write logic so old and new schemas stay in sync during rollout.\n\nChanges:\n- src/schema/migration.ts: Field mapping\n- src/schema/dual-write.ts: Transition logic',
                 created_at: '2026-01-01T11:30:00Z',
             },
             {
-                id: 5, inum: 1, author: 'agent',
-                body: '(question) Should we keep the dual-write active for a fixed period, or until a manual cutover command is run?',
+                id: 5, inum: 1, author: AuthorType.Agent, type: ResponseType.Question,
+                body: 'Should we keep the dual-write active for a fixed period, or until a manual cutover command is run?',
                 created_at: '2026-01-01T11:35:00Z',
             },
             {
-                id: 6, inum: 1, author: 'agent',
-                body: '(analysis) Examining the existing field definitions and planning migration.\n\nKey areas:\n1. Identify all server-derived fields\n2. Map to new schema columns\n3. Write migration script',
+                id: 6, inum: 1, author: AuthorType.Agent, type: ResponseType.Analysis,
+                body: 'Examining the existing field definitions and planning migration.\n\nKey areas:\n1. Identify all server-derived fields\n2. Map to new schema columns\n3. Write migration script',
                 created_at: '2026-01-01T10:10:00Z',
             },
             {
-                id: 7, inum: 1, author: 'user',
+                id: 7, inum: 1, author: AuthorType.User, type: ResponseType.None,
                 body: 'Make sure to handle backward compatibility during the transition.',
                 created_at: '2026-01-01T11:00:00Z',
             },
             {
-                id: 8, inum: 1, author: 'agent',
-                body: '(implementation) Added dual-write logic so old and new schemas stay in sync during rollout.\n\nChanges:\n- src/schema/migration.ts: Field mapping\n- src/schema/dual-write.ts: Transition logic',
+                id: 8, inum: 1, author: AuthorType.Agent, type: ResponseType.Implementation,
+                body: 'Added dual-write logic so old and new schemas stay in sync during rollout.\n\nChanges:\n- src/schema/migration.ts: Field mapping\n- src/schema/dual-write.ts: Transition logic',
                 created_at: '2026-01-01T11:30:00Z',
             },
             {
-                id: 9, inum: 1, author: 'agent',
-                body: '(question) Should we keep the dual-write active for a fixed period, or until a manual cutover command is run?',
+                id: 9, inum: 1, author: AuthorType.Agent, type: ResponseType.Question,
+                body: 'Should we keep the dual-write active for a fixed period, or until a manual cutover command is run?',
                 created_at: '2026-01-01T11:35:00Z',
             },
         ],
@@ -126,7 +126,7 @@ export const MOCK_DETAIL_DATA: Record<number, DetailMockData> = {
     3: {
         issue: issueByInum(3),
         responses: [
-            { id: 10, inum: 3, author: 'user', body: 'Blocked until server field migration is done.', created_at: '2026-01-03T08:05:00Z' },
+            { id: 10, inum: 3, author: AuthorType.User, type: ResponseType.None, body: 'Blocked until server field migration is done.', created_at: '2026-01-03T08:05:00Z' },
         ],
         blockedBy: [1],
         blocks: [6],
@@ -142,8 +142,8 @@ export const MOCK_DETAIL_DATA: Record<number, DetailMockData> = {
     5: {
         issue: issueByInum(5),
         responses: [
-            { id: 20, inum: 5, author: 'user', body: 'Waiting on session credential migration.', created_at: '2026-01-05T10:05:00Z' },
-            { id: 21, inum: 5, author: 'agent', body: '(analysis) Reviewing healthcheck patterns and Docker best practices.', created_at: '2026-01-05T10:30:00Z' },
+            { id: 20, inum: 5, author: AuthorType.User, type: ResponseType.None, body: 'Waiting on session credential migration.', created_at: '2026-01-05T10:05:00Z' },
+            { id: 21, inum: 5, author: AuthorType.Agent, type: ResponseType.Analysis, body: 'Reviewing healthcheck patterns and Docker best practices.', created_at: '2026-01-05T10:30:00Z' },
         ],
         blockedBy: [2],
         blocks: [6],
@@ -166,7 +166,7 @@ export const MOCK_DETAIL_DATA: Record<number, DetailMockData> = {
     8: {
         issue: issueByInum(8),
         responses: [
-            { id: 30, inum: 8, author: 'agent', body: '(implementation) Project scaffolding complete.', created_at: '2026-01-09T10:00:00Z' },
+            { id: 30, inum: 8, author: AuthorType.Agent, type: ResponseType.Implementation, body: 'Project scaffolding complete.', created_at: '2026-01-09T10:00:00Z' },
         ],
         blockedBy: [],
         blocks: [],

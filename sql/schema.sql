@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS responses (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     inum       INTEGER NOT NULL REFERENCES issues(inum),
     author     TEXT NOT NULL CHECK (author IN ('user', 'agent')),
+    type       TEXT NOT NULL DEFAULT 'none'
+               CHECK (type IN ('question', 'implementation', 'clarification', 'analysis', 'fix', 'other', 'none')),
     body       TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );

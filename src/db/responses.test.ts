@@ -23,6 +23,19 @@ describe('responses', () => {
         expect(id).toBeGreaterThan(0);
     });
 
+    it('creates a response with type and stores it', () => {
+        responses.create(db, inum, 'agent', 'Analyzing code', 'analysis');
+        const list = responses.listByInum(db, inum);
+        expect(list[0].type).toBe('analysis');
+        expect(list[0].body).toBe('Analyzing code');
+    });
+
+    it('creates a response without type as none', () => {
+        responses.create(db, inum, 'user', 'Hello');
+        const list = responses.listByInum(db, inum);
+        expect(list[0].type).toBe('none');
+    });
+
     it('listByInum returns responses in order', () => {
         responses.create(db, inum, 'user', 'First');
         responses.create(db, inum, 'agent', 'Second');

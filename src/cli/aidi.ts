@@ -40,13 +40,14 @@ function openDB(): DB {
     return db;
 }
 
-// respond <inum> "<body>"
+// respond <inum> --type <type> "<body>"
 program
     .command('respond')
     .argument('<inum>', 'Issue number', parseInt)
     .argument('<body>', 'Response body')
+    .option('--type <type>', 'Response type (log, note, info, analysis, implementation, fix, etc.)')
     .description('Add a response to an issue')
-    .action((inum: number, body: string) => {
+    .action((inum: number, body: string, opts: { type?: string }) => {
         const db = openDB();
         try {
             const issue = issues.getByInum(db, inum);
@@ -54,7 +55,7 @@ program
                 process.stderr.write(`Error: Issue I${inum} not found\n`);
                 process.exit(1);
             }
-            const id = responses.create(db, inum, 'agent', body);
+            const id = responses.create(db, inum, 'agent', body, opts.type);
             process.stdout.write(`Response ${id} added to I${inum}\n`);
         } finally {
             db.close();
@@ -79,7 +80,7 @@ program
             if (opts.latest) {
                 const latest = responses.getLatestByInum(db, inum);
                 if (latest) {
-                    process.stdout.write(`[${latest.author}] ${latest.body}\n`);
+                    process.stdout.write(`[${latest.author}${latest.type ? ` (${latest.type})` : ''}] ${latest.body}\n`);
                 } else {
                     process.stdout.write('No responses\n');
                 }
@@ -94,7 +95,7 @@ program
                     process.stdout.write('No responses\n');
                 } else {
                     for (const r of resps) {
-                        process.stdout.write(`[${r.author} ${r.created_at}] ${r.body}\n`);
+                        process.stdout.write(`[${r.author} ${r.created_at}${r.type ? ` (${r.type})` : ''}] ${r.body}\n`);
                     }
                 }
             }

@@ -2,18 +2,14 @@ import React from 'react';
 import { Box, Text, useInput, type Key } from 'ink';
 import TextInput from 'ink-text-input';
 import type { Issue, Response as IssueResponse, Container } from '../types.js';
+import { IssueStatusStringsMap } from '../types.js';
 import type { View } from './views.js';
 import { HEADER_LINES } from './header.js';
 import { GroupPicker } from './group-picker.js';
 import { IssueListPicker } from './issue-list-picker.js';
+import { ResponseContainer } from './response-container.js';
 
-// ---- Types ----
-
-interface ConversationLine {
-    type: 'author-header' | 'body' | 'separator';
-    author: 'user' | 'agent';
-    text: string;
-}
+// ---- Props ----
 
 export interface DetailViewProps {
     inum: number;
@@ -40,56 +36,6 @@ export interface DetailViewProps {
 
 const INPUT_AREA_LINES = 3;   // separator, input prompt, footer
 
-const TYPE_TAG_REGEX = /^\((\w+)\)/;
-
-// ---- Helpers ----
-
-export function buildConversationLines(responses: IssueResponse[]): ConversationLine[] {
-    const lines: ConversationLine[] = [];
-    for (const resp of responses) {
-        const timeStr = resp.created_at.replace('T', ' ').replace('Z', '');
-        lines.push({
-            type: 'author-header',
-            author: resp.author,
-            text: `[${resp.author}] ${timeStr}`,
-        });
-        for (const bodyLine of resp.body.split('\n')) {
-            lines.push({ type: 'body', author: resp.author, text: bodyLine });
-        }
-        lines.push({ type: 'separator', author: resp.author, text: '' });
-    }
-    return lines;
-}
-
-function renderLine(line: ConversationLine, key: number): React.ReactNode {
-    if (line.type === 'separator') {
-        return <Text key={key}> </Text>;
-    }
-
-    if (line.type === 'author-header') {
-        const color = line.author === 'user' ? 'cyan' : 'green';
-        return <Text key={key} color={color} bold>{line.text}</Text>;
-    }
-
-    // Body line
-    const color = line.author === 'user' ? 'cyan' : 'green';
-
-    // Highlight (type) tags in agent responses
-    if (line.author === 'agent') {
-        const typeMatch = line.text.match(TYPE_TAG_REGEX);
-        if (typeMatch) {
-            return (
-                <Text key={key}>
-                    <Text color="yellow" bold>({typeMatch[1]})</Text>
-                    <Text color={color}>{line.text.slice(typeMatch[0].length)}</Text>
-                </Text>
-            );
-        }
-    }
-
-    return <Text key={key} color={color}>{line.text}</Text>;
-}
-
 // ---- Input bridge ----
 
 function DetailInputBridge({ onKey }: { onKey: (input: string, key: Key) => void }) {
@@ -114,29 +60,33 @@ enum OverlayType {
 // ---- Component ----
 
 export class DetailView extends React.Component<DetailViewProps> {
-    scrollOffset: number;
     inputValue: string;
     focusedField: number | null;
     overlay: OverlayType;
     blockedBySet: Set<number>;
     blocksSet: Set<number>;
     issueHeaderLineCount: number;
-    private conversationLines: ConversationLine[];
+    selectedMessage: number;
+    firstVisibleMessage: number;
+    private containerHeights: number[];
     private lastResponses: IssueResponse[] | null;
     private initialScrollDone: boolean;
 
     constructor(props: DetailViewProps) {
         super(props);
-        this.scrollOffset = 0;
         this.inputValue = '';
         this.focusedField = null;
         this.overlay = OverlayType.None;
         this.blockedBySet = new Set(props.blockedBy);
         this.blocksSet = new Set(props.blocks);
         this.issueHeaderLineCount = 0;
-        this.conversationLines = buildConversationLines(props.responses);
+        this.containerHeights = props.responses.map(r =>
+            ResponseContainer.computeLineCount(r.body, props.columns),
+        );
         this.lastResponses = props.responses;
         this.initialScrollDone = false;
+        this.selectedMessage = Math.max(0, props.responses.length - 1);
+        this.firstVisibleMessage = 0;
     }
 
     get conversationHeight(): number {
@@ -146,8 +96,51 @@ export class DetailView extends React.Component<DetailViewProps> {
         );
     }
 
-    get maxScroll(): number {
-        return Math.max(0, this.conversationLines.length - this.conversationHeight);
+    /**
+     * Adjust firstVisibleMessage so that selectedMessage is within the viewport.
+     */
+    deriveFirstVisible(): number {
+        const responses = this.props.responses;
+        if (responses.length === 0) return 0;
+
+        const sel = this.selectedMessage;
+        let first = this.firstVisibleMessage;
+
+        // If selected is above current first visible, jump to it
+        if (sel < first) return sel;
+
+        // Check if selected fits in viewport starting from first
+        let used = 0;
+        for (let i = first; i <= sel; i++) {
+            used += this.containerHeights[i];
+        }
+        if (used <= this.conversationHeight) return first;
+
+        // Selected doesn't fit — work backwards from sel
+        used = this.containerHeights[sel];
+        first = sel;
+        while (first > 0 && used + this.containerHeights[first - 1] <= this.conversationHeight) {
+            first--;
+            used += this.containerHeights[first];
+        }
+        return first;
+    }
+
+    /**
+     * Find the last container index that overlaps the viewport.
+     * Includes partially-visible containers so the Box clips them.
+     */
+    computeLastVisible(): number {
+        const responses = this.props.responses;
+        if (responses.length === 0) return 0;
+
+        let last = this.firstVisibleMessage;
+        let used = this.containerHeights[last];
+        while (last + 1 < responses.length && used < this.conversationHeight) {
+            last++;
+            used += this.containerHeights[last];
+        }
+        return last;
     }
 
     cycleField(direction: 1 | -1) {
@@ -199,11 +192,17 @@ export class DetailView extends React.Component<DetailViewProps> {
             return;
         }
         if (key.upArrow) {
-            this.scrollOffset = Math.max(0, this.scrollOffset - 1);
-            this.forceUpdate();
+            if (this.selectedMessage > 0) {
+                this.selectedMessage--;
+                this.firstVisibleMessage = this.deriveFirstVisible();
+                this.forceUpdate();
+            }
         } else if (key.downArrow) {
-            this.scrollOffset = Math.min(this.maxScroll, this.scrollOffset + 1);
-            this.forceUpdate();
+            if (this.selectedMessage < this.props.responses.length - 1) {
+                this.selectedMessage++;
+                this.firstVisibleMessage = this.deriveFirstVisible();
+                this.forceUpdate();
+            }
         }
     };
 
@@ -226,12 +225,18 @@ export class DetailView extends React.Component<DetailViewProps> {
     };
 
     render() {
-        const { inum, issue, responses, blockedBy, blocks, group, columns, containers } = this.props;
+        const { inum, issue, responses, blocks, group, columns, containers } = this.props;
 
-        // Recompute conversation lines if responses changed (memoization)
+        // Recompute container heights if responses changed
         if (responses !== this.lastResponses) {
-            this.conversationLines = buildConversationLines(responses);
+            this.containerHeights = responses.map(r =>
+                ResponseContainer.computeLineCount(r.body, columns),
+            );
             this.lastResponses = responses;
+            if (this.selectedMessage >= responses.length) {
+                this.selectedMessage = Math.max(0, responses.length - 1);
+            }
+            this.firstVisibleMessage = this.deriveFirstVisible();
         }
 
         const blockedByArr = [...this.blockedBySet];
@@ -328,7 +333,7 @@ export class DetailView extends React.Component<DetailViewProps> {
                 I-{inum}: {issue.title}
             </Text>,
             <Text key="status" wrap="truncate">
-                Status: <Text color="yellow">{issue.status}</Text>  |  Group: <Text inverse={groupFocused} bold={groupFocused}>{` ${group} `}</Text>
+                Status: <Text color="yellow">{IssueStatusStringsMap.get(issue.status) ?? issue.status}</Text>  |  Group: <Text inverse={groupFocused} bold={groupFocused}>{` ${group} `}</Text>
             </Text>,
             <Text key="deps" wrap="truncate">
                 Blocked by: <Text inverse={blockedByFocused} bold={blockedByFocused}>{` ${blockedByStr} `}</Text>  |  Blocks: <Text inverse={blocksFocused} bold={blocksFocused}>{` ${blocksStr} `}</Text>
@@ -338,15 +343,20 @@ export class DetailView extends React.Component<DetailViewProps> {
         ];
         this.issueHeaderLineCount = issueHeader.length;
 
-        if (!this.initialScrollDone) {
-            this.scrollOffset = this.maxScroll;
+        // Initial scroll to bottom
+        if (!this.initialScrollDone && responses.length > 0) {
+            this.selectedMessage = responses.length - 1;
+            this.firstVisibleMessage = this.deriveFirstVisible();
             this.initialScrollDone = true;
         }
 
-        const visibleLines = this.conversationLines.slice(
-            this.scrollOffset,
-            this.scrollOffset + this.conversationHeight,
-        );
+        // Determine visible range of containers
+        const lastVisible = responses.length > 0
+            ? this.computeLastVisible()
+            : -1;
+        const visibleResponses = responses.length > 0
+            ? responses.slice(this.firstVisibleMessage, lastVisible + 1)
+            : [];
 
         return (
             <Box flexDirection="column">
@@ -354,14 +364,21 @@ export class DetailView extends React.Component<DetailViewProps> {
                 {issueHeader}
 
                 {/* Scrollable conversation */}
-                <Box flexDirection="column" height={this.conversationHeight}>
-                    {visibleLines.map((line, i) => renderLine(line, i))}
+                <Box flexDirection="column" height={this.conversationHeight} overflow="hidden">
+                    {visibleResponses.map((resp, i) => (
+                        <ResponseContainer
+                            key={resp.id}
+                            response={resp}
+                            columns={columns}
+                            selected={this.firstVisibleMessage + i === this.selectedMessage}
+                        />
+                    ))}
                 </Box>
 
                 {/* Input area */}
                 <Text dimColor>{'─'.repeat(columns)}</Text>
                 <Box>
-                    <Text color="cyan">&gt; </Text>
+                    <Text color="cyan">Enter message: &gt; </Text>
                     <TextInput
                         value={this.inputValue}
                         focus={this.focusedField === null}
