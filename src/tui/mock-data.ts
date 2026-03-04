@@ -91,6 +91,26 @@ export const MOCK_DETAIL_DATA: Record<number, DetailMockData> = {
                 body: '(question) Should we keep the dual-write active for a fixed period, or until a manual cutover command is run?',
                 created_at: '2026-01-01T11:35:00Z',
             },
+            {
+                id: 6, inum: 1, author: 'agent',
+                body: '(analysis) Examining the existing field definitions and planning migration.\n\nKey areas:\n1. Identify all server-derived fields\n2. Map to new schema columns\n3. Write migration script',
+                created_at: '2026-01-01T10:10:00Z',
+            },
+            {
+                id: 7, inum: 1, author: 'user',
+                body: 'Make sure to handle backward compatibility during the transition.',
+                created_at: '2026-01-01T11:00:00Z',
+            },
+            {
+                id: 8, inum: 1, author: 'agent',
+                body: '(implementation) Added dual-write logic so old and new schemas stay in sync during rollout.\n\nChanges:\n- src/schema/migration.ts: Field mapping\n- src/schema/dual-write.ts: Transition logic',
+                created_at: '2026-01-01T11:30:00Z',
+            },
+            {
+                id: 9, inum: 1, author: 'agent',
+                body: '(question) Should we keep the dual-write active for a fixed period, or until a manual cutover command is run?',
+                created_at: '2026-01-01T11:35:00Z',
+            },
         ],
         blockedBy: [],
         blocks: [3, 4],

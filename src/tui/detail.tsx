@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from 'react';
-import { Box, Text, useInput } from 'ink';
+import React from 'react';
+import { Box, Text, useInput, type Key } from 'ink';
 import TextInput from 'ink-text-input';
-import type { Issue, Response as IssueResponse } from '../types.js';
+import type { Issue, Response as IssueResponse, Container } from '../types.js';
 import type { View } from './views.js';
 import { HEADER_LINES } from './header.js';
+import { GroupPicker } from './group-picker.js';
 
 // ---- Types ----
 
@@ -22,10 +23,13 @@ export interface DetailViewProps {
     group: string;
     columns: number;
     rows: number;
+    containers?: Container[];
     onBack?: () => void;
     onSend?: (message: string) => void;
     onNavigate?: (view: View) => void;
     onQuit?: () => void;
+    onGroupChange?: (containerId: number) => void;
+    onGroupCreate?: (name: string) => void;
 }
 
 // ---- Layout constants ----
@@ -83,102 +87,165 @@ function renderLine(line: ConversationLine, key: number): React.ReactNode {
     return <Text key={key} color={color}>{line.text}</Text>;
 }
 
+// ---- Input bridge ----
+
+function DetailInputBridge({ onKey }: { onKey: (input: string, key: Key) => void }) {
+    useInput(onKey);
+    return null;
+}
+
 // ---- Component ----
 
-export function DetailView({
-    inum,
-    issue,
-    responses,
-    blockedBy,
-    blocks,
-    group,
-    columns,
-    rows,
-    onBack,
-    onSend,
-    onNavigate,
-    onQuit,
-}: DetailViewProps) {
-    const [scrollOffset, setScrollOffset] = useState(0);
-    const [inputValue, setInputValue] = useState('');
+export class DetailView extends React.Component<DetailViewProps> {
+    scrollOffset: number;
+    inputValue: string;
+    groupPickerOpen: boolean;
+    private conversationLines: ConversationLine[];
+    private lastResponses: IssueResponse[] | null;
 
-    const conversationLines = useMemo(
-        () => buildConversationLines(responses),
-        [responses],
-    );
+    constructor(props: DetailViewProps) {
+        super(props);
+        this.scrollOffset = 0;
+        this.inputValue = '';
+        this.groupPickerOpen = false;
+        this.conversationLines = buildConversationLines(props.responses);
+        this.lastResponses = props.responses;
+    }
 
-    const conversationHeight = Math.max(
-        1,
-        rows - HEADER_LINES - ISSUE_HEADER_LINES - INPUT_AREA_LINES,
-    );
-    const maxScroll = Math.max(0, conversationLines.length - conversationHeight);
+    get conversationHeight(): number {
+        return Math.max(
+            1,
+            this.props.rows - HEADER_LINES - ISSUE_HEADER_LINES - INPUT_AREA_LINES,
+        );
+    }
 
-    useInput((_input, key) => {
+    get maxScroll(): number {
+        return Math.max(0, this.conversationLines.length - this.conversationHeight);
+    }
+
+    handleKey = (input: string, key: Key) => {
+        // When group picker is open, it handles its own input
+        if (this.groupPickerOpen) return;
+
         if (key.escape) {
-            onBack?.();
+            this.props.onBack?.();
+            return;
+        }
+        if (input === 'g' && this.props.containers) {
+            this.groupPickerOpen = true;
+            this.forceUpdate();
             return;
         }
         if (key.upArrow) {
-            setScrollOffset(prev => Math.max(0, prev - 1));
+            this.scrollOffset = Math.max(0, this.scrollOffset - 1);
+            this.forceUpdate();
         } else if (key.downArrow) {
-            setScrollOffset(prev => Math.min(maxScroll, prev + 1));
+            this.scrollOffset = Math.min(this.maxScroll, this.scrollOffset + 1);
+            this.forceUpdate();
         }
-    });
+    };
 
-    const visibleLines = conversationLines.slice(
-        scrollOffset,
-        scrollOffset + conversationHeight,
-    );
+    handleInputChange = (value: string) => {
+        this.inputValue = value;
+        this.forceUpdate();
+    };
 
-    const blockedByStr = blockedBy.length > 0
-        ? blockedBy.map(n => `I-${n}`).join(', ')
-        : '(none)';
-    const blocksStr = blocks.length > 0
-        ? blocks.map(n => `I-${n}`).join(', ')
-        : '(none)';
+    handleInputSubmit = (value: string) => {
+        if (value.trim()) {
+            this.props.onSend?.(value.trim());
+        }
+        this.inputValue = '';
+        this.forceUpdate();
+    };
 
-    // TODO: Make "Blocked by" and "Blocks" issue numbers navigable.
-    // Pressing Tab could cycle focus between: text input → blocked-by links → blocks links.
-    // When focused on a dependency link, arrow keys select an inum and Enter navigates to it.
-    // Alternative: left/right arrows cycle through dependency inums in the header while
-    // up/down continue to scroll conversation.
+    render() {
+        const { inum, issue, responses, blockedBy, blocks, group, columns, containers } = this.props;
 
-    return (
-        <Box flexDirection="column">
-            {/* Issue info header */}
-            <Text bold wrap="truncate">
-                I-{inum}: {issue.title}
-            </Text>
-            <Text wrap="truncate">
-                Status: <Text color="yellow">{issue.status}</Text>  |  Group: {group}
-            </Text>
-            <Text wrap="truncate">
-                Blocked by: {blockedByStr}  |  Blocks: {blocksStr}
-            </Text>
-            <Text dimColor>{'─'.repeat(columns)}</Text>
+        // Recompute conversation lines if responses changed (memoization)
+        if (responses !== this.lastResponses) {
+            this.conversationLines = buildConversationLines(responses);
+            this.lastResponses = responses;
+        }
 
-            {/* Scrollable conversation */}
-            <Box flexDirection="column" height={conversationHeight}>
-                {visibleLines.map((line, i) => renderLine(line, i))}
+        const visibleLines = this.conversationLines.slice(
+            this.scrollOffset,
+            this.scrollOffset + this.conversationHeight,
+        );
+
+        const blockedByStr = blockedBy.length > 0
+            ? blockedBy.map(n => `I-${n}`).join(', ')
+            : '(none)';
+        const blocksStr = blocks.length > 0
+            ? blocks.map(n => `I-${n}`).join(', ')
+            : '(none)';
+
+        // TODO: Make "Blocked by" and "Blocks" issue numbers navigable.
+        // Pressing Tab could cycle focus between: text input → blocked-by links → blocks links.
+        // When focused on a dependency link, arrow keys select an inum and Enter navigates to it.
+        // Alternative: left/right arrows cycle through dependency inums in the header while
+        // up/down continue to scroll conversation.
+
+        // Total content height below the App header (conversation + input + issue header)
+        const contentHeight = this.props.rows - HEADER_LINES;
+
+        if (this.groupPickerOpen && containers) {
+            return (
+                <Box flexDirection="column" height={contentHeight} justifyContent="center" alignItems="center">
+                    <DetailInputBridge onKey={this.handleKey} />
+                    <GroupPicker
+                        containers={containers}
+                        currentGroup={group}
+                        onSelect={(containerId) => {
+                            this.props.onGroupChange?.(containerId);
+                            this.groupPickerOpen = false;
+                            this.forceUpdate();
+                        }}
+                        onCreate={(name) => {
+                            this.props.onGroupCreate?.(name);
+                            this.groupPickerOpen = false;
+                            this.forceUpdate();
+                        }}
+                        onClose={() => {
+                            this.groupPickerOpen = false;
+                            this.forceUpdate();
+                        }}
+                    />
+                </Box>
+            );
+        }
+
+        return (
+            <Box flexDirection="column">
+                <DetailInputBridge onKey={this.handleKey} />
+                {/* Issue info header */}
+                <Text bold wrap="truncate">
+                    I-{inum}: {issue.title}
+                </Text>
+                <Text wrap="truncate">
+                    Status: <Text color="yellow">{issue.status}</Text>  |  Group: {group}{containers ? ' [g]' : ''}
+                </Text>
+                <Text wrap="truncate">
+                    Blocked by: {blockedByStr}  |  Blocks: {blocksStr}
+                </Text>
+                <Text dimColor>{'─'.repeat(columns)}</Text>
+
+                {/* Scrollable conversation */}
+                <Box flexDirection="column" height={this.conversationHeight}>
+                    {visibleLines.map((line, i) => renderLine(line, i))}
+                </Box>
+
+                {/* Input area */}
+                <Text dimColor>{'─'.repeat(columns)}</Text>
+                <Box>
+                    <Text color="cyan">&gt; </Text>
+                    <TextInput
+                        value={this.inputValue}
+                        onChange={this.handleInputChange}
+                        onSubmit={this.handleInputSubmit}
+                    />
+                </Box>
+
             </Box>
-
-            {/* Input area */}
-            <Text dimColor>{'─'.repeat(columns)}</Text>
-            <Box>
-                <Text color="cyan">&gt; </Text>
-                <TextInput
-                    value={inputValue}
-                    onChange={setInputValue}
-                    onSubmit={(value: string) => {
-                        if (value.trim()) {
-                            onSend?.(value.trim());
-                        }
-                        setInputValue('');
-                    }}
-                />
-            </Box>
-
-        </Box>
-    );
+        );
+    }
 }
-

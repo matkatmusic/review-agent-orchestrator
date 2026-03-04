@@ -6,7 +6,7 @@ import { Footer } from './footer.js';
 import { NewIssue } from './newissue.js';
 import type { NewIssueData } from './newissue.js';
 import { Dashboard } from './dashboard.js';
-import { MOCK_ISSUES, MOCK_UNREAD_INUMS, MOCK_MAX_AGENTS, MOCK_DETAIL_DATA } from './mock-data.js';
+import { MOCK_ISSUES, MOCK_UNREAD_INUMS, MOCK_MAX_AGENTS, MOCK_DETAIL_DATA, MOCK_CONTAINERS } from './mock-data.js';
 import { DetailView } from './detail.js';
 import { AgentStatus } from './agent-status.js';
 import { BlockingMap } from './blocking-map.js';
@@ -59,7 +59,7 @@ class App extends React.Component<AppProps> {
 
     constructor(props: AppProps) {
         super(props);
-        this.viewStack = [props.initialView ?? { type: ViewType.Dashboard }];
+        this.viewStack = [props.initialView ?? { type: ViewType.Detail, inum: 1 }];
         this.groupMode = GROUP_MODE_INITIAL;
     }
 
@@ -112,27 +112,29 @@ class App extends React.Component<AppProps> {
                     />
                 );
                 break;
-            // case 'Detail': {
-            //     const mockData = MOCK_DETAIL_DATA[this.currentView.inum];
-            //     if (mockData) {
-            //         content = (
-            //             <DetailView
-            //                 inum={this.currentView.inum}
-            //                 issue={mockData.issue}
-            //                 responses={mockData.responses}
-            //                 blockedBy={mockData.blockedBy}
-            //                 blocks={mockData.blocks}
-            //                 group={mockData.group}
-            //                 columns={this.columns}
-            //                 rows={this.rows}
-            //                 onBack={() => this.goBackToPreviousView()}
-            //             />
-            //         );
-            //     } else {
-            //         content = <Text color="red">Issue I-{this.currentView.inum} not found</Text>;
-            //     }
-            //     break;
-            // }
+            case ViewType.Detail: {
+                const mockData = MOCK_DETAIL_DATA[this.currentView.inum];
+                if (mockData) {
+                    content = (
+                        <DetailView
+                            inum={this.currentView.inum}
+                            issue={mockData.issue}
+                            responses={mockData.responses}
+                            blockedBy={mockData.blockedBy}
+                            blocks={mockData.blocks}
+                            group={mockData.group}
+                            columns={this.columns}
+                            rows={this.rows}
+                            containers={MOCK_CONTAINERS}
+                            onBack={() => this.goBackToPreviousView()}
+                            onQuit={() => this.props.onExit?.()}
+                        />
+                    );
+                } else {
+                    content = <Text color="red">Issue I-{this.currentView.inum} not found</Text>;
+                }
+                break;
+            }
             // case 'NewIssue':
             //     content = (
             //         <NewIssue
