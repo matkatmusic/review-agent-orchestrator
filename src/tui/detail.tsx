@@ -33,11 +33,11 @@ export interface DetailViewProps {
     onGroupChange?: (containerId: number) => void;
     onGroupCreate?: (name: string) => void;
     onBlockedByChange?: (blockerInums: number[]) => void;
+    onBlocksChange?: (blockedInums: number[]) => void;
 }
 
 // ---- Layout constants ----
 
-const ISSUE_HEADER_LINES = 4; // title, status|group, deps, separator
 const INPUT_AREA_LINES = 3;   // separator, input prompt, footer
 
 const TYPE_TAG_REGEX = /^\((\w+)\)/;
@@ -99,11 +99,17 @@ function DetailInputBridge({ onKey }: { onKey: (input: string, key: Key) => void
 
 // ---- Focus fields ----
 
-const DETAIL_FIELD_COUNT = 2;
+const DETAIL_FIELD_COUNT = 3;
 const FIELD_GROUP = 0;
 const FIELD_BLOCKED_BY = 1;
+const FIELD_BLOCKS = 2;
 
-type OverlayType = 'group' | 'blockedBy' | null;
+enum OverlayType {
+    None,
+    Group,
+    BlockedBy,
+    Blocks,
+}
 
 // ---- Component ----
 
@@ -113,24 +119,30 @@ export class DetailView extends React.Component<DetailViewProps> {
     focusedField: number | null;
     overlay: OverlayType;
     blockedBySet: Set<number>;
+    blocksSet: Set<number>;
+    issueHeaderLineCount: number;
     private conversationLines: ConversationLine[];
     private lastResponses: IssueResponse[] | null;
+    private initialScrollDone: boolean;
 
     constructor(props: DetailViewProps) {
         super(props);
         this.scrollOffset = 0;
         this.inputValue = '';
         this.focusedField = null;
-        this.overlay = null;
+        this.overlay = OverlayType.None;
         this.blockedBySet = new Set(props.blockedBy);
+        this.blocksSet = new Set(props.blocks);
+        this.issueHeaderLineCount = 0;
         this.conversationLines = buildConversationLines(props.responses);
         this.lastResponses = props.responses;
+        this.initialScrollDone = false;
     }
 
     get conversationHeight(): number {
         return Math.max(
             1,
-            this.props.rows - HEADER_LINES - ISSUE_HEADER_LINES - INPUT_AREA_LINES,
+            this.props.rows - HEADER_LINES - this.issueHeaderLineCount - INPUT_AREA_LINES,
         );
     }
 
@@ -154,22 +166,25 @@ export class DetailView extends React.Component<DetailViewProps> {
 
     openOverlayForField() {
         if (this.focusedField === FIELD_GROUP && this.props.containers) {
-            this.overlay = 'group';
+            this.overlay = OverlayType.Group;
             this.forceUpdate();
         } else if (this.focusedField === FIELD_BLOCKED_BY && this.props.allIssues) {
-            this.overlay = 'blockedBy';
+            this.overlay = OverlayType.BlockedBy;
+            this.forceUpdate();
+        } else if (this.focusedField === FIELD_BLOCKS && this.props.allIssues) {
+            this.overlay = OverlayType.Blocks;
             this.forceUpdate();
         }
     }
 
     closeOverlay = () => {
-        this.overlay = null;
+        this.overlay = OverlayType.None;
         this.forceUpdate();
     };
 
     handleKey = (_input: string, key: Key) => {
         // When an overlay is open, it handles its own input
-        if (this.overlay) return;
+        if (this.overlay !== OverlayType.None) return;
 
         if (key.escape) {
             this.props.onBack?.();
@@ -219,24 +234,20 @@ export class DetailView extends React.Component<DetailViewProps> {
             this.lastResponses = responses;
         }
 
-        const visibleLines = this.conversationLines.slice(
-            this.scrollOffset,
-            this.scrollOffset + this.conversationHeight,
-        );
-
         const blockedByArr = [...this.blockedBySet];
         const blockedByStr = blockedByArr.length > 0
             ? blockedByArr.map(n => `I-${n}`).join(', ')
             : '(none)';
-        const blocksStr = blocks.length > 0
-            ? blocks.map(n => `I-${n}`).join(', ')
+        const blocksArr = [...this.blocksSet];
+        const blocksStr = blocksArr.length > 0
+            ? blocksArr.map(n => `I-${n}`).join(', ')
             : '(none)';
 
         // Total content height below the App header (conversation + input + issue header)
         const contentHeight = this.props.rows - HEADER_LINES;
 
         // ---- Overlay: Group picker ----
-        if (this.overlay === 'group' && containers) {
+        if (this.overlay === OverlayType.Group && containers) {
             return (
                 <Box flexDirection="column" height={contentHeight} justifyContent="center" alignItems="center">
                     <DetailInputBridge onKey={this.handleKey} />
@@ -258,7 +269,7 @@ export class DetailView extends React.Component<DetailViewProps> {
         }
 
         // ---- Overlay: Blocked By editor ----
-        if (this.overlay === 'blockedBy' && this.props.allIssues) {
+        if (this.overlay === OverlayType.BlockedBy && this.props.allIssues) {
             const otherIssues = this.props.allIssues.filter(i => i.inum !== inum);
             return (
                 <Box flexDirection="column" height={contentHeight} justifyContent="center" alignItems="center">
@@ -282,24 +293,65 @@ export class DetailView extends React.Component<DetailViewProps> {
             );
         }
 
+        // ---- Overlay: Blocks editor ----
+        if (this.overlay === OverlayType.Blocks && this.props.allIssues) {
+            const otherIssues = this.props.allIssues.filter(i => i.inum !== inum);
+            return (
+                <Box flexDirection="column" height={contentHeight} justifyContent="center" alignItems="center">
+                    <DetailInputBridge onKey={this.handleKey} />
+                    <IssueListPicker
+                        title="Blocks"
+                        issues={otherIssues}
+                        selected={this.blocksSet}
+                        onToggle={(toggledInum) => {
+                            if (this.blocksSet.has(toggledInum)) {
+                                this.blocksSet.delete(toggledInum);
+                            } else {
+                                this.blocksSet.add(toggledInum);
+                            }
+                            this.props.onBlocksChange?.([...this.blocksSet]);
+                            this.forceUpdate();
+                        }}
+                        onClose={this.closeOverlay}
+                    />
+                </Box>
+            );
+        }
+
         // ---- Normal view ----
         const groupFocused = this.focusedField === FIELD_GROUP;
         const blockedByFocused = this.focusedField === FIELD_BLOCKED_BY;
+        const blocksFocused = this.focusedField === FIELD_BLOCKS;
+
+        const issueHeader: React.ReactNode[] = [
+            <Text key="title" bold wrap="truncate">
+                I-{inum}: {issue.title}
+            </Text>,
+            <Text key="status" wrap="truncate">
+                Status: <Text color="yellow">{issue.status}</Text>  |  Group: <Text inverse={groupFocused} bold={groupFocused}>{` ${group} `}</Text>
+            </Text>,
+            <Text key="deps" wrap="truncate">
+                Blocked by: <Text inverse={blockedByFocused} bold={blockedByFocused}>{` ${blockedByStr} `}</Text>  |  Blocks: <Text inverse={blocksFocused} bold={blocksFocused}>{` ${blocksStr} `}</Text>
+            </Text>,
+            <Text key="hint" dimColor>(Tab to change Group, Blocked By, Blocks)</Text>,
+            <Text key="sep" dimColor>{'─'.repeat(columns)}</Text>,
+        ];
+        this.issueHeaderLineCount = issueHeader.length;
+
+        if (!this.initialScrollDone) {
+            this.scrollOffset = this.maxScroll;
+            this.initialScrollDone = true;
+        }
+
+        const visibleLines = this.conversationLines.slice(
+            this.scrollOffset,
+            this.scrollOffset + this.conversationHeight,
+        );
 
         return (
             <Box flexDirection="column">
                 <DetailInputBridge onKey={this.handleKey} />
-                {/* Issue info header */}
-                <Text bold wrap="truncate">
-                    I-{inum}: {issue.title}
-                </Text>
-                <Text wrap="truncate">
-                    Status: <Text color="yellow">{issue.status}</Text>  |  Group: <Text inverse={groupFocused} bold={groupFocused}>{` ${group} `}</Text>
-                </Text>
-                <Text wrap="truncate">
-                    Blocked by: <Text inverse={blockedByFocused} bold={blockedByFocused}>{` ${blockedByStr} `}</Text>  |  Blocks: {blocksStr}
-                </Text>
-                <Text dimColor>{'─'.repeat(columns)}</Text>
+                {issueHeader}
 
                 {/* Scrollable conversation */}
                 <Box flexDirection="column" height={this.conversationHeight}>
@@ -312,6 +364,7 @@ export class DetailView extends React.Component<DetailViewProps> {
                     <Text color="cyan">&gt; </Text>
                     <TextInput
                         value={this.inputValue}
+                        focus={this.focusedField === null}
                         onChange={this.handleInputChange}
                         onSubmit={this.handleInputSubmit}
                     />
