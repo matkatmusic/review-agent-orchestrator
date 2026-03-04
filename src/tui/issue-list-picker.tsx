@@ -28,7 +28,8 @@ export class IssueListPicker extends React.Component<IssueListPickerProps> {
 
     constructor(props: IssueListPickerProps) {
         super(props);
-        this.cursor = 0;
+        const firstSelected = props.issues.findIndex(i => props.selected.has(i.inum));
+        this.cursor = firstSelected >= 0 ? firstSelected : 0;
     }
 
     handleKey = (input: string, key: Key) => {
