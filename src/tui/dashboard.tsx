@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, type Key } from 'ink';
 import type { Issue } from '../types.js';
 import { IssueStatus } from "../types.js"
 import { IssueStatusStringsMap } from '../types.js';
@@ -48,10 +48,9 @@ export interface DashboardProps {
     onQuit?: () => void;
 }
 
-// Stub functional component — keeps ink alive by registering a useInput listener.
-// Key handling will be added here in a later phase.
-function DashboardInputStub() {
-    useInput((_input, _key) => {});
+// Functional bridge — registers useInput and forwards keypresses to the class component.
+function DashboardInputBridge({ onKey }: { onKey: (input: string, key: Key) => void }) {
+    useInput(onKey);
     return null;
 }
 
@@ -96,11 +95,16 @@ export class Dashboard extends React.Component<DashboardProps> {
         this.forceUpdate();
     }
 
-    // [Phase A] useInput removed — key handling will be wired via handleGlobalKey later.
+    handleKey = (input: string, key: Key) => {
+        if (key.downArrow || input === 'j') {
+            this.moveCursor(1, this.filteredLength);
+        } else if (key.upArrow || input === 'k') {
+            this.moveCursor(-1, this.filteredLength);
+        }
+    };
 
-    renderInputHook() {
-        return <DashboardInputStub />;
-    }
+    // Stashed between render passes so handleKey can reference it.
+    private filteredLength = 0;
 
     render() {
         const { issues, unreadInums, maxAgents, onSelect, onNewIssue } = this.props;
@@ -117,11 +121,13 @@ export class Dashboard extends React.Component<DashboardProps> {
             filtered = issues.filter(function(i: Issue) { return i.status === sf; });
         }
 
+        this.filteredLength = filtered.length;
+
         const clampedCursor = Math.min(this.cursor, Math.max(0, filtered.length - 1));
 
         return (
             <Box flexDirection="column">
-                {this.renderInputHook()}
+                <DashboardInputBridge onKey={this.handleKey} />
                 {/* Status tabs */}
                 <Box gap={2} marginBottom={1}>
                     <Text key="All" bold={!this.useStatusFilter} inverse={!this.useStatusFilter}>
