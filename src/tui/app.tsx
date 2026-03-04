@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { View } from './views.js';
+import { type View, ViewType } from './views.js';
 import { Header, HEADER_LINES } from './header.js';
 import { Footer } from './footer.js';
 import { NewIssue } from './newissue.js';
@@ -59,7 +59,7 @@ class App extends React.Component<AppProps> {
 
     constructor(props: AppProps) {
         super(props);
-        this.viewStack = [props.initialView ?? { type: 'Dashboard' }];
+        this.viewStack = [props.initialView ?? { type: ViewType.Dashboard }];
         this.groupMode = GROUP_MODE_INITIAL;
     }
 
@@ -97,17 +97,18 @@ class App extends React.Component<AppProps> {
     render() {
         let content: React.ReactNode;
         switch (this.currentView.type) {
-            case 'Dashboard':
+            case ViewType.Dashboard:
                 content = (
                     <Dashboard
                         issues={MOCK_ISSUES}
                         unreadInums={MOCK_UNREAD_INUMS}
                         maxAgents={MOCK_MAX_AGENTS}
-                        onSelect={(inum) => this.navigateToView({ type: 'Detail', inum })}
-                        onNewIssue={() => this.navigateToView({ type: 'NewIssue' })}
+                        onSelect={(inum) => this.navigateToView({ type: ViewType.Detail, inum })}
+                        onNewIssue={() => this.navigateToView({ type: ViewType.NewIssue })}
                         onActivate={() => {}}
                         onDefer={() => {}}
                         onResolve={() => {}}
+                        onQuit={() => this.props.onExit?.()}
                     />
                 );
                 break;

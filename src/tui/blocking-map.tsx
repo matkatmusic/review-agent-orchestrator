@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Box, Text, useInput } from 'ink';
-import type { View } from './views.js';
+import { type View, ViewType } from './views.js';
 import type { Issue, Dependency } from '../types.js';
 import { statusToColor } from './status-color.js';
 import { MOCK_ISSUES, MOCK_DEPS } from './mock-data.js';
@@ -114,7 +114,7 @@ function BlockingMapComponent({ onNavigate, onBack, onQuit }: BlockingMapProps) 
         if (key.return) {
             const row = flatRows[cursor];
             if (row) {
-                onNavigate({ type: 'Detail', inum: row.issue.inum });
+                onNavigate({ type: ViewType.Detail, inum: row.issue.inum });
             }
             return;
         }

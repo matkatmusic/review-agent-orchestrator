@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { Box, Text } from 'ink';
-import type { View } from './views.js';
+import { type View, ViewType, ViewTypeStringsMap } from './views.js';
 
 export const HEADER_LINES = 3;
 
@@ -16,37 +16,25 @@ const assertNever = (x: never): never => {
 };
 
 function getViewLabel(view: View): string {
-    switch (view.type) {
-        case 'Dashboard':
-            return 'Dashboard';
-        case 'Detail':
-            return `I-${view.inum} Detail`;
-        case 'NewIssue':
-            return 'New Issue';
-        case 'AgentStatus':
-            return 'Agent Status';
-        case 'BlockingMap':
-            return 'Blocking Map';
-        case 'GroupView':
-            return 'Group View';
-        default:
-            return assertNever(view);
+    if (view.type === ViewType.Detail) {
+        return `I-${view.inum} Detail`;
     }
+    return ViewTypeStringsMap.get(view.type) ?? String(view.type);
 }
 
 function getSubtitle(view: View): string {
     switch (view.type) {
-        case 'Dashboard':
+        case ViewType.Dashboard:
             return 'Overview of all issues and orchestration state';
-        case 'Detail':
+        case ViewType.Detail:
             return `Viewing issue I-${view.inum}`;
-        case 'NewIssue':
+        case ViewType.NewIssue:
             return 'Create a new issue';
-        case 'AgentStatus':
+        case ViewType.AgentStatus:
             return 'Active agent sessions and pane status';
-        case 'BlockingMap':
+        case ViewType.BlockingMap:
             return 'Dependency and blocking relationships';
-        case 'GroupView':
+        case ViewType.GroupView:
             return 'Issues grouped by container';
         default:
             return assertNever(view);

@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { Box, Text } from 'ink';
-import type { ViewType } from './views.js';
+import { ViewType } from './views.js';
 
 export const FOOTER_LINES = 1;
 
@@ -15,7 +15,7 @@ export interface FooterProps {
 }
 
 export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
-    Dashboard: [
+    [ViewType.Dashboard]: [
         { key: 'Enter', label: 'View' },
         { key: 'n',     label: 'New' },
         { key: 'a',     label: 'Activate' },
@@ -26,7 +26,7 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
         { key: 'g',     label: 'Groups' },
         { key: 'q',     label: 'Quit' },
     ],
-    Detail: [
+    [ViewType.Detail]: [
         { key: 'Enter', label: 'Send' },
         { key: '\u2191\u2193', label: 'Scroll' },
         { key: 'Esc',   label: 'Back' },
@@ -36,21 +36,21 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
         { key: 'w',     label: 'Rebase', disabled: true },
         { key: 's',     label: 'Show pane', disabled: true },
     ],
-    NewIssue: [
+    [ViewType.NewIssue]: [
         { key: 'Enter', label: 'Create' },
         { key: 'Esc',   label: 'Cancel' },
     ],
-    AgentStatus: [
+    [ViewType.AgentStatus]: [
         { key: 'Enter', label: 'Focus pane' },
         { key: 'j/k',   label: 'Navigate' },
         { key: 'Esc',   label: 'Back' },
     ],
-    BlockingMap: [
+    [ViewType.BlockingMap]: [
         { key: 'Enter', label: 'View issue' },
         { key: 'j/k',   label: 'Navigate' },
         { key: 'Esc',   label: 'Back' },
     ],
-    GroupView: [
+    [ViewType.GroupView]: [
         { key: 'Enter', label: 'View issues' },
         { key: 'n',     label: 'Next issue' },
         { key: 'p',     label: 'Prev issue' },

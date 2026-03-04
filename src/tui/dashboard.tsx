@@ -3,8 +3,9 @@ import { Box, Text, useInput, type Key } from 'ink';
 import type { Issue } from '../types.js';
 import { IssueStatus } from "../types.js"
 import { IssueStatusStringsMap } from '../types.js';
-import type { View } from './views.js';
+import { type View, ViewType } from './views.js';
 import { statusToColor } from './status-color.js';
+import { handleGlobalKey } from './global-keys.js';
 
 type StatusCounts = Record<IssueStatus, number>;
 
@@ -102,6 +103,12 @@ export class Dashboard extends React.Component<DashboardProps> {
             this.moveCursor(-1, this.filteredLength);
         } else if (key.tab) {
             this.cycleTab(key.shift ? -1 : 1);
+        } else {
+            handleGlobalKey(input, key, ViewType.Dashboard, {
+                onBack: this.props.onBack,
+                onQuit: this.props.onQuit,
+                onNavigate: this.props.onNavigate,
+            });
         }
     };
 

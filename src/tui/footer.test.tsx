@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 import React from 'react';
 import { render } from 'ink-testing-library';
 import { Footer, VIEW_SHORTCUTS, FOOTER_LINES } from './footer.js';
-import type { ViewType } from './views.js';
+import { ViewType } from './views.js';
 
 describe('Footer — shortcut data', () => {
     const allViews: ViewType[] = [
-        'Dashboard', 'Detail', 'NewIssue', 'AgentStatus', 'BlockingMap', 'GroupView',
+        ViewType.Dashboard, ViewType.Detail, ViewType.NewIssue, ViewType.AgentStatus, ViewType.BlockingMap, ViewType.GroupView,
     ];
 
     it('VIEW_SHORTCUTS has an entry for every ViewType', () => {
@@ -32,7 +32,7 @@ describe('Footer — shortcut data', () => {
 
 describe('Footer — per-view rendering', () => {
     it('Dashboard renders all 9 shortcuts (wraps on narrow terminals)', () => {
-        const { lastFrame } = render(<Footer viewType="Dashboard" />);
+        const { lastFrame } = render(<Footer viewType={ViewType.Dashboard} />);
         const frame = lastFrame()!;
         expect(frame).toContain('[Enter]');
         expect(frame).toContain('View');
@@ -51,7 +51,7 @@ describe('Footer — per-view rendering', () => {
     });
 
     it('Detail shows all shortcuts with disabled indicators', () => {
-        const { lastFrame } = render(<Footer viewType="Detail" />);
+        const { lastFrame } = render(<Footer viewType={ViewType.Detail} />);
         const frame = lastFrame()!;
         expect(frame).toContain('[Enter]');
         expect(frame).toContain('Send');
@@ -71,7 +71,7 @@ describe('Footer — per-view rendering', () => {
     });
 
     it('NewIssue shows 2 shortcuts', () => {
-        const { lastFrame } = render(<Footer viewType="NewIssue" />);
+        const { lastFrame } = render(<Footer viewType={ViewType.NewIssue} />);
         const frame = lastFrame()!;
         expect(frame).toContain('[Enter]');
         expect(frame).toContain('Create');
@@ -80,7 +80,7 @@ describe('Footer — per-view rendering', () => {
     });
 
     it('NewIssue does NOT show Dashboard-only shortcuts', () => {
-        const { lastFrame } = render(<Footer viewType="NewIssue" />);
+        const { lastFrame } = render(<Footer viewType={ViewType.NewIssue} />);
         const frame = lastFrame()!;
         expect(frame).not.toContain('[q]');
         expect(frame).not.toContain('Quit');
@@ -89,7 +89,7 @@ describe('Footer — per-view rendering', () => {
     });
 
     it('AgentStatus shows 3 shortcuts', () => {
-        const { lastFrame } = render(<Footer viewType="AgentStatus" />);
+        const { lastFrame } = render(<Footer viewType={ViewType.AgentStatus} />);
         const frame = lastFrame()!;
         expect(frame).toContain('[Enter]');
         expect(frame).toContain('Focus pane');
@@ -100,7 +100,7 @@ describe('Footer — per-view rendering', () => {
     });
 
     it('BlockingMap shows 3 shortcuts', () => {
-        const { lastFrame } = render(<Footer viewType="BlockingMap" />);
+        const { lastFrame } = render(<Footer viewType={ViewType.BlockingMap} />);
         const frame = lastFrame()!;
         expect(frame).toContain('[Enter]');
         expect(frame).toContain('View issue');
@@ -111,7 +111,7 @@ describe('Footer — per-view rendering', () => {
     });
 
     it('GroupView shows 4 shortcuts', () => {
-        const { lastFrame } = render(<Footer viewType="GroupView" />);
+        const { lastFrame } = render(<Footer viewType={ViewType.GroupView} />);
         const frame = lastFrame()!;
         expect(frame).toContain('[Enter]');
         expect(frame).toContain('View issues');

@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
 import { render } from 'ink-testing-library';
 import { BlockingMap } from './blocking-map.js';
+import { ViewType } from './views.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 
@@ -172,7 +173,7 @@ describe('BlockingMap — Enter navigates to detail', () => {
         await tick();
 
         expect(navigate).toHaveBeenCalledOnce();
-        expect(navigate).toHaveBeenCalledWith({ type: 'Detail', inum: 1 });
+        expect(navigate).toHaveBeenCalledWith({ type: ViewType.Detail, inum: 1 });
     });
 
     it('Enter after moving cursor navigates to the correct issue', async () => {
@@ -189,7 +190,7 @@ describe('BlockingMap — Enter navigates to detail', () => {
         expect(navigate).toHaveBeenCalledOnce();
         // Should navigate to the second item's inum (child of I-1)
         const call = navigate.mock.calls[0][0];
-        expect(call.type).toBe('Detail');
+        expect(call.type).toBe(ViewType.Detail);
         expect(call.inum).toBeGreaterThan(0);
     });
 });

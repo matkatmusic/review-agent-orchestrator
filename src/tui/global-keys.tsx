@@ -21,20 +21,20 @@ export function handleGlobalKey(
         return true;
     }
     // Skip same-view navigation to prevent duplicate stack entries
-    if (input === 's' && currentView !== 'AgentStatus') {
-        callbacks.onNavigate?.({ type: 'AgentStatus' });
+    if (input === 's' && currentView !== ViewType.AgentStatus) {
+        callbacks.onNavigate?.({ type: ViewType.AgentStatus });
         return true;
     }
-    if (input === 'b' && currentView !== 'BlockingMap') {
-        callbacks.onNavigate?.({ type: 'BlockingMap' });
+    if (input === 'b' && currentView !== ViewType.BlockingMap) {
+        callbacks.onNavigate?.({ type: ViewType.BlockingMap });
         return true;
     }
-    if (input === 'g' && currentView !== 'GroupView') {
-        callbacks.onNavigate?.({ type: 'GroupView' });
+    if (input === 'g' && currentView !== ViewType.GroupView) {
+        callbacks.onNavigate?.({ type: ViewType.GroupView });
         return true;
     }
     if (input === 'n') {
-        callbacks.onNavigate?.({ type: 'NewIssue' });
+        callbacks.onNavigate?.({ type: ViewType.NewIssue });
         return true;
     }
     return false;
