@@ -3,6 +3,7 @@ import { createTestDb } from './database.test.js';
 import { DB } from './database.js';
 import * as containers from './containers.js';
 import * as issues from './issues.js';
+import { IssueStatus } from "../types.js"
 
 describe('containers', () => {
     let db: DB;
@@ -84,7 +85,7 @@ describe('containers', () => {
         const i2 = issues.createIssue(db, 'Active', '');
         const i3 = issues.createIssue(db, 'Awaiting 2', '');
 
-        issues.updateStatus(db, i2, 'Active');
+        issues.updateStatus(db, i2, IssueStatus.Active);
 
         containers.addIssueToContainer(db, i1, containerId, 2);
         containers.addIssueToContainer(db, i2, containerId, 1);

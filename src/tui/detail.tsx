@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import type { Issue, Response as IssueResponse } from '../types.js';
+import type { View } from './views.js';
 import { HEADER_LINES } from './header.js';
 
 // ---- Types ----
@@ -23,6 +24,8 @@ export interface DetailViewProps {
     rows: number;
     onBack?: () => void;
     onSend?: (message: string) => void;
+    onNavigate?: (view: View) => void;
+    onQuit?: () => void;
 }
 
 // ---- Layout constants ----
@@ -93,6 +96,8 @@ export function DetailView({
     rows,
     onBack,
     onSend,
+    onNavigate,
+    onQuit,
 }: DetailViewProps) {
     const [scrollOffset, setScrollOffset] = useState(0);
     const [inputValue, setInputValue] = useState('');

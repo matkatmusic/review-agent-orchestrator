@@ -3,6 +3,7 @@ import { createTestDb } from './database.test.js';
 import { DB } from './database.js';
 import * as deps from './dependencies.js';
 import * as issues from './issues.js';
+import { IssueStatus } from "../types.js"
 
 describe('dependencies', () => {
     let db: DB;
@@ -57,7 +58,7 @@ describe('dependencies', () => {
         const i1 = issues.createIssue(db, 'Blocker', '');
         const i2 = issues.createIssue(db, 'Blocked', '');
         deps.addBlock(db, i2, i1);
-        issues.updateStatus(db, i1, 'Resolved');
+        issues.updateStatus(db, i1, IssueStatus.Resolved);
 
         expect(deps.isBlocked(db, i2)).toBe(false);
     });
@@ -130,7 +131,7 @@ describe('dependencies', () => {
     it('rejects addBlock when blocked issue is Resolved', () => {
         const i1 = issues.createIssue(db, 'Blocker', '');
         const i2 = issues.createIssue(db, 'Resolved', '');
-        issues.updateStatus(db, i2, 'Resolved');
+        issues.updateStatus(db, i2, IssueStatus.Resolved);
         expect(() => deps.addBlock(db, i2, i1)).toThrow('Cannot block a Resolved issue');
     });
 });

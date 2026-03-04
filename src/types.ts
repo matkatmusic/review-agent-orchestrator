@@ -1,4 +1,23 @@
-export type IssueStatus = 'Awaiting' | 'Active' | 'Blocked' | 'Deferred' | 'Resolved';
+
+/**
+ * The list of possible statuses that an issue can have
+ */
+
+export enum IssueStatus {
+  Active,
+  Awaiting,
+  Blocked,
+  Deferred,
+  Resolved
+}
+
+export const IssueStatusStringsMap = new Map<IssueStatus, string>([
+  [IssueStatus.Active, "Active"],
+  [IssueStatus.Awaiting, "Awaiting"],
+  [IssueStatus.Blocked, "Blocked"],
+  [IssueStatus.Deferred, "Deferred"],
+  [IssueStatus.Resolved, "Resolved"],
+]);
 
 export interface Issue {
     inum: number;

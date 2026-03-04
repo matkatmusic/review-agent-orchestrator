@@ -350,7 +350,7 @@ describe('GroupView', () => {
 
     it('does not call onNavigate from container list', async () => {
         const onNavigate = vi.fn();
-        const { stdin } = render(<GroupView onNavigate={onNavigate} />);
+        const { stdin } = render(<GroupView onSelectIssue={onNavigate} />);
         await tick();
 
         stdin.write('j');
@@ -361,7 +361,7 @@ describe('GroupView', () => {
 
     it('Enter on issue in drilled-in view calls onNavigate', async () => {
         const onNavigate = vi.fn();
-        const { stdin } = render(<GroupView onNavigate={onNavigate} />);
+        const { stdin } = render(<GroupView onSelectIssue={onNavigate} />);
         await tick();
 
         // Drill into Inbox

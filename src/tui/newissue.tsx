@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
+import type { View } from './views.js';
 
 export interface NewIssueData {
     title: string;
@@ -12,6 +13,9 @@ export interface NewIssueData {
 interface NewIssueProps {
     onCreated: (data: NewIssueData) => void;
     onCancel: () => void;
+    onNavigate?: (view: View) => void;
+    onBack?: () => void;
+    onQuit?: () => void;
 }
 
 const FIELDS = ['Title', 'Description', 'Group', 'Blocked by'] as const;
@@ -26,7 +30,7 @@ function validateBlockedBy(value: string): boolean {
     });
 }
 
-function NewIssue({ onCreated, onCancel }: NewIssueProps) {
+function NewIssue({ onCreated, onCancel, onNavigate, onBack, onQuit }: NewIssueProps) {
     const [activeField, setActiveField] = useState(0);
     const [values, setValues] = useState<Record<number, string>>({
         0: '',

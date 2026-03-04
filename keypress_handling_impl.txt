@@ -1,4 +1,4 @@
-- [ ] remove useInput from app entirely: 
+- [x] remove useInput from app entirely: 
     - app.tsx:2,51  
     - dashboard.tsx:2,70    
     - detail.tsx:2,111
@@ -6,9 +6,9 @@
     - agent-status.tsx:2,34
     - blocking-map.tsx:2,103
     - group-view.tsx:2,72   
-- [ ] Modify app.tsx
+- [x] Modify app.tsx
     - Delete VIEW_OWNED_KEYS constant entirely
-- [ ] ensure constructors of all views accept navigation callbacks
+- [x] ensure constructors of all views accept navigation callbacks: onNavigate, onBack, onQuit
 - [ ] add key handling to each view: 
     - [ ] dashboard.tsx
     - [ ] detail.tsx

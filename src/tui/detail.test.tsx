@@ -3,6 +3,7 @@ import React from 'react';
 import { render } from 'ink-testing-library';
 import { DetailView, buildConversationLines } from './detail.js';
 import type { Issue, Response as IssueResponse } from '../types.js';
+import {IssueStatus} from "../types.js"
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 
@@ -12,7 +13,7 @@ const TEST_ISSUE: Issue = {
     inum: 1,
     title: 'Implement authentication module',
     description: 'Add JWT-based auth',
-    status: 'Active',
+    status: IssueStatus.Active,
     created_at: '2025-01-15T10:00:00Z',
     resolved_at: null,
     issue_revision: 3,
@@ -271,7 +272,7 @@ describe('DetailView', () => {
     });
 
     it('renders Blocked status for blocked issue', () => {
-        const blockedIssue: Issue = { ...TEST_ISSUE, inum: 2, status: 'Blocked' };
+        const blockedIssue: Issue = { ...TEST_ISSUE, inum: 2, status: IssueStatus.Blocked };
         const { lastFrame } = render(
             <DetailView
                 {...defaultProps}

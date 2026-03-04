@@ -1,5 +1,6 @@
 import type { DB } from './database.js';
-import type { Issue, IssueStatus } from '../types.js';
+import type { Issue } from '../types.js';
+import { IssueStatus } from '../types.js';
 
 export function createIssue(
     db: DB,
@@ -55,7 +56,7 @@ export function list(db: DB, status?: IssueStatus): Issue[] {
 }
 
 export function updateStatus(db: DB, inum: number, status: IssueStatus): void {
-    if (status === 'Resolved') {
+    if (status === IssueStatus.Resolved) {
         const result = db.run(
             "UPDATE issues SET status = ?, resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE inum = ?",
             status,
@@ -124,7 +125,11 @@ export function getStatusCounts(db: DB): Record<IssueStatus, number> {
         'SELECT status, COUNT(*) AS count FROM issues GROUP BY status'
     );
     const counts: Record<IssueStatus, number> = {
-        Awaiting: 0, Active: 0, Blocked: 0, Deferred: 0, Resolved: 0,
+        [IssueStatus.Awaiting]: 0,
+        [IssueStatus.Active]: 0,
+        [IssueStatus.Blocked]: 0,
+        [IssueStatus.Deferred]: 0,
+        [IssueStatus.Resolved]: 0,
     };
     for (const row of rows) {
         counts[row.status] = row.count;

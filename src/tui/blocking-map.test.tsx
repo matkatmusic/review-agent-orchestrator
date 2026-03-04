@@ -7,19 +7,19 @@ const tick = () => new Promise(r => setTimeout(r, 0));
 
 describe('BlockingMap — rendering', () => {
     it('renders without crash', () => {
-        const { lastFrame } = render(<BlockingMap navigate={vi.fn()} />);
+        const { lastFrame } = render(<BlockingMap onNavigate={vi.fn()} />);
         expect(lastFrame()).toBeDefined();
     });
 
     it('shows "Blocking Map" title area', () => {
-        const { lastFrame } = render(<BlockingMap navigate={vi.fn()} />);
+        const { lastFrame } = render(<BlockingMap onNavigate={vi.fn()} />);
         expect(lastFrame()).toContain('Dependency');
     });
 
     // ---- Tree structure ----
 
     it('shows root issues (issues that block others)', () => {
-        const { lastFrame } = render(<BlockingMap navigate={vi.fn()} />);
+        const { lastFrame } = render(<BlockingMap onNavigate={vi.fn()} />);
         const frame = lastFrame()!;
         // Mock data has I-1 and I-2 as roots
         expect(frame).toContain('I-1');
@@ -27,28 +27,28 @@ describe('BlockingMap — rendering', () => {
     });
 
     it('shows blocked issues as children under their blockers', () => {
-        const { lastFrame } = render(<BlockingMap navigate={vi.fn()} />);
+        const { lastFrame } = render(<BlockingMap onNavigate={vi.fn()} />);
         const frame = lastFrame()!;
         // I-3 is blocked by I-1 and should appear indented under it
         expect(frame).toContain('I-3');
     });
 
     it('displays tree connectors (├── or └──)', () => {
-        const { lastFrame } = render(<BlockingMap navigate={vi.fn()} />);
+        const { lastFrame } = render(<BlockingMap onNavigate={vi.fn()} />);
         const frame = lastFrame()!;
         // Should have box-drawing tree connectors
         expect(frame).toMatch(/[├└]/);
     });
 
     it('displays issue titles', () => {
-        const { lastFrame } = render(<BlockingMap navigate={vi.fn()} />);
+        const { lastFrame } = render(<BlockingMap onNavigate={vi.fn()} />);
         const frame = lastFrame()!;
         // Mock issues should show their titles from canonical mock-data
         expect(frame).toContain('migrate_ServerDerivedFields');
     });
 
     it('displays issue statuses', () => {
-        const { lastFrame } = render(<BlockingMap navigate={vi.fn()} />);
+        const { lastFrame } = render(<BlockingMap onNavigate={vi.fn()} />);
         const frame = lastFrame()!;
         // Should show status indicators
         expect(frame).toContain('Active');
@@ -56,7 +56,7 @@ describe('BlockingMap — rendering', () => {
     });
 
     it('shows continuation lines (│) for multi-child trees', () => {
-        const { lastFrame } = render(<BlockingMap navigate={vi.fn()} />);
+        const { lastFrame } = render(<BlockingMap onNavigate={vi.fn()} />);
         const frame = lastFrame()!;
         // I-1 has multiple children, so should show vertical continuation
         expect(frame).toContain('│');
@@ -65,7 +65,7 @@ describe('BlockingMap — rendering', () => {
     // ---- Isolated issues ----
 
     it('shows isolated issues section for issues with no dependencies', () => {
-        const { lastFrame } = render(<BlockingMap navigate={vi.fn()} />);
+        const { lastFrame } = render(<BlockingMap onNavigate={vi.fn()} />);
         const frame = lastFrame()!;
         // I-7 "legacy_api_removal" and I-8 "initial_setup_task" have no dependencies — shown separately
         expect(frame).toContain('I-7');
@@ -75,7 +75,7 @@ describe('BlockingMap — rendering', () => {
     // ---- Diamond dependency (I-6 blocked by both I-3 and I-5) ----
 
     it('shows issues that appear in multiple subtrees', () => {
-        const { lastFrame } = render(<BlockingMap navigate={vi.fn()} />);
+        const { lastFrame } = render(<BlockingMap onNavigate={vi.fn()} />);
         const frame = lastFrame()!;
         // I-6 appears under both I-3 and I-5 subtrees
         // Count occurrences of I-6 — should appear at least twice
@@ -87,7 +87,7 @@ describe('BlockingMap — rendering', () => {
 
 describe('BlockingMap — cursor navigation', () => {
     it('first item is selected by default (has cursor indicator)', async () => {
-        const { lastFrame } = render(<BlockingMap navigate={vi.fn()} />);
+        const { lastFrame } = render(<BlockingMap onNavigate={vi.fn()} />);
         await tick();
         const frame = lastFrame()!;
         // The first item should have a selection indicator (▸ or similar)
@@ -98,7 +98,7 @@ describe('BlockingMap — cursor navigation', () => {
     });
 
     it('j moves cursor down', async () => {
-        const { lastFrame, stdin } = render(<BlockingMap navigate={vi.fn()} />);
+        const { lastFrame, stdin } = render(<BlockingMap onNavigate={vi.fn()} />);
         await tick();
 
         // Move down
@@ -115,7 +115,7 @@ describe('BlockingMap — cursor navigation', () => {
     });
 
     it('k moves cursor up', async () => {
-        const { lastFrame, stdin } = render(<BlockingMap navigate={vi.fn()} />);
+        const { lastFrame, stdin } = render(<BlockingMap onNavigate={vi.fn()} />);
         await tick();
 
         // Move down then back up
@@ -132,7 +132,7 @@ describe('BlockingMap — cursor navigation', () => {
     });
 
     it('cursor does not move above first item', async () => {
-        const { lastFrame, stdin } = render(<BlockingMap navigate={vi.fn()} />);
+        const { lastFrame, stdin } = render(<BlockingMap onNavigate={vi.fn()} />);
         await tick();
 
         const frameBefore = lastFrame();
@@ -144,7 +144,7 @@ describe('BlockingMap — cursor navigation', () => {
     });
 
     it('cursor does not move below last item', async () => {
-        const { lastFrame, stdin } = render(<BlockingMap navigate={vi.fn()} />);
+        const { lastFrame, stdin } = render(<BlockingMap onNavigate={vi.fn()} />);
         await tick();
 
         // Move down many times past the end
@@ -164,7 +164,7 @@ describe('BlockingMap — cursor navigation', () => {
 describe('BlockingMap — Enter navigates to detail', () => {
     it('Enter on selected issue calls navigate with Detail view', async () => {
         const navigate = vi.fn();
-        const { stdin } = render(<BlockingMap navigate={navigate} />);
+        const { stdin } = render(<BlockingMap onNavigate={navigate} />);
         await tick();
 
         // Press Enter on the first item (I-1)
@@ -177,7 +177,7 @@ describe('BlockingMap — Enter navigates to detail', () => {
 
     it('Enter after moving cursor navigates to the correct issue', async () => {
         const navigate = vi.fn();
-        const { stdin } = render(<BlockingMap navigate={navigate} />);
+        const { stdin } = render(<BlockingMap onNavigate={navigate} />);
         await tick();
 
         // Move down to second item then press Enter

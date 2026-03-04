@@ -84,10 +84,12 @@ function buildFlatRows(issues: Issue[], deps: Dependency[]): FlatRow[] {
 // ── Component ──
 
 interface BlockingMapProps {
-    navigate: (view: View) => void;
+    onNavigate: (view: View) => void;
+    onBack?: () => void;
+    onQuit?: () => void;
 }
 
-function BlockingMapComponent({ navigate }: BlockingMapProps) {
+function BlockingMapComponent({ onNavigate, onBack, onQuit }: BlockingMapProps) {
     const flatRows = useMemo(() => buildFlatRows(MOCK_ISSUES, MOCK_DEPS), []);
     const [cursor, setCursor] = useState(0);
 
@@ -112,7 +114,7 @@ function BlockingMapComponent({ navigate }: BlockingMapProps) {
         if (key.return) {
             const row = flatRows[cursor];
             if (row) {
-                navigate({ type: 'Detail', inum: row.issue.inum });
+                onNavigate({ type: 'Detail', inum: row.issue.inum });
             }
             return;
         }

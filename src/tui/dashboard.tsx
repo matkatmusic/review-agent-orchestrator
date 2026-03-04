@@ -1,25 +1,37 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React from 'react';
 import { Box, Text, useInput } from 'ink';
-import type { Issue, IssueStatus } from '../types.js';
+import type { Issue } from '../types.js';
+import { IssueStatus } from "../types.js"
+import { IssueStatusStringsMap } from '../types.js';
+import type { View } from './views.js';
 import { statusToColor } from './status-color.js';
 
-const STATUS_TABS = ['All', 'Active', 'Awaiting', 'Blocked', 'Deferred', 'Resolved'] as const;
-type StatusFilter = (typeof STATUS_TABS)[number];
-
-interface StatusCounts {
-    Active: number;
-    Awaiting: number;
-    Blocked: number;
-    Deferred: number;
-    Resolved: number;
-}
+type StatusCounts = Record<IssueStatus, number>;
 
 function computeCounts(issues: Issue[]): StatusCounts {
-    const counts: StatusCounts = { Active: 0, Awaiting: 0, Blocked: 0, Deferred: 0, Resolved: 0 };
+    //declares an instance of StatusCounts, with all counts initialized to 0
+    const counts = {} as StatusCounts;
+    //enums are not iterable in Typescript.
+    //but a map (of <enum, string>) is iterable.
+    // IssueStatusStringsMap is such a map.
+    // this is how we can get each enum value and iterate over it.
+    for (const key of IssueStatusStringsMap.keys()) {
+        counts[key] = 0;
+    }
+    //iterates through the issues and increments the count for each status
     for (const issue of issues) {
         counts[issue.status]++;
     }
     return counts;
+}
+
+function getNextStatus(currentStatus: IssueStatus, direction: 1 | -1): IssueStatus {
+    const count = IssueStatusStringsMap.size;
+    let newIndex = currentStatus + direction;
+    //newIndex could be negative, so add 'count' to it.
+    newIndex += count;
+    //now newIndex is always positive, so we can use modulo to wrap around.
+    return newIndex % count;
 }
 
 export interface DashboardProps {
@@ -31,145 +43,138 @@ export interface DashboardProps {
     onActivate: (inum: number) => void;
     onDefer: (inum: number) => void;
     onResolve: (inum: number) => void;
+    onNavigate?: (view: View) => void;
+    onBack?: () => void;
+    onQuit?: () => void;
 }
 
-export function Dashboard({
-    issues,
-    unreadInums,
-    maxAgents,
-    onSelect,
-    onNewIssue,
-    onActivate,
-    onDefer,
-    onResolve,
-}: DashboardProps) {
-    const [filter, setFilter] = useState<StatusFilter>('All');
-    const [cursor, setCursor] = useState(0);
+// Stub functional component — keeps ink alive by registering a useInput listener.
+// Key handling will be added here in a later phase.
+function DashboardInputStub() {
+    useInput((_input, _key) => {});
+    return null;
+}
 
-    const counts = useMemo(() => computeCounts(issues), [issues]);
-    const activeCount = counts.Active;
-    const atCapacity = activeCount >= maxAgents;
+export class Dashboard extends React.Component<DashboardProps> {
+    useStatusFilter: boolean;
+    statusFilter: IssueStatus;
+    cursor: number;
 
-    const filtered = useMemo(() => {
-        if (filter === 'All') return issues;
-        return issues.filter(i => i.status === filter);
-    }, [issues, filter]);
+    constructor(props: DashboardProps) {
+        super(props);
+        this.useStatusFilter = false;
+        this.statusFilter = IssueStatus.Active;
+        this.cursor = 0;
+    }
 
-    // Clamp cursor when list changes
-    const clampedCursor = Math.min(cursor, Math.max(0, filtered.length - 1));
-
-    const cycleTab = useCallback((direction: 1 | -1) => {
-        setFilter(prev => {
-            const idx = STATUS_TABS.indexOf(prev);
-            const next = STATUS_TABS[(idx + direction + STATUS_TABS.length) % STATUS_TABS.length]!;
-            return next;
-        });
-        setCursor(0);
-    }, []);
-
-    useInput((input, key) => {
-        // Tab switching
-        if (key.tab) {
-            cycleTab(key.shift ? -1 : 1);
-            return;
-        }
-
-        // Cursor navigation
-        if (key.downArrow || input === 'j') {
-            setCursor(c => Math.min(filtered.length - 1, c + 1));
-            return;
-        }
-        if (key.upArrow || input === 'k') {
-            setCursor(c => Math.max(0, c - 1));
-            return;
-        }
-
-        // Actions
-        if (key.return) {
-            if (filtered.length > 0 && filtered[clampedCursor]) {
-                onSelect(filtered[clampedCursor]!.inum);
+    cycleTab(direction: 1 | -1) {
+        const statusCount = IssueStatusStringsMap.size;
+        if (!this.useStatusFilter) {
+            // Currently showing all — enter filtered mode
+            this.useStatusFilter = true;
+            this.statusFilter = direction === 1 ? 0 : statusCount - 1;
+        } else {
+            // Check if cycling would wrap around — if so, go back to "All"
+            let wouldWrap = (direction === 1 && this.statusFilter === statusCount - 1)
+                         || (direction === -1 && this.statusFilter === 0);
+            if (wouldWrap) {
+                this.useStatusFilter = false;
+            } else {
+                this.statusFilter = getNextStatus(this.statusFilter, direction);
             }
-            return;
+        }
+        this.cursor = 0;
+        this.forceUpdate();
+    }
+
+    moveCursor(direction: 1 | -1, listLength: number) {
+        if (direction === 1) {
+            this.cursor = Math.min(this.cursor + 1, listLength - 1);
+        } else {
+            this.cursor = Math.max(this.cursor - 1, 0);
+        }
+        this.forceUpdate();
+    }
+
+    // [Phase A] useInput removed — key handling will be wired via handleGlobalKey later.
+
+    renderInputHook() {
+        return <DashboardInputStub />;
+    }
+
+    render() {
+        const { issues, unreadInums, maxAgents, onSelect, onNewIssue } = this.props;
+
+        const counts = computeCounts(issues);
+        const activeCount = counts[IssueStatus.Active];
+        const atCapacity = activeCount >= maxAgents;
+
+        let filtered: Issue[];
+        if (!this.useStatusFilter) {
+            filtered = issues;
+        } else {
+            const sf = this.statusFilter;
+            filtered = issues.filter(function(i: Issue) { return i.status === sf; });
         }
 
-        if (input === 'n') {
-            onNewIssue();
-            return;
-        }
+        const clampedCursor = Math.min(this.cursor, Math.max(0, filtered.length - 1));
 
-        if (input === 'a') {
-            if (filtered.length > 0 && filtered[clampedCursor]) {
-                onActivate(filtered[clampedCursor]!.inum);
-            }
-            return;
-        }
-
-        if (input === 'd') {
-            if (filtered.length > 0 && filtered[clampedCursor]) {
-                onDefer(filtered[clampedCursor]!.inum);
-            }
-            return;
-        }
-
-        if (input === 'r') {
-            if (filtered.length > 0 && filtered[clampedCursor]) {
-                onResolve(filtered[clampedCursor]!.inum);
-            }
-            return;
-        }
-    });
-
-    return (
-        <Box flexDirection="column">
-            {/* Status tabs */}
-            <Box gap={2} marginBottom={1}>
-                {STATUS_TABS.map(tab => {
-                    const active = tab === filter;
-                    const count = tab === 'All' ? issues.length : counts[tab];
-                    return (
-                        <Text key={tab} bold={active} inverse={active}>
-                            {` ${tab} (${count}) `}
-                        </Text>
-                    );
-                })}
-                {atCapacity && (
-                    <Text color="red" bold> Agents full ({activeCount}/{maxAgents}) </Text>
-                )}
-            </Box>
-
-            {/* Issue list */}
+        return (
             <Box flexDirection="column">
-                {filtered.length === 0 ? (
-                    <Text dimColor>  No issues in this view.</Text>
-                ) : (
-                    filtered.map((issue, i) => {
-                        const selected = i === clampedCursor;
-                        const unread = unreadInums.has(issue.inum);
-                        const sColor = statusToColor(issue.status);
+                {this.renderInputHook()}
+                {/* Status tabs */}
+                <Box gap={2} marginBottom={1}>
+                    <Text key="All" bold={!this.useStatusFilter} inverse={!this.useStatusFilter}>
+                        {` All (${issues.length}) `}
+                    </Text>
+                    {[...IssueStatusStringsMap.entries()].map(([status, label]) => {
+                        const active = this.useStatusFilter && status === this.statusFilter;
                         return (
-                            <Box key={issue.inum}>
-                                <Text color={selected ? 'cyan' : undefined} bold={selected}>
-                                    {selected ? ' \u25B8 ' : '   '}
-                                </Text>
-                                <Text color={selected ? 'cyan' : undefined} bold={selected}>
-                                    {`I-${issue.inum}`.padEnd(6)}
-                                </Text>
-                                <Text>  </Text>
-                                <Text color={selected ? 'cyan' : undefined} bold={selected}>
-                                    {issue.title.length > 40
-                                        ? issue.title.slice(0, 37) + '...'
-                                        : issue.title.padEnd(40)}
-                                </Text>
-                                <Text> </Text>
-                                <Text color="yellow" bold>{unread ? '\u2731' : ' '}</Text>
-                                <Text>  </Text>
-                                <Text color={sColor}>{issue.status.padEnd(10)}</Text>
-                            </Box>
+                            <Text key={status} bold={active} inverse={active}>
+                                {` ${label} (${counts[status]}) `}
+                            </Text>
                         );
-                    })
-                )}
-            </Box>
+                    })}
+                    {atCapacity && (
+                        <Text color="red" bold> Agents full ({activeCount}/{maxAgents}) </Text>
+                    )}
+                </Box>
 
-        </Box>
-    );
+                {/* Issue list */}
+                <Box flexDirection="column">
+                    {filtered.length === 0 ? (
+                        <Text dimColor>  No issues in this view.</Text>
+                    ) : (
+                        filtered.map((issue, i) => {
+                            const selected = i === clampedCursor;
+                            const unread = unreadInums.has(issue.inum);
+                            const sColor = statusToColor(issue.status);
+                            const statusLabel = IssueStatusStringsMap.get(issue.status) ?? '';
+                            return (
+                                <Box key={issue.inum}>
+                                    <Text color={selected ? 'cyan' : undefined} bold={selected}>
+                                        {selected ? ' \u25B8 ' : '   '}
+                                    </Text>
+                                    <Text color={selected ? 'cyan' : undefined} bold={selected}>
+                                        {`I-${issue.inum}`.padEnd(6)}
+                                    </Text>
+                                    <Text>  </Text>
+                                    <Text color={selected ? 'cyan' : undefined} bold={selected}>
+                                        {issue.title.length > 40
+                                            ? issue.title.slice(0, 37) + '...'
+                                            : issue.title.padEnd(40)}
+                                    </Text>
+                                    <Text> </Text>
+                                    <Text color="yellow" bold>{unread ? '\u2731' : ' '}</Text>
+                                    <Text>  </Text>
+                                    <Text color={sColor}>{statusLabel.padEnd(10)}</Text>
+                                </Box>
+                            );
+                        })
+                    )}
+                </Box>
+
+            </Box>
+        );
+    }
 }

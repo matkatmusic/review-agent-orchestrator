@@ -1,5 +1,6 @@
 import React, { useState, memo } from 'react';
 import { Box, Text, useInput } from 'ink';
+import type { View } from './views.js';
 
 export interface AgentStatusEntry {
     inum: number;
@@ -22,11 +23,17 @@ const DEAD = '\u25CB';      // ○ (empty circle)
 interface AgentStatusProps {
     agents?: AgentStatusEntry[];
     onFocusPane?: (paneId: string) => void;
+    onNavigate?: (view: View) => void;
+    onBack?: () => void;
+    onQuit?: () => void;
 }
 
 const AgentStatusComponent: React.FC<AgentStatusProps> = ({
     agents,
     onFocusPane,
+    onNavigate,
+    onBack,
+    onQuit,
 }) => {
     const list = agents ?? MOCK_AGENTS;
     const [cursor, setCursor] = useState(0);

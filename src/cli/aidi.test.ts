@@ -8,6 +8,7 @@ import { dirname } from 'node:path';
 import { DB } from '../db/database.js';
 import * as issues from '../db/issues.js';
 import * as responses from '../db/responses.js';
+import { IssueStatus } from "../types.js"
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -164,7 +165,7 @@ describe('aidi CLI', () => {
 
     it('status: prints issue status', () => {
         const inum = issues.createIssue(db, 'Status Test', '');
-        issues.updateStatus(db, inum, 'Active');
+        issues.updateStatus(db, inum, IssueStatus.Active);
         db.close();
 
         const { stdout, exitCode } = runAidi(`status ${inum}`, tmpDir);

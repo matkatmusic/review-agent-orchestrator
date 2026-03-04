@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { Issue } from '../types.js';
+import {IssueStatus, IssueStatusStringsMap} from "../types.js"
+import type { View } from './views.js';
 import { statusToColor } from './status-color.js';
 import { MOCK_CONTAINERS, MOCK_CONTAINER_ISSUES } from './mock-data.js';
 
@@ -22,7 +24,9 @@ export const GROUP_MODE_INITIAL: GroupMode = { mode: 'list', cursor: 0 };
 
 export interface GroupViewProps {
     onBack?: () => void;
-    onNavigate?: (inum: number) => void;
+    onSelectIssue?: (inum: number) => void;
+    onNavigate?: (view: View) => void;
+    onQuit?: () => void;
     /** Externally managed state — preserved across navigation */
     groupMode?: GroupMode;
     onGroupModeChange?: (mode: GroupMode) => void;
@@ -30,7 +34,7 @@ export interface GroupViewProps {
 
 // ---- Component ----
 
-export function GroupView({ onBack, onNavigate, groupMode, onGroupModeChange }: GroupViewProps) {
+export function GroupView({ onBack, onSelectIssue, onNavigate, onQuit, groupMode, onGroupModeChange }: GroupViewProps) {
     const [internalState, setInternalState] = useState<GroupMode>(GROUP_MODE_INITIAL);
     const state = groupMode ?? internalState;
     const setState = useCallback((updater: GroupMode | ((prev: GroupMode) => GroupMode)) => {
@@ -51,7 +55,7 @@ export function GroupView({ onBack, onNavigate, groupMode, onGroupModeChange }: 
     const containerData = useMemo(() => {
         return containers.map(c => {
             const issues = MOCK_CONTAINER_ISSUES[c.id] ?? [];
-            const resolved = issues.filter(i => i.status === 'Resolved').length;
+            const resolved = issues.filter(i => i.status === IssueStatus.Resolved).length;
             return { container: c, issues, resolved, total: issues.length };
         });
     }, []); // static mock data — never changes
@@ -118,7 +122,7 @@ export function GroupView({ onBack, onNavigate, groupMode, onGroupModeChange }: 
             }
             if (key.return) {
                 if (currentIssues.length > 0 && currentIssues[state.cursor]) {
-                    onNavigate?.(currentIssues[state.cursor]!.inum);
+                    onSelectIssue?.(currentIssues[state.cursor]!.inum);
                 }
                 return;
             }
@@ -203,7 +207,7 @@ export function GroupView({ onBack, onNavigate, groupMode, onGroupModeChange }: 
                                     I-{String(issue.inum).padStart(3)}
                                 </Text>
                                 <Text>  </Text>
-                                <Text color={sColor}>{issue.status.padEnd(9)}</Text>
+                                <Text color={sColor}>{IssueStatusStringsMap.get(issue.status)?.padEnd(9)}</Text>
                                 <Text>  </Text>
                                 <Text color={selected ? 'cyan' : undefined} bold={selected} wrap="truncate">
                                     {issue.title.length > 40 ? issue.title.slice(0, 37) + '...' : issue.title}

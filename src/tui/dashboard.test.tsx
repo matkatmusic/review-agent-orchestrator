@@ -2,14 +2,15 @@ import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
 import { render } from 'ink-testing-library';
 import { Dashboard } from './dashboard.js';
-import type { Issue, IssueStatus } from '../types.js';
+import type { Issue } from '../types.js';
+import { IssueStatus } from "../types.js";
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 
 function makeIssue(overrides: Partial<Issue> & { inum: number; title: string }): Issue {
     return {
         description: '',
-        status: 'Awaiting' as IssueStatus,
+        status: IssueStatus.Awaiting,
         created_at: '2026-01-01T00:00:00Z',
         resolved_at: null,
         issue_revision: 1,
@@ -20,14 +21,14 @@ function makeIssue(overrides: Partial<Issue> & { inum: number; title: string }):
 }
 
 const MOCK_ISSUES: Issue[] = [
-    makeIssue({ inum: 1, title: 'migrate_ServerDerivedFields', status: 'Active' }),
-    makeIssue({ inum: 2, title: 'migrate_SessionCredentials', status: 'Active' }),
-    makeIssue({ inum: 3, title: 'rate_limiting_design', status: 'Awaiting' }),
-    makeIssue({ inum: 4, title: 'payload_encryption_flow', status: 'Awaiting' }),
-    makeIssue({ inum: 5, title: 'docker_healthcheck', status: 'Awaiting' }),
-    makeIssue({ inum: 6, title: 'stale_session_cleanup', status: 'Blocked' }),
-    makeIssue({ inum: 7, title: 'legacy_api_removal', status: 'Deferred' }),
-    makeIssue({ inum: 8, title: 'initial_setup_task', status: 'Resolved' }),
+    makeIssue({ inum: 1, title: 'migrate_ServerDerivedFields', status: IssueStatus.Active }),
+    makeIssue({ inum: 2, title: 'migrate_SessionCredentials', status: IssueStatus.Active }),
+    makeIssue({ inum: 3, title: 'rate_limiting_design', status: IssueStatus.Awaiting }),
+    makeIssue({ inum: 4, title: 'payload_encryption_flow', status: IssueStatus.Awaiting }),
+    makeIssue({ inum: 5, title: 'docker_healthcheck', status: IssueStatus.Awaiting }),
+    makeIssue({ inum: 6, title: 'stale_session_cleanup', status: IssueStatus.Blocked }),
+    makeIssue({ inum: 7, title: 'legacy_api_removal', status: IssueStatus.Deferred }),
+    makeIssue({ inum: 8, title: 'initial_setup_task', status: IssueStatus.Resolved }),
 ];
 
 const UNREAD_INUMS = new Set([3, 6]);

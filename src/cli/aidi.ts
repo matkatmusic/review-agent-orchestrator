@@ -6,6 +6,7 @@ import { DB } from '../db/database.js';
 import * as issues from '../db/issues.js';
 import * as responses from '../db/responses.js';
 import * as deps from '../db/dependencies.js';
+import { IssueStatus } from "../types.js"
 
 const program = new Command();
 
@@ -116,7 +117,7 @@ program
                 // Only set status to Blocked if the issue is actually blocked
                 // (blocker may already be Resolved, making the dependency inactive)
                 if (deps.isBlocked(db, inum)) {
-                    issues.updateStatus(db, inum, 'Blocked');
+                    issues.updateStatus(db, inum, IssueStatus.Blocked);
                 }
             });
             process.stdout.write(`I${inum} is now blocked by I${opts.by}\n`);
