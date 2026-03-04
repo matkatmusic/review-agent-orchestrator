@@ -126,7 +126,9 @@ class App extends React.Component<AppProps> {
                             columns={this.columns}
                             rows={this.rows}
                             containers={MOCK_CONTAINERS}
+                            allIssues={MOCK_ISSUES}
                             onBack={() => this.goBackToPreviousView()}
+                            onNavigate={(view) => this.navigateToView(view)}
                             onQuit={() => this.props.onExit?.()}
                         />
                     );
