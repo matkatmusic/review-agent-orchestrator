@@ -1,0 +1,75 @@
+ANALYSIS OF THREADED MESSAGE SPEC
+
+======================================================================
+1. FEASIBILITY
+======================================================================
+
+Implementable, but the spec has a fundamental structural problem: it proposes an in-memory linked-list data structure while the existing system uses a flat SQL table for persistence. The gap between these two worlds is where almost all the difficulty lives.
+
+Hardest parts, in order:
+
+(a) Paragraph splitting with structural integrity. Splitting agent messages on blank lines while preserving code fences is straightforward as a string operation. But once you split a single response row into two separate linked-list nodes, you have created virtual entities that do not exist as rows in the responses table. The spec does not address how these paragraph nodes are identified, stored, or referenced. Either paragraph nodes need their own table or the paragraph index within a parent response needs to be part of the addressing scheme. Neither is specified.
+
+(b) Mapping the linked-list to SQLite. The current schema has a flat responses table with (id, inum, author, type, body, created_at). There are no foreign key self-references, no parent_id, no sequence pointers. The spec's Response node has three pointers (responding_to, response, reply) which would need to become columns or a separate join table. The spec says nothing about schema migration.
+
+(c) TUI rendering of nested threads in a terminal. The current ResponseContainer renders a flat list of messages with box-drawing characters. Adding depth means indentation, which eats into already constrained horizontal space. At 80 columns, three levels of nesting at 4 chars per level leaves 64 chars of usable width. At deeper nesting on narrower terminals it becomes unusable.
+
+(d) Agent awareness of threads. The spec does not describe how the AI agent knows which paragraph it should respond to, or how its response gets routed to the correct thread node.
+
+======================================================================
+2. DATA STRUCTURE ANALYSIS
+======================================================================
+
+The linked-list with three pointers is essentially a "left-child, right-sibling" tree encoding. It is a poor fit for this use case.
+
+Cons of the linked list approach:
+- Single-pointer chains mean "Add Response to Response" OVERWRITES the existing .response pointer. This is a data loss bug.
+- Same overwrite problem for .reply. Multiple reply threads from the same node are impossible.
+- Linked lists are painful to query in SQL. Recursive CTEs are needed and not ergonomic for this shape.
+- Insertion in the middle requires multi-row transactions.
+
+RECOMMENDATION: Use adjacency list (parent_id) approach. Requires minimal schema change, avoids overwrite bugs, naturally supports multiple replies to the same paragraph, and query patterns are straightforward.
+
+For paragraphs: keep the response body intact in the database, compute paragraph boundaries at render time. Use (response_id, paragraph_index) as a composite key to identify reply targets.
+
+======================================================================
+3. FLAWS AND AMBIGUITIES
+======================================================================
+
+(a) THE OVERWRITE BUG (Critical): Setting .response or .reply on a node that already has one orphans the existing chain. No insertion logic is specified.
+
+(b) PARAGRAPH IDENTITY IS UNDEFINED: After splitting, where do paragraphs live? Are they separate Response nodes? If so, who is their responding_to? The spec treats Response.content.body as a single message while simultaneously treating individual paragraphs as reply targets.
+
+(c) SPEC TYPES VS EXISTING TYPES: The spec defines new types (Message, Response, Issue) that are incompatible with the existing types.ts. The spec's Issue has "body: Response" making the issue description itself a Response node, while the existing system stores description as a plain string.
+
+(d) "TRAVERSE TO END" IS O(n): With an adjacency list, appending is O(1).
+
+(e) USER MESSAGES NEVER SPLIT: But what if an agent wants to reply to a specific part of a long user message? The asymmetry may be intentional but is not justified.
+
+(f) THREAD DISPLAY LOGIC IS INCOMPLETE: No sibling traversal. If there are three separate replies to a paragraph, you can only see one reply chain.
+
+(g) AGENT THREADING PROTOCOL: Completely unspecified.
+
+======================================================================
+4. TUI/UX CONCERNS
+======================================================================
+
+(a) No visual affordance telling the user "this paragraph has a reply thread" or "you can reply to this paragraph."
+(b) Unlimited nesting + Tab/Enter/Esc creates a hard-to-follow state machine. Needs breadcrumb/depth indicator.
+(c) Indentation eats horizontal space. Consider full-width drill-down views instead.
+(d) Tab conflict with existing DetailView header field cycling.
+(e) Missing keybindings for: reply to paragraph, expand/collapse thread, navigate between paragraphs, jump to next unread reply.
+(f) Scroll state preservation across thread navigation is unspecified.
+
+======================================================================
+5. SUGGESTIONS
+======================================================================
+
+(a) Use adjacency list: ALTER TABLE responses ADD COLUMN parent_response_id, parent_paragraph_index.
+(b) Keep paragraph splitting as a render concern, not a data concern.
+(c) Use full-width drill-down model for threads, reusing existing viewStack pattern.
+(d) Show reply count indicators on paragraphs in the parent view.
+(e) Consider limiting nesting to one level (flat reply list per paragraph).
+(f) Define agent threading protocol with reply-to headers.
+(g) Reconcile spec types with existing types.ts.
+(h) Add a shared splitIntoParagraphs() utility function.

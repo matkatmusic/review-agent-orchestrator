@@ -1,0 +1,158 @@
+MESSAGE THREADS DESIGN — THREE-WAY REVIEW SYNTHESIS
+====================================================
+
+All three reviewers (Gemini, Codex, Claude) converge on the same core findings.
+Areas of unanimous agreement are listed first, followed by unique insights.
+
+
+UNANIMOUS: THE LINKED LIST DATA STRUCTURE IS WRONG
+---------------------------------------------------
+All three reviewers independently identified the same critical flaw:
+
+The Response node's single .response and .reply pointers CANNOT support
+multiple children. "Add Response to Response" overwrites the existing
+.response pointer, orphaning everything after it. Same for .reply —
+you cannot have two separate reply threads branching from the same paragraph.
+
+All three recommend the ADJACENCY LIST approach (parent_id column) instead:
+  - Gemini: "Add parent_id INTEGER NULL to the responses SQLite table"
+  - Codex: "Replace linked-list node model with SQL adjacency list (parent_comment_id)"
+  - Claude: "ALTER TABLE responses ADD COLUMN parent_response_id, parent_paragraph_index"
+
+This is the single most important takeaway. The linked list design is
+fundamentally broken for a system where multiple replies to the same
+target must coexist.
+
+
+UNANIMOUS: PARAGRAPH IDENTITY IS A CRITICAL GAP
+------------------------------------------------
+All three identified that the spec does not define how paragraphs are
+identified or whether they are stored as separate database rows.
+
+  - Gemini: "Pre-compute paragraphs at ingest and insert as individual rows
+    linked to a parent Message Group ID" OR treat them as render-time splits
+  - Codex: "No stable paragraph identity is defined. Edits/reformatting can
+    reindex paragraphs and orphan/misattach threads"
+  - Claude: "Keep paragraph splitting as a render concern. Use
+    (response_id, paragraph_index) as a composite key"
+
+Two approaches emerged:
+  A) Store paragraphs as separate DB rows at ingest time (Gemini, Codex lean)
+  B) Compute at render time, reference by index (Claude leans)
+
+Option A is more robust if content is ever edited. Option B is simpler and
+avoids phantom rows. Since agent responses are immutable once stored (agents
+don't edit past responses), Option B is likely sufficient.
+
+
+UNANIMOUS: AGENT THREADING PROTOCOL IS UNSPECIFIED
+--------------------------------------------------
+All three flagged that the spec says nothing about how the AI agent:
+  - Knows which paragraph it should respond to
+  - Addresses its response to a specific thread
+  - Decides between top-level reply vs in-thread reply
+
+Claude's suggestion: require the agent to emit a reply-to header like
+  [reply-to: response_id=5, paragraph=2]
+which the orchestrator parses and routes.
+
+Codex's suggestion: "Agent replies to currently open thread if in thread view;
+otherwise replies at top level."
+
+
+UNANIMOUS: UX NEEDS BREADCRUMBS AND DEPTH INDICATORS
+-----------------------------------------------------
+All three identified that "unlimited nesting depth" with no depth indicator
+will disorient users.
+
+  - Gemini: "No mention of UI breadcrumbs. Users will get lost."
+  - Codex: "Needs breadcrumb and depth marker (Issue #12 > Msg 8 > P2 > Reply 4)"
+  - Claude: "Show breadcrumb: I-3 > Response #2 > Paragraph 1 > Thread"
+
+
+UNANIMOUS: TAB OVERLOADING / ENTER OVERLOADING
+-----------------------------------------------
+  - Codex: "Enter is overloaded (send vs open thread); high risk of
+    accidental send/open"
+  - Claude: "Tab conflicts with existing DetailView header field cycling"
+  - Gemini: "Focus Traps — If you rely on Tab to escape the input, users might
+    find it frustrating"
+
+Codex suggests defining explicit input modes: Compose vs Action.
+
+
+UNANIMOUS: SPEC TYPES DO NOT MATCH EXISTING TYPES
+--------------------------------------------------
+The spec defines Message, Response, Issue types that are incompatible with
+the existing types.ts. All three note the spec appears to be a green-field
+design that ignores the current schema and type system.
+
+
+UNIQUE INSIGHTS BY REVIEWER
+============================
+
+GEMINI UNIQUE:
+  - The "2 sentences per paragraph" rule (still in TODO at line 5) contradicts
+    the later "split on blank lines" criteria. Drop the sentence-based rule.
+  - Suggested alternative to paragraph splitting: let the user select text
+    and insert it as a Markdown blockquote in a reply. This avoids the
+    entire paragraph identity problem.
+  - Paragraph splitting will increase vertical height of the chat even when
+    no one replied, causing excessive scrolling.
+
+CODEX UNIQUE:
+  - Proposed a more granular schema with separate tables:
+    messages (timeline), message_segments (paragraph anchors),
+    thread_comments (threaded replies), thread_read_state (per-thread read tracking)
+  - Identified that color-only indicators (red bold) are fragile in low-color
+    terminals — add textual markers (NEW, counts)
+  - Noted the thread display traversal only walks .response, never .reply,
+    so replies added via .reply may never actually render
+  - Suggested a visual depth rendering cap (e.g., 4 levels) while preserving
+    unlimited depth in data
+
+CLAUDE UNIQUE:
+  - Recommended reusing the existing viewStack/overlay pattern from app.tsx
+    for thread drill-down, rather than inventing a new navigation system
+  - Suggested full-width drill-down views instead of inline indentation,
+    which sidesteps the horizontal space problem entirely
+  - Pointed out that "traverse to end of response chain" is O(n) while
+    adjacency list insertion is O(1)
+  - Recommended limiting nesting to one level initially (flat reply list
+    per paragraph) since two-party conversations rarely need deeper nesting
+  - Provided concrete schema migration: just ADD COLUMN parent_response_id
+    and parent_paragraph_index to existing responses table
+  - Identified scroll state preservation across thread navigation as
+    an unspecified requirement
+
+
+RECOMMENDED PATH FORWARD
+=========================
+
+1. DROP the linked-list data structure. Use adjacency list with two new
+   columns on the existing responses table:
+     parent_response_id INTEGER REFERENCES responses(id)
+     parent_paragraph_index INTEGER
+
+2. KEEP paragraph splitting as a render-time computation (not stored rows).
+   Create a shared splitIntoParagraphs(body) utility. Reference paragraphs
+   by (response_id, paragraph_index).
+
+3. USE the existing viewStack drill-down pattern for thread navigation.
+   When the user presses a key on a paragraph, push a ThreadView onto the
+   stack. Full-width rendering, breadcrumb at top, Esc pops back.
+
+4. START with one level of nesting (flat reply list per paragraph).
+   Add deeper nesting later if the use case demands it.
+
+5. DEFINE an agent threading protocol so the orchestrator knows where to
+   route agent responses.
+
+6. ADD breadcrumbs to the thread view header.
+
+7. RECONCILE the spec types with the existing types.ts — extend Response
+   with parent_response_id and parent_paragraph_index rather than
+   introducing new incompatible types.
+
+8. DROP the "2 sentences per paragraph" rule. Stick to blank-line splitting
+   with code fence preservation.

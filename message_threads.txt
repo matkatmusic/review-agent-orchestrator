@@ -1,0 +1,290 @@
+TODO: 
+
+paragraph reply threads:
+- split long agent messages into paragraphs that can be replied to.
+ - split criteria: 2 sentences per paragraph.
+
+[agent_msg] 
+    [reply]
+[agent_msg] 
+    |--[user_reply]
+    |      |--[agent_reply]
+    |      |--[user_reply]
+    |      |--[agent_reply]
+    |--[agent_reply]
+    |      |--[user_reply]
+    |      |--[agent_reply]
+    |--[user_reply]
+    |      |--[agent_reply]
+    |      |--[user_reply]
+    |      |--[agent_reply]
+    [user_reply]
+    [agent_reply]
+[agent_msg]
+
+
+implementation: 
+Issues are represented as a Tree structure
+Agent messages are split into paragraphs. Each paragraph is a node in the tree.
+Each Issue Response is a node in the tree.
+An issue response 
+
+[Issue]
+    [Agent Message]
+        [Paragraph 1]
+            |--[user_reply]
+            |--[agent_reply]
+            |--[user_reply]
+            |--[agent_reply]
+        [Paragraph 2]
+        [Paragraph 3]
+    [User Reply]
+    [Agent Reply]
+        [Paragraph 1]
+        [Paragraph 2]
+    [User Reply]
+        [Paragraph 1]
+        [Paragraph 2]
+        [Paragraph 3]
+    [Agent Reply]
+        [Paragraph 1]
+        [Paragraph 2]
+    [User Reply]
+    [Agent Reply]
+
+TUI Detail View: Message Response format: 
+When: (message.selected == false && message.reply_thread == null)
+|- <author> - <tag> - <timestamp> ------------|
+| <body>                                      |
+|---------------------------------------------|
+
+When: (message.selected == false && message.reply_thread != null)
+|- <author> - <tag> - <timestamp> ---[# replies]|
+| <body>                                      |
+|---------------------------------------------|
+
+When: (message.selected == false && message.reply_thread != null && message.hasNewReplies == true ): 
+|- <author> - <tag> - <timestamp> ----[# new replies]|
+| <body>                                      |
+|---------------------------------------------|
+
+when: (message.selected == true && message.reply_thread == null )
+|- <author> - <tag> - <timestamp> ------------|
+| <body>                                      |
+|                         [add threaded reply]|
+|---------------------------------------------|
+
+when: (message.selected == true && message.reply_thread != null )
+|- <author> - <tag> - <timestamp> ---[# replies]|
+| <body>                                      |
+|                               [view replies]|
+|---------------------------------------------|
+
+when: (message.selected == true && message.reply_thread != null && message.hasNewReplies == true)
+|- <author> - <tag> - <timestamp> ----[# new replies]|
+| <body>                                      |
+|                               [view replies]|
+|---------------------------------------------|
+
+How a thread is displayed: 
+|- <author> - <tag> - <timestamp> ------------|
+| <body>                                      |
+|                         [add threaded reply]|
+|---------------------------------------------|
+
+|---------------------------------------------|
+|--<author> - <tag> - <timestamp> ------------|
+| <body>                                      |
+|                         [add threaded reply]|
+|---------------------------------------------|
+
+|--<author> - <tag> - <timestamp> ------------|
+| <body>                                      |
+|                         [add threaded reply]|
+|---------------------------------------------|
+Add a reply > [ <text_input> ]
+[Enter] send  [^v] Scroll  [Esc] exit thread
+
+Response container logic: 
+if( message.isSelected )
+    draw white border around the message container
+    in header: draw author & timestamp in white bold  
+    in header: draw response type in yellow bold. 
+    in center: draw message.body.
+    if( message.reply_thread == null )
+        in message footer:
+            show [add threaded reply] button in bottom right
+    else
+        in header: 
+            if( message.reply_thread.hasNewRepliesSinceLastView == true )
+                show [# new replies] in red bold
+            else
+                show [# replies] in white bold
+        in message footer: 
+            show [view replies] button in bottom right
+else 
+    draw {color} around message container
+    in header: draw author & responseType and timestamp with color={color}
+    in center: draw message.body with color={color}
+    if( message.reply_thread != null )
+        in header: if( message.reply_thread.hasNewRepliesSinceLastView == true )
+                show [# new replies] with color={red bold}
+            else
+                show [# replies] with color={color}
+        
+                 
+<Paragraph splitting criteria> 
+- split on blank lines
+- code fences are never split. 
+- User messages are never split into paragraphs. 
+</Paragraph splitting criteria> 
+
+<Activating the buttons> 
+- in Thread View (different from Detail View), the view header only shows: 
+
+    - <inum> <title> 
+------------------------------------------
+[msg_agent  <# replies>]
+[msg_user]
+[msg_agent]
+------------------------------------------
+Respond > [ <text_input> ]
+[Enter] send  [^v] Scroll [tab] Respond/view thread [Esc] exit thread
+Pressing TAB moves the cursor between the text input and the [view/create thread] button on the selected message. 
+    pressing [enter] on the [view/create thread] button opens the thread view for that thread. 
+</Activating the buttons>
+
+<Thread nesting depth>
+- unlimited
+- pressing Enter when 'view thread' or 'add threaded reply' button is selected changes view to that thread.
+</Thread nesting depth>
+
+------------------------------------------
+a data structure to represent a message thread: 
+<Data Structures>
+Message
+{
+    author: string
+    body: string
+    timestamp: datetime
+    seen: datetime | null
+}
+
+Response //a node in a linked list
+{
+    content: Message
+    responding_to: Response | null //(previous message in chain)
+    response: Response | null //down arrow (next message in chain)
+    replying_to: Response | null //(parent of this thread)
+    reply: Response | null //right arrow (reply to this message)
+}
+
+Issue
+{
+    inum: number
+    group: string
+    blocked_by: Issue[]
+    blocks: Issue[]
+    body: Response //a linked list root node
+}
+</Data Structures>
+
+<Issue Creation> 
+- create a Message message = {
+    .author = agent | user
+    .body = <the text> 
+    .timestamp = now()
+    .seen = null
+}
+- Create a Response response = {
+    .content = message,
+    .responding_to = null
+    .response = null
+    .reply = null
+}
+- create an Issue issue = {
+    .inum = <the number>,
+    .group = "",
+    .block_by = []
+    .blocks = []
+    .body = response
+}
+</Issue Creation> 
+
+<Add Response to Issue>
+- find the last Response node in the issue: 
+lastResponseNode = issue.body
+while( lastResponseNode != null )
+    if( lastResponseNode.response == null )
+        break;
+    lastResponseNode = lastResponseNode.response 
+- create a Message message = {
+    .author = agent | user
+    .body = <the text> 
+    .timestamp = now()
+    .seen = null
+}
+- Create a Response new_response = {
+    .content = message,
+    .responding_to = the end of the Response linked-list
+    .response = null
+    .reply = null
+}
+- add the new_response to the lastResponseNode. 
+lastResponseNode.response = new_response
+</Add Response to Issue>
+
+<Add Response to Response>
+- create a Message message = {
+    .author = agent | user
+    .body = <the text>
+    .timestamp = now()
+    .seen = null
+}
+- Create a Response new_response = {
+    .content = message,
+    .responding_to = the Response being responded to
+    .response = null
+    .reply = null
+}
+- append to the end of the response chain:
+    lastNode = theResponseBeingRespondedTo
+    while( lastNode.response != null )
+        lastNode = lastNode.response
+    lastNode.response = new_response
+</Add Response to Response>
+
+<Add Reply to Response>
+- create a Message message = {
+    .author = agent | user
+    .body = <the text>
+    .timestamp = now()
+    .seen = null
+}
+- create a Response new_response = {
+    .content = message,
+    .responding_to = the Response being replied to
+    .response = null
+    .reply = null
+}
+- if theResponseBeingRepliedTo.reply == null:
+    theResponseBeingRepliedTo.reply = new_response
+  else:
+    // reply chain already exists — append to its tail
+    lastNode = theResponseBeingRepliedTo.reply
+    while( lastNode.response != null )
+        lastNode = lastNode.response
+    lastNode.response = new_response
+</Add Reply to Response>
+
+
+<Displaying a Reply thread> 
+- get 'responding_to' Response from selected message, show 'responding_to' first. 
+- show selected message next 
+- then: 
+    - next = selected.response
+    while( next != null ) //show all direct responses by traversing the response linked list. 
+        show next
+        next = next.response
+</Displaying a Reply thread>
+        
