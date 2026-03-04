@@ -100,6 +100,8 @@ export class Dashboard extends React.Component<DashboardProps> {
             this.moveCursor(1, this.filteredLength);
         } else if (key.upArrow || input === 'k') {
             this.moveCursor(-1, this.filteredLength);
+        } else if (key.tab) {
+            this.cycleTab(key.shift ? -1 : 1);
         }
     };
 
