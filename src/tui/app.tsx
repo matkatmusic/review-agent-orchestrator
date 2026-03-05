@@ -150,7 +150,7 @@ class App extends React.Component<AppProps> {
                             initialSelectedMessage={this.savedSelectedMessage.get(inum)}
                             onBack={(sel) => this.saveSelectedAndGoBack(inum, sel)}
                             onHome={(sel) => this.saveSelectedAndGoHome(inum, sel)}
-                            onSend={(msg) => { /* TODO: wire to backend */ }}
+                            onSend={() => {}}
                             onNavigateIssue={(inumTo) => this.replaceCurrentView({ type: ViewType.Detail, inum: inumTo })}
                             onQuit={() => this.props.onExit?.()}
                             onThreadStateChange={(info) => {

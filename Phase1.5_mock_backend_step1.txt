@@ -27,8 +27,8 @@ Make a currently missing view load by default. Interact with it, identify missin
   - [O:E1] broken feature: pressing tab in text input in a Thread View moves the cursor somewhere outside of the text input, causing it to disappear.  pressing tab again moves the cursor back to the text input.
   - [ ] broken feature: [^R] Resolve: should say "Resolve Thread", change hotkey to Ctrl Shift r
   - [ ] broken feature: [r] resolve issue: issue not resolved when cursor is in text input. Change to Ctrl r
-  - [O:E2] broken feature: adding a response in a thread doesn't create a new response in the thread view, and doesn't update the mock data json.
-  - [O:E2] broken feature: adding a response in an issue doesn't create a new response in the issue view, and doesn't update the mock data json. 
+  - [x] broken feature: adding a response in a thread doesn't create a new response in the thread view, and doesn't update the mock data json.
+  - [x] broken feature: adding a response in an issue doesn't create a new response in the issue view, and doesn't update the mock data json.
   - [ ] UX change: Thread resolution hotkey functionality: hot key toggles thread resolution state (resolved/unresolved).  Footer text updates accordingly. 
   - [O:E3] UX change: Response Type tag text should not be bold. 
   - [O:E3] UX Change: 'view replies (# √)' should not be bold. 

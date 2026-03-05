@@ -1,0 +1,122 @@
+RESPONSE TO: Research and propose the best implementation approach for wiring up response submission in a React/Ink TUI app backed by a JSON mock data store.
+
+1. RECOMMENDED APPROACH (WITH RATIONALE)
+
+The mutation logic should live primarily in DetailView, with a thin coordination layer in App. Here is why.
+
+The fundamental tension in the current design is that onSend is defined in App but the thread context -- whether we are appending to the main chain or a thread reply chain, and which node is the thread parent -- lives inside DetailView's internal threadStack. There are three ways to bridge this gap, and only one of them keeps the architecture clean.
+
+Option A (rejected): Lift threadStack into App. This would mean moving a large amount of DetailView-specific UI state (thread navigation, saved cursor positions, overlay state) up into App. App already has a threadInfo object that receives state changes from DetailView, but that object is a read-only summary for the header display -- it does not contain the actual Response node references. Promoting the full thread stack into App would couple App to response chain traversal logic, violating the current separation where App handles view navigation and DetailView handles response chain display.
+
+Option B (rejected): Pass thread context into onSend. Change the onSend signature from (message: string) => void to (message: string, context: { threadParent: Response | null }) => void. This is workable but still puts the linked list mutation logic in App, which has no business knowing about response chain structure. App is a view router. It should not be walking linked lists.
+
+Option C (recommended): Replace onSend with an onSubmit that DetailView handles internally. DetailView already has access to everything it needs: the threadStack, the rootResponse, the linked list structure, and via imports, the MockStore. DetailView should own the full mutation. App's role reduces to providing the inum (which it already does via props) and potentially a callback to notify that data changed (for cross-view cache invalidation later, though unnecessary today since mock-data.ts exports mutable singletons).
+
+The concrete pattern: DetailView's handleInputSubmit method, which already calls this.props.onSend(value.trim()), should instead call a local method like this.submitResponse(value.trim()). That method creates the Response node, appends it to the correct chain, persists via saveMockStore(), and calls forceUpdate(). The onSend prop can either be removed entirely or kept as an optional notification callback (App might want to know a message was sent for future features like marking an issue unread).
+
+Why this is correct: The Response linked list is already mutated in-place by DetailView for thread resolution (resolveThread() directly sets thread_resolved_at on the node). The submitResponse operation is the same category of in-place mutation. Putting it in the same place that already does similar mutations is the principle of locality.
+
+2. PSEUDOCODE / CODE SKETCH
+
+In detail.tsx, add a new method to the DetailView class:
+
+    submitResponse(body: string) {
+        const store = getMockStore();
+        const id = getNextResponseId(store);
+        const now = new Date().toISOString();
+
+        const newResponse: Response = {
+            id,
+            content: {
+                author: AuthorType.User,
+                type: ResponseType.None,
+                body,
+                timestamp: now,
+                seen: now,
+            },
+            responding_to: null,
+            response: null,
+            replying_to: null,
+            reply: null,
+            is_continuation: false,
+            thread_resolved_at: null,
+        };
+
+        const isInThread = this.threadStack.length > 0;
+
+        if (isInThread) {
+            const threadParent = this.threadStack[this.threadStack.length - 1].parent;
+            let last = threadParent.reply;
+            if (!last) {
+                threadParent.reply = newResponse;
+                newResponse.replying_to = threadParent;
+            } else {
+                while (last.response) {
+                    last = last.response;
+                }
+                last.response = newResponse;
+                newResponse.responding_to = last;
+                newResponse.replying_to = threadParent;
+            }
+        } else {
+            if (!this.props.rootResponse) {
+                const detail = MOCK_DETAIL_DATA[this.props.inum];
+                if (detail) {
+                    detail.rootResponse = newResponse;
+                }
+            } else {
+                let last: Response = this.props.rootResponse;
+                while (last.response) {
+                    last = last.response;
+                }
+                last.response = newResponse;
+                newResponse.responding_to = last;
+            }
+        }
+
+        saveMockStore();
+        const messages = this.currentMessages();
+        this.selectedMessage = messages.length - 1;
+        this.forceUpdate();
+        this.props.onSend?.(body);
+    }
+
+Then modify handleInputSubmit:
+
+    handleInputSubmit = (value: string) => {
+        if (this.focusedField !== null) {
+            this.openOverlayForField();
+            return;
+        }
+        if (value.trim()) {
+            this.submitResponse(value.trim());
+        }
+        this.inputValue = '';
+        this.forceUpdate();
+    };
+
+In app.tsx, the onSend prop becomes optional notification.
+
+3. EDGE CASES AND PITFALLS
+
+A. The replying_to pointer on non-first thread replies -- every node in a reply chain should have replying_to set to the thread parent, not just the first one.
+
+B. Empty rootResponse -- need to mutate MOCK_DETAIL_DATA directly. Props won't update until App re-renders. Two solutions: (i) onDataChanged callback, or (ii) local rootResponse override in DetailView.
+
+C. Cursor positioning -- selectedMessage = messages.length - 1 after mutation.
+
+D. seen field -- set to current timestamp since user saw what they wrote.
+
+E. Concurrent forceUpdate calls -- harmless, React batches them.
+
+F. ResponseChain viewport anchor -- preserved correctly for append operations.
+
+G. File I/O on every submit -- synchronous write is fine for mock store.
+
+4. WHERE TO PUT THE MUTATION LOGIC
+
+Put it in DetailView (detail.tsx) as a method on the class:
+- detail.tsx / submitResponse(): Creates node, links, persists, updates cursor
+- app.tsx / onSend: Optional notification, no-op for now
+- mock-store.ts / mock-data.ts: No changes needed
+- Do NOT create a separate service module -- premature abstraction

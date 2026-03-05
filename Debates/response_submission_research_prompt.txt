@@ -1,0 +1,35 @@
+TASK: Research and propose the best implementation approach for wiring up response submission in a React/Ink TUI app backed by a JSON mock data store.
+
+CONTEXT:
+- This is a terminal UI (TUI) built with React + Ink (ink npm package)
+- Data is stored in a JSON file (mock-data.json) and loaded into a singleton MockStore
+- The UI has a DetailView that shows an issue's response chain (linked list of Response nodes)
+- Users can type responses in an InputBox and press Enter to submit
+- The DetailView has a threadStack - when in a thread, responses should be added to the thread chain; when on the main chain, responses go to the main chain
+
+CURRENT STATE:
+- The onSend callback in app.tsx is a no-op: `onSend={(msg) => { /* TODO: wire to backend */ }}`
+- MockStore has: getNextResponseId(store), saveMockData(store), loadMockData()
+- Response is a linked list node with: id, content (Message), responding_to, response, replying_to, reply, is_continuation, thread_resolved_at
+- Message has: author, type, body, timestamp, seen
+- DetailView tracks threadStack - array of ThreadStackEntry { parent: Response, savedSelectedIndex: number }
+- DetailView.currentMessages() returns the flattened array for the current view (thread or main chain)
+- The mock-data module exports: MOCK_DETAIL_DATA (keyed by inum), getMockStore(), saveMockStore()
+
+KEY QUESTION: When the user submits a response, we need to:
+1. Create a new Response node with a unique ID from getNextResponseId()
+2. Append it to the END of the correct chain (main chain or thread reply chain)
+3. Persist to JSON via saveMockStore()
+4. Trigger a re-render so the new response appears immediately
+
+SPECIFIC CHALLENGES TO ADDRESS:
+A. The onSend callback is in app.tsx but the thread context (whether we're in a thread, which thread parent) is in DetailView's internal state. How should we pass this context?
+B. To append to the end of a linked list, we need to walk to the last node. What's the cleanest way?
+C. After mutating the Response linked list in-place, how do we trigger React re-render? (The component uses forceUpdate)
+D. Should the response type default to "none" for user submissions, or should there be a type selector?
+
+Please provide:
+1. Your recommended approach (with rationale)
+2. Pseudocode or code sketch for the implementation
+3. Any edge cases or pitfalls to watch for
+4. Whether you'd put the mutation logic in app.tsx, detail.tsx, or a separate service

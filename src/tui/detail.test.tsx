@@ -7,6 +7,21 @@ import type { Issue, Response, Message } from '../types.js';
 import { IssueStatus, ResponseType, AuthorType } from '../types.js';
 import { createMessage, buildResponseChain, buildMixedChain } from './thread-builders.js';
 
+let mockNextId = 100;
+vi.mock('./mock-data.js', () => ({
+    getMockStore: () => ({ nextResponseId: mockNextId }),
+    saveMockStore: vi.fn(),
+    MOCK_DETAIL_DATA: {} as Record<number, unknown>,
+}));
+vi.mock('./mock-store.js', () => ({
+    getNextResponseId: (store: { nextResponseId: number }) => {
+        const id = store.nextResponseId;
+        store.nextResponseId = id + 1;
+        mockNextId = store.nextResponseId;
+        return id;
+    },
+}));
+
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 
@@ -214,10 +229,10 @@ describe('DetailView', () => {
         expect(lastFrame()).toContain('>');
     });
 
-    it('calls onSend when Enter is pressed with text', async () => {
-        const onSend = vi.fn();
+    it('appends a response to the chain when Enter is pressed with text', async () => {
+        const { root } = buildResponseChain(TEST_MESSAGES);
         const { stdin } = render(
-            <DetailView {...defaultProps} onSend={onSend} />
+            <DetailView {...defaultProps} rootResponse={root} />
         );
         await tick();
 
@@ -226,20 +241,31 @@ describe('DetailView', () => {
         stdin.write('\r');
         await tick();
 
-        expect(onSend).toHaveBeenCalledWith('hello');
+        // Walk to the end of the chain and verify the new response
+        let last: Response = root;
+        while (last.response) last = last.response;
+        expect(last.content.body).toBe('hello');
+        expect(last.content.author).toBe(AuthorType.User);
+        expect(last.content.type).toBe(ResponseType.None);
+        expect(last.responding_to).not.toBeNull();
     });
 
-    it('does not call onSend for empty input', async () => {
-        const onSend = vi.fn();
+    it('does not append a response for empty input', async () => {
+        const { root, nodes } = buildResponseChain(TEST_MESSAGES);
+        const originalLength = nodes.length;
         const { stdin } = render(
-            <DetailView {...defaultProps} onSend={onSend} />
+            <DetailView {...defaultProps} rootResponse={root} />
         );
         await tick();
 
         stdin.write('\r');
         await tick();
 
-        expect(onSend).not.toHaveBeenCalled();
+        // Chain length should be unchanged
+        let count = 0;
+        let cur: Response | null = root;
+        while (cur) { count++; cur = cur.response; }
+        expect(count).toBe(originalLength);
     });
 
     // ---- Edge cases ----
