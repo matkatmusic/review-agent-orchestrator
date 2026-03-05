@@ -1,0 +1,493 @@
+DEBATE ANALYSIS: Serializing Threaded Issue Conversations into issue.md
+=======================================================================
+Analyst: Backend System Architect (claude-opus-4-6)
+Date: 2026-03-05
+
+
+PRELIMINARY NOTES
+-----------------
+
+Before addressing the 8 questions, I want to establish the key design
+tension at play: issue.md serves as the sole interface between the
+orchestrator and the agent. It must be both a complete state transfer
+document and a readable conversational context. These goals sometimes
+conflict -- completeness wants everything included, readability wants
+noise removed. Every recommendation below navigates this tension.
+
+I also note that the current DB schema (responses.ts) does not yet have
+responding_to_id or replying_to_id columns in the actual INSERT
+statements, though the types.ts ResponseRow interface defines them. The
+aidi CLI's respond command also does not support thread targeting. These
+are gaps that the implementation will need to address.
+
+
+========================================================================
+QUESTION 1: SERIALIZATION FORMAT
+========================================================================
+
+Recommendation: HYBRID -- Section-based with inline parent references
+(a combination of options b and c)
+
+My proposed format:
+
+    # I-7: migrate_ServerDerivedFields
+    Revision: 14
+    Status: Active
+    Blocked by: (none)
+    Blocks: I-14, I-15
+
+    --- New since your last read (revision 12) ---
+    - #11 [User] in Thread on #5: "there's a bug in your revision..."
+    - #12 [User] in Main: "also, please update the tests"
+    --- End new ---
+
+    === Main Conversation ===
+
+    [#1 Agent - Analysis - 2026-01-01 10:00]
+    I worked on the server-derived field migration...
+
+    [#2 User - 2026-01-01 10:30]
+    great, now work on the dual-write logic...
+
+    [#3 Agent - Implementation - 2026-01-01 11:00]
+    I completed work on the dual-write logic...
+
+    [#4 User - 2026-01-01 11:30]
+    can you change the field mapping...
+
+    [#5 Agent - Implementation - 2026-01-01 12:00]
+    I have implemented the change.
+
+    === Thread on #1 (Agent: "I worked on...") [3 messages] ===
+
+    [#6 User - 2026-01-01 10:15 -> reply to #1]
+    one minor tweak: ...
+
+    [#7 Agent - Fix - 2026-01-01 10:20 -> reply to #6]
+    Tweak implemented, please review.
+
+    [#8 User - 2026-01-01 10:25 -> reply to #7]
+    looks good.
+
+      --- Sub-thread on #7 (Agent: "Tweak implemented...") [2 messages] ---
+
+      [#9 User - 2026-01-01 10:22 -> reply to #7]
+      use an approach like this: ...
+
+      [#10 Agent - Fix - 2026-01-01 10:24 -> reply to #9]
+      user-preferred approach used, please review.
+
+    === Thread on #5 (Agent: "I have implemented...") [1 message] ===
+
+    [#11 User - 2026-01-01 12:15 -> reply to #5] [NEW]
+    there's a bug in your revision: ...
+
+
+Rationale:
+
+1. Section headers ("=== Thread on #N ===") give the agent an
+   unambiguous structural signal that it has left the main chain and
+   entered a thread. This eliminates the confusion risk that pure
+   indentation would create (indentation is fragile and easily lost
+   in text processing).
+
+2. Every message gets a stable numeric ID (#N) corresponding to its
+   database response.id. The "-> reply to #N" suffix on thread messages
+   makes the parent relationship explicit without requiring the agent
+   to infer it from position.
+
+3. The section header includes a truncated preview of the parent
+   message ("Agent: 'I worked on...'") so the agent can quickly
+   orient itself without scanning back to find #1.
+
+4. Nested threads get sub-sections with deeper header markers
+   ("--- Sub-thread on #N ---") and 2-space indentation. This handles
+   arbitrary nesting while keeping the format visually distinct at
+   each level.
+
+5. For issues with zero threads, this format degrades cleanly to
+   the original flat format (just the "=== Main Conversation ==="
+   section with sequential messages).
+
+Why NOT pure indentation (option a):
+  - LLMs process text sequentially. Indentation-based structure requires
+    the reader to track indentation state across potentially long
+    message bodies. A 20-line agent message followed by a 2-space
+    indent is easy to miss.
+  - Word-wrapped message bodies at different indentation levels make
+    width calculations fragile.
+
+Why NOT flat-with-metadata (option d):
+  - A flat sequential dump with "[Thread: parent_id]" markers forces
+    the agent to mentally reconstruct the tree structure from
+    interleaved messages. With multiple threads, messages from different
+    threads would be interleaved by timestamp, creating confusion.
+
+Why NOT purely inline references (option c alone):
+  - Inline references are necessary but not sufficient. Without section
+    grouping, thread messages scattered among main-chain messages are
+    hard to follow.
+
+
+========================================================================
+QUESTION 2: THREAD RENDERING
+========================================================================
+
+Recommendation: Show ALL threads fully expanded, with one exception --
+threads marked resolved get collapsed (see Question 6).
+
+Justification:
+
+1. The agent cannot query the DB. If a thread is omitted or summarized,
+   the agent permanently loses that context. When the user later
+   references something from a hidden thread ("remember what we said
+   about the tweak approach?"), the agent has no way to recover.
+
+2. Threads exist because the user considered the topic important enough
+   to create a side conversation. If the user then sends a message to
+   the main chain referencing thread context, the agent needs the full
+   thread to respond coherently.
+
+3. The concern about deeply nested threads being noise is real but
+   manageable. In practice, threads rarely nest more than 2-3 levels
+   (the Excalidraw diagram shows max 2 levels). The section-based
+   format makes it easy for the agent to skip over threads that are
+   not relevant to its current task -- the "=== Thread ===" headers
+   are clear section boundaries.
+
+4. Thread summaries (e.g., "Thread on #1: 3 messages about tweaking
+   the migration") would require the orchestrator to generate
+   meaningful summaries, which is either an LLM call per thread
+   (expensive, slow) or a naive truncation (lossy). Neither is
+   acceptable for the agent's sole context source.
+
+The scalability concern is addressed separately in Question 8, where
+older threads can be truncated as part of a broader recency window.
+
+
+========================================================================
+QUESTION 3: NEW MESSAGE INDICATORS
+========================================================================
+
+Recommendation: BOTH a summary section at the top AND per-message
+[NEW] markers (combination of options b and c).
+
+Justification:
+
+1. The "New since" summary at the top tells the agent immediately what
+   has changed, before it reads the full conversation. This is the
+   equivalent of the tmux signal but in-band, so the agent does not
+   need to parse the signal text.
+
+2. Per-message [NEW] markers in the body let the agent identify new
+   messages in context as it reads through the conversation. This is
+   important when a new message appears mid-thread -- the agent needs
+   to see it in its conversational position.
+
+3. Option (d) -- relying on agent memory -- is unreliable. The agent
+   may have been restarted, may have context window limitations, or
+   may have processed multiple issues between reads. Explicit markers
+   are deterministic.
+
+4. The "New since revision N" phrasing ties directly to the ack
+   mechanism. The agent reads, sees revision 14, and can
+   `aidi ack 7 14` to confirm.
+
+Why not ONLY option (a) -- a single separator line:
+  A separator works for a linear conversation (everything below the
+  line is new). But with threaded messages, new messages can appear
+  in different threads at different positions in the file. A single
+  separator cannot handle this.
+
+
+========================================================================
+QUESTION 4: DELTA vs FULL CONTEXT (tmux signal)
+========================================================================
+
+Recommendation: Structured signal with location hint.
+
+Signal format:
+    "I7:rev14:main" -- new message on main chain
+    "I7:rev14:thread#5" -- new reply in thread on message #5
+    "I7:rev14:multi" -- multiple new messages in different locations
+
+Justification:
+
+1. The agent re-reads the full file regardless, so the signal is a
+   hint, not a data source. But hints matter for attention allocation.
+   An agent that knows the new message is in "thread#5" can
+   efficiently scan to that section.
+
+2. The structured format (colon-delimited) is easy to parse
+   programmatically if the agent's prompt instructs it to do so.
+
+3. The revision number in the signal lets the agent immediately
+   verify it matches the file's revision header. If they mismatch
+   (file not yet written when signal arrived), the agent knows to
+   wait.
+
+4. The "multi" case avoids an explosion of signal complexity when
+   the user sends several messages at once (batch scenario).
+
+5. Keeping signals short is important because tmux send-keys has
+   practical length limits and the signal should be processable in
+   a single glance.
+
+
+========================================================================
+QUESTION 5: CONTINUATION HANDLING
+========================================================================
+
+Recommendation: Option (a) -- merge continuations back into the parent
+message in issue.md.
+
+The serialized output should show one logical message, not multiple
+response entries. Continuations are a DB-level concern (splitting long
+messages for the TUI's rendering/scrolling) and should be invisible
+to the agent.
+
+Implementation:
+
+When the orchestrator serializes, it walks the response chain. When it
+encounters a Response with is_continuation=true, it appends its body
+to the preceding non-continuation message's body with a double newline
+separator. The continuation's ID is not shown as a separate message
+entry. The merged message uses the original (non-continuation)
+message's ID, author, type, and timestamp.
+
+Example -- if the DB has:
+  #3 Agent - Implementation - "I completed the migration..."
+  #3a Agent - (continuation) - "Additionally, I refactored..."
+  #3b Agent - (continuation) - "Testing notes: ..."
+
+issue.md shows:
+  [#3 Agent - Implementation - 2026-01-01 11:00]
+  I completed the migration...
+
+  Additionally, I refactored...
+
+  Testing notes: ...
+
+Edge case: if a thread branches off a continuation message (#3a has
+a reply), the thread header should reference the root message ID
+(#3), not the continuation's internal ID. This means the orchestrator
+needs to resolve continuation IDs to their root message ID when
+building thread section headers.
+
+
+========================================================================
+QUESTION 6: THREAD RESOLUTION
+========================================================================
+
+Recommendation: Option (b) -- collapse to a one-line summary.
+
+Proposed format for resolved threads:
+
+    === Thread on #1 (Agent: "I worked on...") [RESOLVED - 3 messages] ===
+    (Resolved 2026-01-01 11:00. Last message: User: "looks good.")
+
+Justification:
+
+1. Option (a) -- omitting entirely -- is dangerous. If the agent
+   contributed to the thread and the resolution resulted in a code
+   change, the agent may need to remember what was decided. A one-line
+   summary preserves a breadcrumb.
+
+2. Option (c) -- including everything marked [RESOLVED] -- provides
+   no benefit over showing active threads. The point of resolution is
+   to signal "this conversation is finished." Showing all messages
+   wastes context window space on completed discussions.
+
+3. The one-line summary captures: (a) that the thread existed,
+   (b) when it was resolved, (c) the last message as a hint of the
+   outcome. This is enough for the agent to recall the context if
+   needed and know it does not require action.
+
+4. If the agent needs the full resolved thread content (rare), a
+   future command like `aidi read-thread <inum> <response_id>` could
+   fetch it. However, this conflicts with the design principle that
+   issue.md is the sole context source. I would defer this expansion
+   mechanism unless a concrete need arises.
+
+
+========================================================================
+QUESTION 7: AGENT RESPONSE TO THREADS
+========================================================================
+
+Recommendation: Option (a) -- extend the aidi CLI with --reply-to.
+
+New command signature:
+    aidi respond <inum> --reply-to <response_id> --type <type> "message"
+
+When --reply-to is provided:
+  - The new response's replying_to_id is set to <response_id>
+  - The orchestrator links it into the thread chain
+  - The new response does NOT appear on the main chain
+
+When --reply-to is omitted (backward compatible):
+  - Behavior is unchanged -- response goes on the main chain
+  - The new response's responding_to_id is set to the current last
+    main-chain message
+
+Justification:
+
+1. Option (c) -- agent always responds on main chain -- is a
+   non-starter for threaded conversations. If the user reports a bug
+   in thread #11 and the agent can only respond on the main chain,
+   the conversation becomes fragmented. The user sees the bug reply
+   on the main chain, not in the bug thread.
+
+2. Option (b) -- thread replies as a special response type -- overloads
+   the type field, which should describe the content nature (analysis,
+   implementation, fix), not the structural position (main vs thread).
+   Mixing structural and semantic metadata in the same field is a
+   modeling error.
+
+3. The --reply-to flag is explicit, unambiguous, and backward
+   compatible. The agent sees the response ID (#N) in issue.md and
+   can reference it directly.
+
+4. The issue.md format from Question 1 makes response IDs visible
+   and consistent. When the agent reads "[#11 User -> reply to #5]
+   there's a bug..." it can respond with
+   `aidi respond 7 --reply-to 11 --type fix "Fixed the bug..."`.
+
+Implementation note: the CLI should validate that the --reply-to ID
+belongs to the given inum. The responding_to_id (vertical chain
+linkage) should be computed by the orchestrator when it rebuilds the
+linked list, not set by the agent.
+
+
+========================================================================
+QUESTION 8: SCALABILITY
+========================================================================
+
+Recommendation: Option (d) -- configurable depth/recency window, with
+sensible defaults.
+
+Strategy:
+
+The orchestrator maintains a "serialization window" with configurable
+parameters:
+
+    issuemd.maxMainChainMessages: 30    (default)
+    issuemd.maxThreadMessages: 10       (default)
+    issuemd.alwaysIncludeNewMessages: true
+    issuemd.alwaysIncludeThreadRoots: true
+
+Serialization logic:
+
+1. Main chain: include the last N messages (default 30). If there are
+   older messages, prepend:
+
+       === Main Conversation ===
+       (... 20 earlier messages omitted. Earliest shown: #21)
+
+2. Threads: include threads whose parent message is within the
+   serialization window. For threads on omitted messages, include
+   only if they have [NEW] messages; otherwise omit them.
+
+3. Within each thread: include the last M messages (default 10).
+   Older messages get:
+
+       === Thread on #1 (...) ===
+       (... 12 earlier messages omitted in this thread)
+
+4. All messages marked [NEW] are ALWAYS included, even if they would
+   otherwise fall outside the window. The window shifts to accommodate
+   them.
+
+5. Thread root context: even when a thread is truncated, the first
+   message (the original reply that started the thread) is always
+   included, so the agent can understand what the thread is about.
+
+Justification:
+
+1. Option (a) -- full dump every time -- does not scale. 150 messages
+   with multi-paragraph agent responses could easily hit 50K+ tokens.
+
+2. Option (b) -- simple truncation -- loses too much context without
+   giving the agent a way to recover it.
+
+3. Option (c) -- only since last read -- is too aggressive. The agent
+   needs conversational context to understand new messages.
+
+4. The configurable window with defaults above handles the 150-message
+   scenario well. Token budget estimate: ~15,000 tokens for 30 main
+   chain messages, 10 active threads, 10 collapsed resolved threads,
+   plus formatting overhead. Well within Claude's context limits.
+
+
+========================================================================
+ADDITIONAL CONCERNS AND EDGE CASES
+========================================================================
+
+1. RACE CONDITION: AGENT WRITES WHILE ORCHESTRATOR REWRITES
+   The orchestrator should use a DB transaction to read all responses,
+   generate issue.md, bump issue_revision, and write atomically (write
+   to temp file, rename). The agent's ack should use the revision from
+   the file header.
+
+2. THREAD THAT BRANCHES OFF A CONTINUATION
+   The serializer must resolve continuations to their root message. A
+   thread on continuation #3b should appear as "Thread on #3" in the
+   serialized output.
+
+3. CIRCULAR REFERENCE PROTECTION
+   The serializer should have a visited-set guard to detect cycles in
+   the linked list and abort with an error log.
+
+4. EMPTY THREADS
+   Skip thread sections where the reply chain is empty.
+
+5. RESPONSE ID STABILITY
+   Response IDs are database auto-increment and must never be
+   reassigned. Document this as a constraint.
+
+6. AGENT PROMPT INSTRUCTIONS
+   The agent's system prompt should include documentation on the
+   issue.md format and how to use --reply-to.
+
+7. ORDERING WITHIN THREADS
+   Thread messages should be ordered by chain position (following
+   .response pointers), not by timestamp.
+
+8. METADATA UPDATES WITHOUT NEW MESSAGES
+   Revision should bump and file should rewrite even for metadata-only
+   changes. Signal: "I7:rev15:meta".
+
+9. LARGE MESSAGE BODIES
+   The serializer should not truncate message bodies. The scalability
+   window bounds total message count, which transitively bounds size.
+
+10. MULTI-ISSUE THREAD REFERENCES
+    Not currently needed, but if cross-issue references are added, IDs
+    would need namespacing (e.g., I7#N).
+
+
+========================================================================
+SUMMARY TABLE
+========================================================================
+
+Q1 FORMAT:        Hybrid section-based + inline parent references
+Q2 RENDERING:     All threads expanded (resolved collapsed per Q6)
+Q3 NEW MARKERS:   Summary at top + per-message [NEW] markers
+Q4 SIGNAL:        Structured "I7:rev14:thread#5" format
+Q5 CONTINUATIONS: Merge into parent, invisible to agent
+Q6 RESOLVED:      Collapse to one-line summary
+Q7 AGENT REPLY:   aidi --reply-to <response_id> flag
+Q8 SCALABILITY:   Configurable recency window (30 main / 10 thread)
+
+
+========================================================================
+IMPLEMENTATION PRIORITY
+========================================================================
+
+1. Q5 (continuations) -- simplest, unblocks everything
+2. Q1 (format) -- core serializer, the main deliverable
+3. Q3 (new markers) -- requires agent_last_read_at comparison
+4. Q7 (aidi --reply-to) -- unblocks agent thread participation
+5. Q6 (resolved threads) -- collapse logic in serializer
+6. Q8 (scalability) -- windowing, not urgent until issues grow large
+7. Q4 (signal format) -- low priority, agent re-reads full file
+8. Q2 (rendering policy) -- design decision, revisit based on observation

@@ -1,0 +1,83 @@
+Message_threads.excalidraw — Text Analysis
+============================================
+
+Main Response Chain (vertical, top to bottom — the "Issue view"):
+
+1. Agent: "I worked on..." (red/pink background — first message)
+2. User: "great, now work on..."
+3. Agent: "I completed work on ..."
+4. User: "can you change ..."
+5. Agent: "I have implemented the change" (yellow/orange background)
+
+Arrows between these are labeled "User creates a Response" or "Agent creates a
+Response" — these follow the .response pointer (down).
+
+------------------------------------------------------------------------
+
+Reply Thread off Message #1 (horizontal, to the right — the "Reply view"):
+
+Starting from the first agent message "I worked on...", a horizontal arrow
+labeled "User creates a reply" leads to:
+
+1. User: "one minor tweak: ..."
+2. Agent: "Tweak implemented, please review" (green background)
+3. User: "great, add a comment in the code explaining the tweak"
+4. User: "looks good."
+
+This chain follows .response pointers vertically within the thread.
+
+------------------------------------------------------------------------
+
+Reply Thread off the green "Tweak implemented" message (nested thread):
+
+A second horizontal "User creates a reply" arrow leads to:
+- User: "use an approach like this: ..."
+- Agent: "user-preferred approach used, please review."
+
+------------------------------------------------------------------------
+
+Reply Thread off Message #5 "I have implemented the change" (yellow):
+
+Horizontal arrows lead to:
+- User: "there's a bug in your revision: ..."
+
+------------------------------------------------------------------------
+
+Data Structure Definitions (legend area):
+
+Response {
+    content: Message
+    responding_to: Response | null  (where arrow came from — up)
+    response: Response | null       (down arrows)
+    reply: Response | null          (right arrows)
+}
+
+Message {
+    author: string
+    body: string
+    timestamp: datetime
+    seen: datetime | null
+}
+
+Issue {
+    inum: number
+    group: string
+    blocked_by: Issue[]
+    blocks: Issue[]
+    body: Response          (root of the chain)
+}
+
+Key: down arrows = .response chain (main conversation).
+     right arrows = .reply (thread branches).
+
+The diagram also shows "Resolve Thread" and "Resolve Issue" actions at
+terminal nodes.
+
+------------------------------------------------------------------------
+
+Scenarios covered:
+- Linear issue conversation (5 messages deep)
+- Thread on first agent message (4 replies deep)
+- Nested thread (reply to a reply — 2 levels)
+- Thread on the last agent message (bug report)
+- Thread/issue resolution flows

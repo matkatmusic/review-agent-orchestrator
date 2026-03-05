@@ -1,0 +1,84 @@
+DEBATE TOPIC: Complete DetailView Rewrite Architecture
+
+You are reviewing a plan to completely rewrite a DetailView component in a
+React/Ink terminal UI application. The current implementation is poorly
+structured and needs a ground-up rewrite with no recycled code.
+
+Read the following files for context:
+- Message_threads_plan_v2.txt (comprehensive requirements — 21 sections)
+- Message_threads_excalidraw.txt (threading model from Excalidraw diagram)
+- src/tui/detail.tsx (current implementation — the orchestrator)
+- src/tui/app.tsx (current App — manages view stack and thread navigation)
+- src/tui/views.ts (view type definitions including ViewType.Thread)
+- src/tui/response-chain.tsx (virtual-scrolled message list)
+- src/tui/response-container.tsx (individual message rendering)
+- src/tui/issue-header.tsx (5-line header or thread parent display)
+- src/tui/input-box.tsx (text input area)
+- src/types.ts (Response linked-list data model)
+
+CONTEXT:
+The Response data model is a doubly-linked list with two axes:
+  .response / .responding_to — vertical chain (main conversation)
+  .reply / .replying_to — horizontal branching (thread from any message)
+  .is_continuation — true when this node is paragraph 2+ of a split message
+
+The Excalidraw diagram shows:
+  - 5-message main chain (alternating Agent/User)
+  - Thread off message #1 (4 replies deep)
+  - Nested thread off a reply within that thread (2 levels)
+  - Thread off message #5 (bug report)
+  - "Resolve Thread" and "Resolve Issue" actions at terminal nodes
+
+CURRENT PROBLEMS:
+1. Thread navigation is split between App (ViewType.Thread, findResponseById,
+   markRepliesSeen) and DetailView (threadParentStack, render-phase restoration)
+2. State management uses forceUpdate + instance properties instead of React patterns
+3. Render-phase mutations (stack restoration, initial scroll, rootResponse change detection)
+4. ViewType.Thread exists as a separate view type when it should be internal to DetailView
+5. Overlay management is tangled with the main component
+6. The component has too many responsibilities
+
+YOUR TASK:
+Analyze the requirements in Message_threads_plan_v2.txt and propose a clean
+architecture for a complete rewrite. Address:
+
+1. COMPONENT HIERARCHY: What components should exist and what does each own?
+   Consider: DetailView, ResponseChain, ResponseContainer, IssueHeader,
+   InputBox, overlays. Should any be merged or split differently?
+
+2. STATE MANAGEMENT: How should state be managed? Options include:
+   - React.Component with setState (not forceUpdate)
+   - Function components with useState/useReducer
+   - Class components with explicit instance properties (current approach)
+   What are the tradeoffs in an Ink/terminal context?
+
+3. THREAD NAVIGATION: The thread stack should be internal to DetailView.
+   Design the enterThread/exitThread flow. Key questions:
+   - How is the displayed chain derived from the stack?
+   - How is cursor position restored on exit?
+   - When/where should markRepliesSeen be called?
+   - How does nested threading work (thread within a thread)?
+
+4. VIRTUAL SCROLLING: The viewport windowing math (deriveFirstVisible,
+   computeLastVisible) needs to work with lazy height computation.
+   Should this live in ResponseChain or be standalone functions?
+
+5. DATA FLOW: How should props flow from App -> DetailView -> sub-components?
+   What callbacks are needed? How does thread state communicate back to App
+   (for header/footer updates)?
+
+6. WHAT TO KEEP vs REWRITE:
+   - ResponseContainer rendering (borders, badges, colors) — keep or rewrite?
+   - Virtual scrolling math — keep or rewrite?
+   - Overlay components (GroupPicker, IssueListPicker) — keep or rewrite?
+   - The Response/Message data model — definitely keep
+
+7. EXCALIDRAW ALIGNMENT: Does the proposed architecture correctly model the
+   threading shown in the diagram? Specifically:
+   - Can it handle the 2-level nested thread case?
+   - Does entering a thread correctly show threadParent.reply as the chain?
+   - Does exiting restore cursor to the thread parent in the outer chain?
+
+Provide a concrete, opinionated architecture proposal. Include file names,
+component interfaces (props), and state ownership. Favor simplicity over
+abstraction.

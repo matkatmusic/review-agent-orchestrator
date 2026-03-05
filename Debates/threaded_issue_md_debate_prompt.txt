@@ -1,0 +1,156 @@
+DEBATE TOPIC: Serializing Threaded Issue Conversations into issue.md for Tmux Agents
+==================================================================================
+
+CONTEXT
+-------
+
+We are building an issue orchestrator where AI agents run in tmux panes and work
+on issues. Each agent gets an issue.md file in its worktree that contains the
+full context of its issue — header metadata plus conversation history. The
+orchestrator rewrites issue.md atomically on each user response, then signals the
+agent to re-read it.
+
+The ORIGINAL design (v2.1.md, pre-threading) assumed a FLAT conversation model:
+the `responses` table stored sequential messages with (inum, author, type, body,
+created_at). issue.md was a simple linear dump:
+
+  # I-7: migrate_ServerDerivedFields
+  Status: Active
+  Blocked by: (none)
+  Blocks: I-14, I-15
+
+  --- Conversation ---
+
+  [Agent - Analysis - 2026-01-01 10:00]
+  I worked on the server-derived field migration...
+
+  [User - 2026-01-01 10:30]
+  great, now work on the dual-write logic...
+
+  [Agent - Implementation - 2026-01-01 11:00]
+  I completed work on the dual-write logic...
+
+The agent reads issue.md as its sole context for its own issue. It writes to the
+DB via `aidi respond`, never modifies issue.md directly. The orchestrator is the
+only writer of issue.md.
+
+WHAT CHANGED: THREADED MESSAGES
+-------------------------------
+
+The TUI now uses a doubly-linked list data model for messages with TWO axes:
+
+  Response {
+      id: number
+      content: Message { author, type, body, timestamp, seen }
+      responding_to: Response | null   // previous in chain (back, up)
+      response: Response | null        // next in chain (forward, down)
+      replying_to: Response | null     // parent thread (back, left)
+      reply: Response | null           // first reply (forward, right)
+      is_continuation: boolean         // paragraph 2+ of split message
+  }
+
+  - .response/.responding_to = vertical chain (main conversation or within-thread)
+  - .reply/.replying_to = horizontal branching (thread from any message)
+  - Threads can nest arbitrarily (reply to a reply to a reply...)
+
+Example structure (from Excalidraw diagram):
+
+  Main chain: A1(Agent) -> B(User) -> C(Agent) -> D(User) -> E1(Agent)
+  Thread off A1: R1(User) -> R2(Agent) -> R3(User)
+  Nested thread off R2: S1(User) -> S2(Agent)
+  Thread off E1: T1(User) — a bug report
+
+The DB schema has been updated with `responding_to_id` and `replying_to_id`
+columns on the responses table to store these relationships.
+
+THE PROBLEM
+-----------
+
+issue.md needs to serialize this threaded tree into a plain-text format that:
+
+1. An AI agent (Claude running in tmux) can read and understand
+2. Preserves the semantic structure of threads (which message is a reply to what)
+3. Makes it clear which messages are NEW since the agent last read
+4. Is not ambiguous — the agent should never confuse a thread reply with a
+   main-chain response
+5. Works at scale — an issue could have dozens of main-chain messages each with
+   threads, and threads can nest
+
+Additional constraints:
+- The orchestrator rewrites the ENTIRE file on each user response (no incremental
+  updates to the file — the file is the full state)
+- The agent receives a tmux signal like "I7: new reply" after the rewrite
+- The agent then re-reads the entire issue.md
+- The agent has `aidi ack <inum> <revision>` to confirm it has read the latest
+- Continuations (is_continuation=true) are paragraph 2+ of a split message —
+  they should be rendered as part of the same message, not as separate entries
+- The format must be PLAIN TEXT (no markdown rendering in the agent's terminal)
+
+QUESTIONS FOR DEBATE
+--------------------
+
+1. SERIALIZATION FORMAT: How should the threaded conversation tree be serialized
+   into plain text? Consider:
+   a) Indentation-based (threads indented under parent message)
+   b) Section-based (main chain first, then each thread as a labeled section)
+   c) Inline threading markers (each message references its parent)
+   d) Flat with thread metadata (sequential but with [Thread: parent_id] markers)
+   e) Something else entirely
+
+2. THREAD RENDERING: Should ALL threads be expanded in issue.md, or should only
+   the main chain be shown with thread summaries? Consider that the agent needs
+   to understand thread context to respond appropriately, but deeply nested
+   threads may be noise for the agent's primary task.
+
+3. NEW MESSAGE INDICATORS: The agent needs to know which messages are new since
+   its last read. Options:
+   a) A "--- New since revision N ---" separator
+   b) Per-message markers like [NEW] prefix
+   c) A separate "What's New" section at the top/bottom
+   d) Rely on the agent comparing against its own memory of what it read before
+
+4. DELTA vs FULL CONTEXT: Should the tmux signal include what changed (e.g.,
+   "I7: new reply in thread on msg #3"), or just "I7: new reply"? The agent
+   re-reads the full file either way, but the signal hint could help it focus.
+
+5. CONTINUATION HANDLING: Messages with is_continuation=true are paragraph 2+ of
+   a split agent message. Should they be:
+   a) Merged back into the original message in issue.md (simplest for the agent)
+   b) Kept separate with a continuation marker
+   c) Something else
+
+6. THREAD RESOLUTION: Threads can be "resolved" in the TUI. Should resolved
+   threads be:
+   a) Omitted from issue.md entirely
+   b) Collapsed to a one-line summary
+   c) Included but marked as [RESOLVED]
+
+7. AGENT RESPONSE TO THREADS: When the agent wants to reply to a thread (not the
+   main chain), how should it signal this via aidi? Currently `aidi respond <inum>
+   --type <type> "message"` creates a main-chain response. Should there be:
+   a) `aidi respond <inum> --reply-to <response_id> "message"`
+   b) Thread replies as a special response type
+   c) Agent always responds on main chain, user routes to threads via TUI
+
+8. SCALABILITY: For an issue with 50 main-chain messages and 20 threads averaging
+   5 messages each (150 total messages), how should issue.md handle this? Options:
+   a) Full dump every time (simple, possibly large)
+   b) Truncate old messages with a "... N earlier messages ..." marker
+   c) Only include messages since last agent read + thread roots for context
+   d) Configurable depth/recency window
+
+CONSTRAINTS REMINDER
+--------------------
+
+- issue.md is the ONLY way the agent learns about its issue context
+- The agent cannot query the DB for its own issue (design principle)
+- The orchestrator is the sole writer of issue.md
+- The agent writes via aidi CLI only
+- issue.md is chmod 444 (read-only for the agent)
+- Format must be readable by an LLM that processes text sequentially
+- The solution should work for both simple (linear) and complex (heavily threaded)
+  conversations
+
+Please provide your analysis addressing all 8 questions, with a clear
+recommendation for each. Justify your choices based on the constraints above.
+Identify any additional concerns or edge cases not covered by the questions.

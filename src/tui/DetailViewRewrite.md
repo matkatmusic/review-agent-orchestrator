@@ -213,25 +213,24 @@ Verify: npx tsc --noEmit && npx vitest run. No behavior change yet.
 
 #### Step 2.1: Add thread stack to DetailView
 
+The stack is just `Response[]` — each entry is
+the thread parent (the message whose replies you drilled into). Everything
+else is derivable from the Response graph pointers.
+
 ```ts
 export interface ThreadInfo {
     inThread: boolean;
 }
 
-interface ThreadFrame {
-    rootResponse: Response | null;  // the chain that was being displayed
-    threadParent: Response | null;  // so we can restore on exit
-    selectedMessage: number;
-}
-
 // Instance properties:
-private threadStack: ThreadFrame[];
-private currentThreadParent: Response | null;
-private currentRootResponse: Response | null;  // what ResponseChain displays
+private threadStack: Response[];   // stack of thread parents
 ```
 
-Constructor sets threadStack = [], currentThreadParent = null,
-currentRootResponse = props.rootResponse.
+Derived state (computed, not stored):
+- currentThreadParent: `threadStack.length > 0 ? threadStack[threadStack.length - 1] : null`
+- currentRootResponse: `threadStack.length > 0 ? threadStack[threadStack.length - 1].reply : props.rootResponse`
+
+Constructor sets threadStack = [].
 
 #### Step 2.2: enterThread / exitThread
 
@@ -239,44 +238,49 @@ currentRootResponse = props.rootResponse.
 enterThread(parentResponse: Response):
   1. if (!parentResponse.reply) return;
   2. markRepliesSeen(parentResponse)
-  3. Push { rootResponse: currentRootResponse, threadParent: currentThreadParent,
-           selectedMessage } onto threadStack
-  4. currentThreadParent = parentResponse
-  5. currentRootResponse = parentResponse.reply
-  6. selectedMessage = countChain(parentResponse.reply) - 1  // select last
-  7. onThreadStateChange?.({ inThread: true })
+  3. Push parentResponse onto threadStack
+  4. selectedMessage = countChain(parentResponse.reply) - 1  // select last
+  5. onThreadStateChange?.({ inThread: true })
   // parent forceUpdate propagates down, no local forceUpdate needed
 
 exitThread():
-  1. frame = threadStack.pop()
-  2. if threadStack is empty && props.rootResponse !== frame.rootResponse:
-       // Data changed while in thread — use fresh props
-       currentRootResponse = props.rootResponse
-       selectedMessage = clamp(frame.selectedMessage, chainLength - 1)
-     else:
-       currentRootResponse = frame.rootResponse
-       selectedMessage = frame.selectedMessage
-  3. currentThreadParent = frame.threadParent
-  4. markRepliesSeen(currentThreadParent) if currentThreadParent exists
+  1. popped = threadStack.pop()
+  2. Determine the restored chain:
+     - if threadStack is empty: chain = props.rootResponse
+     - else: chain = threadStack[threadStack.length - 1].reply
+  3. Find popped in the restored chain (walk chain, find index)
+     - if found: selectedMessage = that index
+     - if not found (data changed): selectedMessage = chainLength - 1
+  4. markRepliesSeen on the new threadStack top if it exists
   5. onThreadStateChange?.(threadStack.length > 0 ? { inThread: true } : null)
 ```
+
+Why this works:
+- stack.top() IS the thread parent (for header display)
+- stack.top().reply IS the root of the displayed chain
+- The popped parent IS the message to re-select on exit
+- responding_to/replying_to pointers let you navigate the graph
+  without saving snapshots
 
 #### Step 2.3: Update handleKey
 
 - Escape: if threadStack.length > 0, exitThread(). else onBack().
-- Ctrl+Right / Ctrl+Alt+>: get selectedNode from ResponseChain's current list,
-  call enterThread(selectedNode).
+- Ctrl+Right / Ctrl+Alt+>: get selected Response from the current chain,
+  call enterThread(selectedResponse).
 - Ctrl+Left / Ctrl+Alt+<: if threadStack.length > 0, exitThread().
 - Remove onNavigate calls entirely.
 
 #### Step 2.4: Update render() for thread state
 
-- Pass currentRootResponse (not props.rootResponse) to ResponseChain
+- Compute currentRootResponse and currentThreadParent from threadStack
+  (see Step 2.1 derived state)
+- Pass currentRootResponse to ResponseChain
 - Pass currentThreadParent to IssueHeader
 - When props.rootResponse changes and threadStack is empty,
-  update currentRootResponse = props.rootResponse.
-  When threadStack is not empty, just track the change (lastRootResponse)
-  for exitThread to pick up.
+  selectedMessage adjusts automatically (ResponseChain gets new props).
+  When threadStack is not empty, no action needed — the thread's
+  Response objects are still valid. On exit, we use fresh
+  props.rootResponse (Step 2.2 point 2).
 
 #### Step 2.5: Update props
 

@@ -9,26 +9,28 @@ export interface HeaderProps {
     columns: number;
     activeAgents?: number;
     unreadCount?: number;
+    threadInfo?: { inThread: boolean };
 }
 
 const assertNever = (x: never): never => {
     throw new Error(`Unhandled view: ${JSON.stringify(x)}`);
 };
 
-function getViewLabel(view: View): string {
+function getViewLabel(view: View, threadInfo?: { inThread: boolean }): string {
     if (view.type === ViewType.Detail) {
+        if (threadInfo?.inThread) return `I-${view.inum} Thread`;
         return `I-${view.inum} Detail`;
     }
-    if (view.type === ViewType.Thread) return `I-${view.inum} Thread`;
     return ViewTypeStringsMap.get(view.type) ?? String(view.type);
 }
 
-function getSubtitle(view: View): string {
+function getSubtitle(view: View, threadInfo?: { inThread: boolean }): string {
     switch (view.type) {
-        case ViewType.Dashboard:
-            return 'Overview of all issues and orchestration state';
+        case ViewType.Home:
+            return 'All issues and orchestration state';
         case ViewType.Detail:
-            return `Viewing issue I-${view.inum}`;
+            if (threadInfo?.inThread) return `Thread on I-${view.inum}`;
+            return '';
         case ViewType.NewIssue:
             return 'Create a new issue';
         case ViewType.AgentStatus:
@@ -37,8 +39,6 @@ function getSubtitle(view: View): string {
             return 'Dependency and blocking relationships';
         case ViewType.GroupView:
             return 'Issues grouped by container';
-        case ViewType.Thread:
-            return `Thread on I-${view.inum}`;
         default:
             return assertNever(view);
     }
@@ -57,8 +57,9 @@ const HeaderComponent: React.FC<HeaderProps> = ({
     columns,
     activeAgents,
     unreadCount,
+    threadInfo,
 }) => {
-    const title = `Review Agent Orchestrator \u00b7 ${getViewLabel(currentView)}`;
+    const title = `Review Agent Orchestrator \u00b7 ${getViewLabel(currentView, threadInfo)}`;
     const line1 = centeredRule(title, columns);
 
     const statusParts: string[] = [];
@@ -66,7 +67,7 @@ const HeaderComponent: React.FC<HeaderProps> = ({
     if (unreadCount !== undefined) statusParts.push(`Unread: ${unreadCount}`);
     const line2 = statusParts.length > 0 ? statusParts.join('  |  ') : ' ';
 
-    const line3 = getSubtitle(currentView);
+    const line3 = getSubtitle(currentView, threadInfo);
 
     return (
         <Box flexDirection="column" height={HEADER_LINES}>

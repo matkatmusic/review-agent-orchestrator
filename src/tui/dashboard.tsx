@@ -96,6 +96,11 @@ export class Dashboard extends React.Component<DashboardProps> {
         this.forceUpdate();
     }
 
+    private selectedInum(): number | undefined {
+        const clampedCursor = Math.min(this.cursor, Math.max(0, this.filteredLength - 1));
+        return this.filteredIssues[clampedCursor]?.inum;
+    }
+
     handleKey = (input: string, key: Key) => {
         if (key.downArrow || input === 'j') {
             this.moveCursor(1, this.filteredLength);
@@ -103,8 +108,22 @@ export class Dashboard extends React.Component<DashboardProps> {
             this.moveCursor(-1, this.filteredLength);
         } else if (key.tab) {
             this.cycleTab(key.shift ? -1 : 1);
+        } else if (key.return) {
+            const inum = this.selectedInum();
+            if (inum !== undefined) this.props.onSelect(inum);
+        } else if (input === 'a') {
+            const inum = this.selectedInum();
+            if (inum !== undefined) this.props.onActivate(inum);
+        } else if (input === 'd') {
+            const inum = this.selectedInum();
+            if (inum !== undefined) this.props.onDefer(inum);
+        } else if (input === 'r') {
+            const inum = this.selectedInum();
+            if (inum !== undefined) this.props.onResolve(inum);
+        } else if (input === 'n') {
+            this.props.onNewIssue();
         } else {
-            handleGlobalKey(input, key, ViewType.Dashboard, {
+            handleGlobalKey(input, key, ViewType.Home, {
                 onBack: this.props.onBack,
                 onQuit: this.props.onQuit,
                 onNavigate: this.props.onNavigate,
@@ -114,6 +133,7 @@ export class Dashboard extends React.Component<DashboardProps> {
 
     // Stashed between render passes so handleKey can reference it.
     private filteredLength = 0;
+    private filteredIssues: Issue[] = [];
 
     render() {
         const { issues, unreadInums, maxAgents, onSelect, onNewIssue } = this.props;
@@ -131,6 +151,7 @@ export class Dashboard extends React.Component<DashboardProps> {
         }
 
         this.filteredLength = filtered.length;
+        this.filteredIssues = filtered;
 
         const clampedCursor = Math.min(this.cursor, Math.max(0, filtered.length - 1));
 

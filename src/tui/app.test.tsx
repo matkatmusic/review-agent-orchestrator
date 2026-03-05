@@ -16,9 +16,9 @@ describe('App — view routing', () => {
         expect(lastFrame()).toBeDefined();
     });
 
-    it('default view is Dashboard', () => {
+    it('default view is Home', () => {
         const { lastFrame } = render(<App />);
-        expect(lastFrame()).toContain('Dashboard');
+        expect(lastFrame()).toContain('Home');
     });
 
     // ---- Navigation via navigate prop ----
@@ -42,16 +42,16 @@ describe('App — view routing', () => {
         // Press Esc to go back
         stdin.write(ESC);
         await tick();
-        expect(lastFrame()).toContain('Dashboard');
+        expect(lastFrame()).toContain('Home');
     });
 
-    it('Esc on Dashboard does nothing (cannot pop past root)', async () => {
+    it('Esc on Home does nothing (cannot pop past root)', async () => {
         const { lastFrame, stdin } = render(<App />);
         await tick();
         const frameBefore = lastFrame();
         stdin.write(ESC);
         await tick();
-        expect(lastFrame()).toContain('Dashboard');
+        expect(lastFrame()).toContain('Home');
         expect(lastFrame()).toBe(frameBefore);
     });
 
@@ -66,10 +66,10 @@ describe('App — view routing', () => {
 
     // ---- Deep navigation ----
 
-    it('deep navigation: Dashboard → AgentStatus → back → Dashboard', async () => {
+    it('deep navigation: Home → AgentStatus → back → Home', async () => {
         const { lastFrame, stdin } = render(<App />);
         await tick();
-        expect(lastFrame()).toContain('Dashboard');
+        expect(lastFrame()).toContain('Home');
 
         stdin.write('s');
         await tick();
@@ -77,14 +77,14 @@ describe('App — view routing', () => {
 
         stdin.write(ESC);
         await tick();
-        expect(lastFrame()).toContain('Dashboard');
+        expect(lastFrame()).toContain('Home');
     });
 
     it('multi-level deep navigation with Esc unwind', async () => {
         const { lastFrame, stdin } = render(<App />);
         await tick();
 
-        // Dashboard → AgentStatus
+        // Home → AgentStatus
         stdin.write('s');
         await tick();
         expect(lastFrame()).toContain('Agent Status');
@@ -99,18 +99,18 @@ describe('App — view routing', () => {
         await tick();
         expect(lastFrame()).toContain('Agent Status');
 
-        // Back to Dashboard
+        // Back to Home
         stdin.write(ESC);
         await tick();
-        expect(lastFrame()).toContain('Dashboard');
+        expect(lastFrame()).toContain('Home');
     });
 
     // ---- All 6 view types navigable ----
 
-    it('can navigate to Detail view via Dashboard Enter', async () => {
+    it('can navigate to Detail view via Home Enter', async () => {
         const { lastFrame, stdin } = render(<App />);
         await tick();
-        // Press Enter on the first issue in Dashboard to open Detail
+        // Press Enter on the first issue in Home to open Detail
         stdin.write('\r');
         await tick();
         expect(lastFrame()).toContain('Detail');
@@ -150,16 +150,16 @@ describe('App — view routing', () => {
 
     // ---- Header appears on all views ----
 
-    it('header is visible on Dashboard', () => {
+    it('header is visible on Home', () => {
         const { lastFrame } = render(<App />);
         expect(lastFrame()).toContain('Review Agent Orchestrator');
-        expect(lastFrame()).toContain('Dashboard');
+        expect(lastFrame()).toContain('Home');
     });
 
     it('header updates when navigating to a different view', async () => {
         const { lastFrame, stdin } = render(<App />);
         await tick();
-        expect(lastFrame()).toContain('Dashboard');
+        expect(lastFrame()).toContain('Home');
 
         stdin.write('s');
         await tick();
@@ -177,12 +177,12 @@ describe('App — view routing', () => {
 
         stdin.write(ESC);
         await tick();
-        expect(lastFrame()).toContain('Dashboard');
+        expect(lastFrame()).toContain('Home');
     });
 
     // ---- Footer shows correct shortcuts per view ----
 
-    it('footer shows Dashboard shortcuts on default view', () => {
+    it('footer shows Home shortcuts on default view', () => {
         const { lastFrame } = render(<App />);
         const frame = lastFrame()!;
         expect(frame).toContain('[Enter]');
@@ -201,14 +201,14 @@ describe('App — view routing', () => {
         expect(frame).toContain('Create');
         expect(frame).toContain('[Esc]');
         expect(frame).toContain('Cancel');
-        // Dashboard-only shortcuts should not appear
+        // Home-only shortcuts should not appear
         expect(frame).not.toContain('Quit');
         expect(frame).not.toContain('Activate');
     });
 
-    // ---- q works from non-Dashboard views ----
+    // ---- q works from non-Home views ----
 
-    it('q exits from any view, not just Dashboard', async () => {
+    it('q exits from any view, not just Home', async () => {
         const onExit = vi.fn();
         const { lastFrame, stdin } = render(<App onExit={onExit} />);
         await tick();

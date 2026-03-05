@@ -1,0 +1,88 @@
+Debugger listening on ws://127.0.0.1:57608/e632d2e4-80f7-48c6-a911-5bc1305b8626
+For help, see: https://nodejs.org/en/docs/inspector
+Debugger attached.
+Debugger listening on ws://127.0.0.1:57618/b999a8c1-9a8d-4cfe-a21b-7ae3fa22e60d
+For help, see: https://nodejs.org/en/docs/inspector
+Debugger attached.
+Loaded cached credentials.
+[ERROR] [IDEClient] Failed to connect to IDE companion extension. Please ensure the extension is running. To install the extension, run /ide install.
+Hook registry initialized with 0 hook entries
+I will start by reading the relevant files to understand the current implementation, the threading model, and the comprehensive requirements for the rewrite. I'll read these in a few batches.
+Based on the comprehensive requirements and the current pain points, here is a concrete, opinionated architecture for rewriting the `DetailView` and its associated components. 
+
+The primary goal is to shift from a class-based, mutable-state approach (`forceUpdate`) to a declarative, functional React architecture using Hooks.
+
+### 1. COMPONENT HIERARCHY
+`DetailView` currently has too many responsibilities and tangles logic across components. The new hierarchy clearly separates state orchestration from presentation.
+
+*   **`DetailView` (Orchestrator):** Owns all UI state (thread stack, cursor position, input value, focus/overlay state) and the `useInput` key handler. It determines *what* to render but does little rendering itself.
+*   **`IssueHeader` (Pure):** Split! It should **not** handle the `threadParent` anymore. `IssueHeader` should strictly render the 5-line metadata. `DetailView` will conditionally swap it out: `{inThread ? <ResponseContainer response={threadParent} /> : <IssueHeader />}`.
+*   **`ResponseChain` (Pure):** Accepts a pre-flattened `Response[]` array, `selectedIndex`, and viewport dimensions. It maps over the visible window and renders `ResponseContainer`s.
+*   **`ResponseContainer` (Self-contained):** Keep mostly as-is, but move `hasNewReplies` computation internally (passing `userLastViewedAt` as a prop) as planned in Phase 4.
+*   **`InputBox` / Overlays (`GroupPicker`, `IssueListPicker`):** Remain pure presentation components.
+
+### 2. STATE MANAGEMENT
+**Proposal:** Function components with `useState` and `useRef`. 
+
+*Tradeoffs in Ink:* Ink acts exactly like React DOM. The current `class` approach with mutable instance properties (`this.selectedMessage`) and `forceUpdate()` is an anti-pattern that leads to render-phase mutation bugs (like the current `initialScrollDone` hack). `useState` ensures deterministic UI updates.
+
+**State Ownership in `DetailView`:**
+```typescript
+interface ThreadLevel {
+  parent: Response;
+  restoreIndex: number; // The cursor position we left behind
+}
+
+// Core State
+const [threadStack, setThreadStack] = useState<ThreadLevel[]>([]);
+const [selectedIndex, setSelectedIndex] = useState(0);
+
+// UI State
+const [inputValue, setInputValue] = useState("");
+const [focusedField, setFocusedField] = useState<number | null>(null);
+const [overlay, setOverlay] = useState<OverlayType>(OverlayType.None);
+```
+
+### 3. THREAD NAVIGATION
+Thread navigation becomes purely local state manipulation within `DetailView`. 
+
+*   **Deriving the Chain:** 
+    ```typescript
+    const currentParent = threadStack.length > 0 ? threadStack[threadStack.length - 1].parent : null;
+    const chainRoot = currentParent ? currentParent.reply : props.rootResponse;
+    const messages = flattenToArray(chainRoot);
+    ```
+*   **Entering a thread (`enterThread`):**
+    When pressing `Ctrl+Right`, find `messages[selectedIndex]`.
+    1. Call `markRepliesSeen(messages[selectedIndex])`.
+    2. Push to stack: `setThreadStack(prev => [...prev, { parent: messages[selectedIndex], restoreIndex: selectedIndex }])`.
+    3. `setSelectedIndex(messages[selectedIndex].reply ? <length of reply chain - 1> : 0)`.
+*   **Exiting a thread (`exitThread`):**
+    When pressing `Esc` or `Ctrl+Left`.
+    1. If `threadStack` is empty, call `props.onBack()`.
+    2. Otherwise, pop the stack: `const popped = threadStack[threadStack.length - 1]`.
+    3. Call `markRepliesSeen(popped.parent)` again (fixes the mentioned bug where new replies aren't marked seen on exit).
+    4. `setThreadStack(prev => prev.slice(0, -1))`.
+    5. `setSelectedIndex(popped.restoreIndex)`.
+
+### 4. VIRTUAL SCROLLING
+The windowing math (`deriveFirstVisible` and `computeLastVisible`) should be extracted as **standalone, pure functions** outside of the React component (e.g., in a `scroll-utils.ts` file or at the bottom of `response-chain.tsx`). 
+
+*Why?* They rely purely on the `messages` array, `selectedIndex`, and `height`. Keeping them pure makes them perfectly unit-testable without mounting React components, and removes class methods from `ResponseChain`.
+
+### 5. DATA FLOW
+*   **App -> DetailView Props:** `DetailView` no longer receives `threadParentResponse` or `onNavigate({ type: ViewType.Thread })`. The `ViewType.Thread` enum is completely deleted from the App.
+*   **DetailView -> App Callbacks:** `DetailView` takes a new prop: `onThreadStateChange?: (inThread: boolean) => void`. It calls this when `threadStack.length` transitions between `0` and `1`. `App` uses this to update the Header subtitle ("Viewing issue..." vs "Thread on...") and Footer shortcuts.
+*   **DetailView -> Children:** `DetailView` flattens the list and passes `messages: Response[]` to `ResponseChain`. 
+
+### 6. WHAT TO KEEP VS REWRITE
+*   **Keep:** The Doubly-linked `Response` data model, `ResponseContainer` visual design (borders, colors, word-wrapping logic), overlay components (`GroupPicker`, `IssueListPicker`), and the virtual scrolling math concepts.
+*   **Rewrite:** `DetailView` (rewrite entirely as a functional component). `ResponseChain` (convert to functional component). `IssueHeader` (remove `threadParent` logic). App's `render` method (remove the `ViewType.Thread` case block).
+
+### 7. EXCALIDRAW ALIGNMENT
+This architecture perfectly maps to the Excalidraw definitions:
+*   The `.response` downward arrows are resolved by `flattenToArray(chainRoot)` which powers the `ResponseChain`.
+*   The `.reply` rightward arrows are resolved by pushing the current message to `threadStack` and setting the new `chainRoot` to `parent.reply`.
+*   **2-Level Nested Threads:** This works automatically. Pushing another item onto `threadStack` just sets a new `currentParent` and `chainRoot`. Exiting pops them off in LIFO order, seamlessly restoring the `restoreIndex` cursor at each level.
+Waiting for the debugger to disconnect...
+Waiting for the debugger to disconnect...

@@ -6,7 +6,7 @@ import { ViewType } from './views.js';
 
 describe('Footer — shortcut data', () => {
     const allViews: ViewType[] = [
-        ViewType.Dashboard, ViewType.Detail, ViewType.NewIssue, ViewType.AgentStatus, ViewType.BlockingMap, ViewType.GroupView,
+        ViewType.Home, ViewType.Detail, ViewType.NewIssue, ViewType.AgentStatus, ViewType.BlockingMap, ViewType.GroupView,
     ];
 
     it('VIEW_SHORTCUTS has an entry for every ViewType', () => {
@@ -32,7 +32,7 @@ describe('Footer — shortcut data', () => {
 
 describe('Footer — per-view rendering', () => {
     it('Dashboard renders all 9 shortcuts (wraps on narrow terminals)', () => {
-        const { lastFrame } = render(<Footer viewType={ViewType.Dashboard} />);
+        const { lastFrame } = render(<Footer viewType={ViewType.Home} />);
         const frame = lastFrame()!;
         expect(frame).toContain('[Enter]');
         expect(frame).toContain('View');

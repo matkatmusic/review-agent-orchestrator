@@ -1,0 +1,90 @@
+Debugger listening on ws://127.0.0.1:52473/c8de6b3c-b1cc-4ca8-8b6a-f842df7623aa
+For help, see: https://nodejs.org/en/docs/inspector
+Debugger attached.
+Debugger listening on ws://127.0.0.1:52484/84785d6a-fc40-41da-a7a9-8269a1f85d75
+For help, see: https://nodejs.org/en/docs/inspector
+Debugger attached.
+Loaded cached credentials.
+[ERROR] [IDEClient] Failed to connect to IDE companion extension. Please ensure the extension is running. To install the extension, run /ide install.
+Hook registry initialized with 0 hook entries
+Here is an architectural analysis and set of recommendations for serializing the threaded conversation model into `issue.md`, designed specifically for an LLM agent operating in a terminal environment.
+
+### Core Philosophy: LLMs & Structural Text
+LLMs (like Claude, GPT, or Gemini) do not need visual GUI elements to understand nested data, but they **require explicit structural boundaries and unambiguous identifiers**. While human TUIs use spatial positioning (indentation, side-panels) to represent threads, LLMs perform best when hierarchical data is represented using structural markup (like Markdown headers or XML-style tags) combined with unique IDs.
+
+---
+
+### 1. SERIALIZATION FORMAT: Hybrid Main-Chain with XML-Tagged Threads
+**Recommendation:** Keep the main conversation linear, and append threads using XML-style tags or distinct Markdown sections. Do not use deep indentation, as it becomes ambiguous in plain text for LLMs.
+
+**Justification:** A completely flat sequential log loses the semantic grouping of threads. Deep indentation (e.g., `>>>`) breaks down past 2-3 levels. By assigning a clear `[ID: #]` to every message, you can decouple the structural representation from the chronological one.
+
+**Proposed Format Example:**
+```markdown
+# I-7: migrate_ServerDerivedFields
+...metadata...
+
+## Main Conversation
+[ID: 101 | Agent | 10:00]
+I worked on the server-derived field migration...
+
+[ID: 102 | User | 10:30]
+great, now work on the dual-write logic...
+
+## Active Threads
+<thread parent_id="101" status="open">
+  [ID: 104 | User | 10:15]
+  Wait, did you update the schema for this?
+
+  [ID: 105 | Agent | 10:18]
+  Yes, I added the migration file.
+</thread>
+```
+*Why this works:* The LLM can easily map the `<thread parent_id="101">` back to the original context. It is unambiguously plain text, highly scalable, and prevents thread replies from being confused with main-chain directives.
+
+### 2. THREAD RENDERING: Expand Active, Omit or Collapse Resolved
+**Recommendation:** Expand all **active** threads fully. Omit or severely collapse **resolved** threads (see Q6). Do not attempt to use "summaries" for active threads.
+
+**Justification:** The agent relies on `issue.md` for its *entire* context. If you summarize an active thread, you risk hiding critical technical constraints or directives from the agent. Modern LLMs have large context windows (100k+ tokens); they are highly capable of ignoring irrelevant expanded threads, but they cannot guess information that has been abstracted away. 
+
+### 3. NEW MESSAGE INDICATORS: Per-Message Tags + Structural Separation
+**Recommendation:** Use a bold `[NEW]` tag on the specific messages that were added, AND place them logically where they belong. Do not use a separate "What's New" section.
+
+**Justification:** If a user replies deep inside a thread, putting that reply at the bottom of the file in a "What's New" section strips it of its surrounding thread context. By injecting the `[NEW]` tag directly onto the message header (e.g., `[ID: 106 | User | NEW]`), the agent encounters the new information *in its correct semantic location* as it reads the document. 
+
+### 4. DELTA vs FULL CONTEXT: Signal with a Hint
+**Recommendation:** The tmux signal should include a brief location hint, e.g., `I7: new reply in thread #101`. 
+
+**Justification:** While the agent re-reads the full file, modern LLM architectures use the latest prompt (the signal) as their primary attention driver. Telling the agent *where* to look ("You have a new reply in thread #101") acts as an anchor, helping the LLM immediately focus its reasoning on the newly tagged `[NEW]` message rather than re-evaluating the entire history from scratch.
+
+### 5. CONTINUATION HANDLING: Merge Back (Simplest for Agent)
+**Recommendation:** Option A. Merge continuations back into the original message, separated by a standard double-newline. 
+
+**Justification:** `is_continuation` is a TUI rendering/pagination concept, not a semantic conversation concept. Exposing UI pagination logic to the agent is a leaky abstraction that wastes tokens and risks confusing the model. To the agent, it is a single contiguous thought; serialize it as such.
+
+### 6. THREAD RESOLUTION: Collapse to Summary/Marker
+**Recommendation:** Option C (Mark as Resolved) for recent ones, evolving to Option B (Collapse) for scalability.
+Change the tag to `<thread parent_id="X" status="resolved">`. If the thread is very old, truncate the internal messages and replace with: `[Thread resolved. 5 messages hidden.]`
+
+**Justification:** Resolved threads often contain the *reasoning* behind a piece of code. Completely omitting them (Option A) might cause the agent to regress or forget why a certain approach was taken. Marking them as `resolved` tells the agent "do not reply to this, it is settled," while preserving the historical context. 
+
+### 7. AGENT RESPONSE TO THREADS: Explicit CLI Flag
+**Recommendation:** Option A. Introduce an explicit `--reply-to` flag: `aidi respond <inum> --reply-to <message_id> "message"`.
+
+**Justification:** The agent needs precise targeting. If it just responds to the main chain, the TUI user experience becomes messy as agent replies lose their thread grouping. By giving the agent a `--reply-to <ID>` flag, you perfectly mirror the DB schema (`replying_to_id`), and you empower the agent to participate in multiple parallel threads simultaneously. 
+
+### 8. SCALABILITY: Truncate Old Main-Chain, Keep Thread Roots
+**Recommendation:** Option C/D. Implement a configurable recency window (e.g., last 30 main-chain messages). Replace older messages with a clear truncation marker: `... [40 earlier messages omitted for brevity] ...`. 
+
+**Justification:** While LLMs have large context windows, dumping 150+ messages on every read slows down inference (time-to-first-token) and increases API costs dramatically over a long session. 
+*Rule of thumb:* Always include the original issue description, omit the middle history, keep the most recent N messages, and keep *all active threads* (and their parent messages, even if the parent falls into the truncated middle history).
+
+---
+
+### Additional Edge Cases & Concerns to Address:
+
+1. **Race Conditions on Read/Write:** Because the orchestrator rewrites the file atomically, ensure it uses a temporary file and `mv` (rename) to overwrite `issue.md`. If the orchestrator writes directly and the agent reads mid-write, the LLM will receive a truncated JSON/Markdown blob, leading to immediate hallucination or crash.
+2. **Hallucinated Thread IDs:** If the agent is given the `--reply-to` tool, it *will* occasionally hallucinate a message ID. The `aidi respond` CLI must handle invalid IDs gracefully (e.g., returning a terminal error: `Error: Message ID 999 does not exist or is not in your current context`) so the agent can self-correct.
+3. **Ghost Threads:** If an agent is in the middle of typing a response to a thread, and the orchestrator rewrites `issue.md` because the user resolved that thread, the agent's response might be rejected. The system needs a policy for this: either gracefully accept the late reply and reopen the thread, or reject it and tell the agent the thread was closed.
+Waiting for the debugger to disconnect...
+Waiting for the debugger to disconnect...

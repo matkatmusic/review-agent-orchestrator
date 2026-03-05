@@ -7,29 +7,14 @@ import { NewIssue } from './newissue.js';
 import type { NewIssueData } from './newissue.js';
 import { Dashboard } from './dashboard.js';
 import { MOCK_ISSUES, MOCK_UNREAD_INUMS, MOCK_MAX_AGENTS, MOCK_DETAIL_DATA, MOCK_CONTAINERS } from './mock-data.js';
-import { DetailView, findResponseById, markRepliesSeen } from './detail.js';
+import { DetailView } from './detail.js';
 import { AgentStatus } from './agent-status.js';
 import { BlockingMap } from './blocking-map.js';
 import { GroupView, GROUP_MODE_INITIAL } from './group-view.js';
 import type { GroupMode } from './group-view.js';
 import { IssueStatus } from '../types.js';
 
-// [Phase A] Commented out — views now handle all their own keys via handleGlobalKey.
-// No App-level useInput needed. See keypress_handling.txt Step A.2.
-//
-// import type { ViewType } from './views.js';
-//
-// const VIEW_OWNED_KEYS: Record<ViewType, ReadonlySet<string>> = {
-//     Dashboard:   new Set(['n', 'a', 'd', 'r', 'j', 'k', 'return', 'tab']),
-//     Detail:      new Set(['escape', 'return', 'd', 'r', 'b', 'w', 's']),
-//     NewIssue:    new Set(['return', 'tab', 'escape', 'n', 'a', 'b', 'd', 'g', 'j', 'k', 'p', 'q', 'r', 's', 'w']),
-//     AgentStatus: new Set(['j', 'k', 'return']),
-//     BlockingMap: new Set(['j', 'k', 'b', 'return']),
-//     GroupView:   new Set(['j', 'k', 'n', 'p', 'g', 'return', 'escape']),
-// };
-
 function pushViewOntoStack(viewStack: View[], view: View): View[] {
-    //creates a new array by unpacking 'prev' to the front of the new array, and appending 'view' to the end.
     let newStack: View[] = [];
     for (let i = 0; i < viewStack.length; i++) {
         newStack.push(viewStack[i]);
@@ -46,6 +31,10 @@ function popViewFromStack(viewStack: View[]) : View[] {
     return newStack;
 }
 
+function clearScreen(): void {
+    process.stdout.write('\x1B[2J\x1B[H');
+}
+
 interface AppProps {
     initialView?: View;
     onExit?: () => void;
@@ -56,11 +45,15 @@ interface AppProps {
 class App extends React.Component<AppProps> {
     viewStack: View[];
     groupMode: GroupMode;
+    threadInfo: { inThread: boolean };
+    savedSelectedMessage: Map<number, number>;
 
     constructor(props: AppProps) {
         super(props);
-        this.viewStack = [props.initialView ?? { type: ViewType.Detail, inum: 1 }];
+        this.viewStack = [props.initialView ?? { type: ViewType.Home }];
         this.groupMode = GROUP_MODE_INITIAL;
+        this.threadInfo = { inThread: false };
+        this.savedSelectedMessage = new Map();
     }
 
     get currentView(): View {
@@ -75,33 +68,41 @@ class App extends React.Component<AppProps> {
         return this.props.rows ?? 24;
     }
 
-    //navigate to a new view by pushing it onto the view stack
     navigateToView(view: View) {
-        // Mark replies as seen when entering a thread
-        if (view.type === ViewType.Thread) {
-            const mockData = MOCK_DETAIL_DATA[view.inum];
-            if (mockData) {
-                const threadRoot = findResponseById(mockData.rootResponse, view.rootResponseId);
-                if (threadRoot) markRepliesSeen(threadRoot);
-            }
-        }
+        clearScreen();
         this.viewStack = pushViewOntoStack(this.viewStack, view);
         this.forceUpdate();
     }
 
-    //replace the current (top) view without changing stack depth
     replaceCurrentView(view: View) {
+        clearScreen();
         this.viewStack[this.viewStack.length - 1] = view;
         this.viewStack = [...this.viewStack];
         this.forceUpdate();
     }
 
-    //go back to the previous view by popping the top of the view stack
     goBackToPreviousView() {
         if (this.viewStack.length > 1) {
+            clearScreen();
             this.viewStack = popViewFromStack(this.viewStack);
             this.forceUpdate();
         }
+    }
+
+    goHome() {
+        clearScreen();
+        this.viewStack = [{ type: ViewType.Home }];
+        this.forceUpdate();
+    }
+
+    saveSelectedAndGoBack(inum: number, selectedMessage: number) {
+        this.savedSelectedMessage.set(inum, selectedMessage);
+        this.goBackToPreviousView();
+    }
+
+    saveSelectedAndGoHome(inum: number, selectedMessage: number) {
+        this.savedSelectedMessage.set(inum, selectedMessage);
+        this.goHome();
     }
 
     setGroupMode(mode: GroupMode) {
@@ -112,7 +113,7 @@ class App extends React.Component<AppProps> {
     render() {
         let content: React.ReactNode;
         switch (this.currentView.type) {
-            case ViewType.Dashboard:
+            case ViewType.Home:
                 content = (
                     <Dashboard
                         issues={MOCK_ISSUES}
@@ -123,6 +124,8 @@ class App extends React.Component<AppProps> {
                         onActivate={() => {}}
                         onDefer={() => {}}
                         onResolve={() => {}}
+                        onNavigate={(view) => this.navigateToView(view)}
+                        onBack={() => this.goBackToPreviousView()}
                         onQuit={() => this.props.onExit?.()}
                     />
                 );
@@ -130,9 +133,10 @@ class App extends React.Component<AppProps> {
             case ViewType.Detail: {
                 const mockData = MOCK_DETAIL_DATA[this.currentView.inum];
                 if (mockData) {
+                    const inum = this.currentView.inum;
                     content = (
                         <DetailView
-                            inum={this.currentView.inum}
+                            inum={inum}
                             issue={mockData.issue}
                             rootResponse={mockData.rootResponse}
                             blockedBy={mockData.blockedBy}
@@ -143,10 +147,16 @@ class App extends React.Component<AppProps> {
                             containers={MOCK_CONTAINERS}
                             allIssues={MOCK_ISSUES}
                             userLastViewedAt={mockData.issue.user_last_viewed_at}
-                            onBack={() => this.goBackToPreviousView()}
-                            onNavigate={(view) => this.navigateToView(view)}
-                            onNavigateIssue={(inum) => this.replaceCurrentView({ type: ViewType.Detail, inum })}
+                            initialSelectedMessage={this.savedSelectedMessage.get(inum)}
+                            onBack={(sel) => this.saveSelectedAndGoBack(inum, sel)}
+                            onHome={(sel) => this.saveSelectedAndGoHome(inum, sel)}
+                            onSend={(msg) => { /* TODO: wire to backend */ }}
+                            onNavigateIssue={(inumTo) => this.replaceCurrentView({ type: ViewType.Detail, inum: inumTo })}
                             onQuit={() => this.props.onExit?.()}
+                            onThreadStateChange={(info) => {
+                                this.threadInfo = info;
+                                this.forceUpdate();
+                            }}
                         />
                     );
                 } else {
@@ -154,61 +164,6 @@ class App extends React.Component<AppProps> {
                 }
                 break;
             }
-            case ViewType.Thread: {
-                const view = this.currentView;
-                const mockData = MOCK_DETAIL_DATA[view.inum];
-                if (mockData) {
-                    // Find the thread root by id
-                    const threadRoot = findResponseById(mockData.rootResponse, view.rootResponseId);
-                    content = (
-                        <DetailView
-                            inum={view.inum}
-                            issue={mockData.issue}
-                            rootResponse={threadRoot?.reply ?? null}
-                            threadParentResponse={threadRoot ?? undefined}
-                            blockedBy={mockData.blockedBy}
-                            blocks={mockData.blocks}
-                            group={mockData.group}
-                            columns={this.columns}
-                            rows={this.rows}
-                            userLastViewedAt={mockData.issue.user_last_viewed_at}
-                            onBack={() => this.goBackToPreviousView()}
-                            onNavigate={(view) => this.navigateToView(view)}
-                            onQuit={() => this.props.onExit?.()}
-                        />
-                    );
-                } else {
-                    content = <Text color="red">Issue I-{view.inum} not found</Text>;
-                }
-                break;
-            }
-            // case 'NewIssue':
-            //     content = (
-            //         <NewIssue
-            //             onCreated={(_data: NewIssueData) => {
-            //                 // Phase 2 will wire this to DB — for now just navigate back
-            //                 this.goBackToPreviousView();
-            //             }}
-            //             onCancel={() => this.goBackToPreviousView()}
-            //         />
-            //     );
-            //     break;
-            // case 'AgentStatus':
-            //     content = <AgentStatus />;
-            //     break;
-            // case 'BlockingMap':
-            //     content = <BlockingMap onNavigate={(view) => this.navigateToView(view)} />;
-            //     break;
-            // case 'GroupView':
-            //     content = (
-            //         <GroupView
-            //             onBack={() => this.goBackToPreviousView()}
-            //             onSelectIssue={(inum) => this.navigateToView({ type: 'Detail', inum })}
-            //             groupMode={this.groupMode}
-            //             onGroupModeChange={(mode) => this.setGroupMode(mode)}
-            //         />
-            //     );
-            //     break;
         }
 
         return (
@@ -218,9 +173,10 @@ class App extends React.Component<AppProps> {
                     columns={this.columns}
                     activeAgents={MOCK_ISSUES.filter(i => i.status === IssueStatus.Active).length}
                     unreadCount={MOCK_UNREAD_INUMS.size}
+                    threadInfo={this.threadInfo}
                 />
                 {content}
-                <Footer viewType={this.currentView.type} />
+                <Footer viewType={this.currentView.type} inThread={this.threadInfo.inThread} />
             </Box>
         );
     }

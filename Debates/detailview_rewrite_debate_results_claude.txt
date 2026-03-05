@@ -1,0 +1,748 @@
+DETAIL VIEW REWRITE -- ARCHITECTURE PROPOSAL
+=============================================
+Agent: backend-architect (Claude)
+
+
+EXECUTIVE SUMMARY
+-----------------
+
+The current DetailView suffers from split ownership of thread navigation
+(between App and DetailView), render-phase mutations, and forceUpdate-driven
+state management. The rewrite should internalize all thread state into
+DetailView, eliminate ViewType.Thread from the App's vocabulary, and convert
+mutable instance properties into proper React state managed via useReducer
+(or setState in a class component). The component hierarchy stays mostly the
+same -- DetailView, ResponseChain, ResponseContainer, IssueHeader, InputBox,
+overlays -- but with sharply redefined ownership boundaries.
+
+
+=========================================================================
+1. COMPONENT HIERARCHY
+=========================================================================
+
+Files and their responsibilities:
+
+  detail.tsx -- DetailView (the orchestrator)
+    Owns: thread stack, selected message index, focused field, overlay state,
+          input value, blockedBySet, blocksSet.
+    Renders: IssueHeader OR ThreadParentHeader, ResponseChain, InputBox.
+    Handles: all keyboard input (via useInput or DetailInputBridge).
+    Exposes: onThreadStateChange callback to tell App about thread depth
+             (for header/footer label updates).
+
+  response-chain.tsx -- ResponseChain (virtual-scrolled message list)
+    Owns: nothing. Pure rendering component.
+    Receives: messages (Response[]), columns, height, selectedIndex,
+              userLastViewedAt.
+    Computes: firstVisible/lastVisible from props on each render.
+    Renders: visible ResponseContainers within the viewport window.
+
+  response-container.tsx -- ResponseContainer (single message box)
+    Owns: nothing. Pure rendering component.
+    Receives: response, columns, selected, hasNewReplies (or userLastViewedAt
+              in Phase 4).
+    Renders: bordered box with author, type, timestamp, reply badge, body.
+    Static method: computeLineCount(body, columns) -- keep as-is.
+
+  issue-header.tsx -- IssueHeader (metadata display in issue mode)
+    Owns: nothing. Pure rendering component.
+    Receives: inum, issue, group, blockedByStr, blocksStr, columns,
+              focusedField.
+    Renders: 5-line header (title, status/group, deps, hint, separator).
+    Does NOT render thread parent. That responsibility moves out.
+
+  thread-parent-header.tsx -- NEW file (simple wrapper)
+    Owns: nothing. Pure rendering component.
+    Receives: threadParent (Response), columns.
+    Renders: a single ResponseContainer for the thread parent message,
+             always unselected, with hasNewReplies=false.
+    This replaces the threadParent branch currently inside IssueHeader.
+    Rationale: IssueHeader should not need to know about threads at all.
+    Its prop interface becomes simpler. The thread parent display is
+    conceptually different (it's a message container, not issue metadata).
+
+  input-box.tsx -- InputBox (text entry)
+    Owns: nothing. Receives value, focused, columns, onChange, onSubmit.
+    No changes needed.
+
+  group-picker.tsx, issue-list-picker.tsx -- Overlay pickers
+    Keep as-is. They are self-contained. DetailView just mounts/unmounts them.
+
+
+Why NOT merge or split further:
+
+  - Merging ResponseChain into DetailView would make DetailView even larger.
+    The viewport math is a distinct concern worth isolating.
+
+  - Splitting DetailView into IssueDetailView and ThreadDetailView is
+    tempting but creates duplication. The two modes share 90% of their
+    logic (scrolling, input, keyboard handling). A single component with
+    an internal "am I in a thread?" flag is simpler.
+
+  - Splitting overlay management into a separate component is unnecessary.
+    The overlay replaces the entire content area and only needs to intercept
+    keyboard input. A simple if/else in render is the right pattern.
+
+
+=========================================================================
+2. STATE MANAGEMENT
+=========================================================================
+
+Recommendation: React.Component with setState.
+
+Rationale for class component with setState (not function components):
+
+  a) Ink's useInput hook is awkward in class components -- but DetailView
+     already solves this with DetailInputBridge (a tiny function component
+     that calls useInput and forwards to the class). This pattern works.
+
+  b) The state is complex enough that useReducer would be the natural
+     choice in a function component. But useReducer in Ink has a subtle
+     issue: dispatch is async, and Ink's render cycle is tied to stdout
+     writes. Class setState with the callback form gives equivalent
+     control.
+
+  c) The current team is already using class components throughout the
+     codebase (App, DetailView, ResponseChain, ResponseContainer,
+     IssueHeader, InputBox are all classes). Staying with classes avoids
+     a style mismatch.
+
+  d) Instance methods (handleKey, enterThread, exitThread, cycleField)
+     read naturally as methods on a class, not as closures inside a
+     function component.
+
+
+The critical change: replace ALL forceUpdate() calls with setState().
+
+State shape:
+
+  interface DetailViewState {
+      selectedMessage: number;
+      focusedField: number | null;
+      overlay: OverlayType;
+      inputValue: string;
+      blockedBySet: Set<number>;
+      blocksSet: Set<number>;
+      threadStack: ThreadStackEntry[];
+  }
+
+  interface ThreadStackEntry {
+      parent: Response;         // the message we threaded into
+      savedSelectedIndex: number; // cursor position to restore on exit
+  }
+
+Why threadStack is state, not an instance property:
+
+  The threadStack determines WHAT gets rendered (issue header vs thread
+  parent header, which response chain to display). Changes to it must
+  trigger a re-render. Making it state ensures this happens automatically
+  via setState, eliminating the forceUpdate pattern.
+
+Why blockedBySet/blocksSet are state:
+
+  Same reasoning -- toggle operations must trigger re-render. Currently
+  they use forceUpdate after mutating an instance property. setState is
+  the correct React pattern.
+
+Derived values (NOT state -- computed in render or via getters):
+
+  - messages: Response[] -- derived from threadStack + rootResponse
+  - isInThread: boolean -- derived from threadStack.length > 0
+  - currentThreadParent: Response | null -- derived from threadStack top
+  - headerLineCount: number -- derived from isInThread + currentThreadParent
+  - conversationHeight: number -- derived from rows, headerLineCount
+  - displayedRootResponse: Response | null -- the chain to render
+
+The render-phase mutation problem disappears:
+
+  Currently, render() detects rootResponse changes and mutates
+  selectedMessage + threadParentStack. After the rewrite, rootResponse
+  changes are handled in componentDidUpdate (or getDerivedStateFromProps),
+  which is the proper lifecycle for responding to prop changes. But
+  actually, with thread navigation internalized, rootResponse will only
+  change when navigating between issues (via Shift+Left/Right), not when
+  entering/exiting threads. So the "restore from stack" logic inside
+  render disappears entirely.
+
+
+=========================================================================
+3. THREAD NAVIGATION
+=========================================================================
+
+Core design: DetailView owns a threadStack: ThreadStackEntry[] in its
+state. The stack is empty when viewing the issue. Each enterThread pushes
+an entry; each exitThread pops one.
+
+
+enterThread():
+
+  1. Guard: if no messages or selectedMessage is out of bounds, return.
+
+  2. Compute the current displayed messages array.
+
+  3. Get selectedNode = messages[this.state.selectedMessage].
+
+  4. Call markRepliesSeen(selectedNode) -- mark all replies on the
+     selected node as seen (timestamp = now). This clears the "new
+     replies" badge.
+
+  5. Push a ThreadStackEntry onto the stack:
+       {
+         parent: selectedNode,
+         savedSelectedIndex: this.state.selectedMessage,
+       }
+
+  6. Compute the new messages array (selectedNode.reply chain).
+
+  7. setState({
+       threadStack: [...this.state.threadStack, newEntry],
+       selectedMessage: Math.max(0, newMessages.length - 1),
+       focusedField: null,  // no Tab cycling in thread mode
+     })
+
+  8. Call this.props.onThreadStateChange({ depth: newStack.length })
+     so App can update the header subtitle and footer shortcuts.
+
+
+exitThread():
+
+  1. If threadStack is empty, call this.props.onBack() instead (Escape
+     at top level leaves the detail view).
+
+  2. Pop the top entry from the stack.
+
+  3. Call markRepliesSeen on the popped entry's parent -- this handles
+     the "mark seen on exit" bug noted in requirement section 16.
+
+  4. setState({
+       threadStack: newStack,  // with top popped
+       selectedMessage: poppedEntry.savedSelectedIndex,
+     })
+
+  5. Call this.props.onThreadStateChange({ depth: newStack.length })
+
+
+How the displayed chain is derived:
+
+  In render():
+
+    const { threadStack } = this.state;
+    const { rootResponse } = this.props;
+
+    let displayedRoot: Response | null;
+    let threadParent: Response | null = null;
+
+    if (threadStack.length === 0) {
+        displayedRoot = rootResponse;
+    } else {
+        const top = threadStack[threadStack.length - 1];
+        threadParent = top.parent;
+        displayedRoot = top.parent.reply;
+    }
+
+    const messages = flattenToArray(displayedRoot);
+
+  This is clean derivation from state, no mutations needed.
+
+
+Nested threading:
+
+  Works automatically. When the user is viewing thread replies and presses
+  Ctrl+Right on one of those replies, enterThread fires again. It pushes
+  another entry onto the stack. The displayed chain becomes the nested
+  reply's .reply chain. Exiting pops back to the outer thread. The
+  Excalidraw 2-level nesting scenario is handled naturally.
+
+  Example walk-through with the Excalidraw data:
+
+    State: threadStack = []
+    Display: main chain [Agent1, User2, Agent3, User4, Agent5]
+    User selects Agent1, presses Ctrl+Right.
+
+    State: threadStack = [{parent: Agent1, savedIndex: 0}]
+    Display: Agent1.reply chain [UserTweak, AgentTweakDone, UserAddComment, UserLooksGood]
+    User selects AgentTweakDone, presses Ctrl+Right.
+
+    State: threadStack = [
+      {parent: Agent1, savedIndex: 0},
+      {parent: AgentTweakDone, savedIndex: 1}
+    ]
+    Display: AgentTweakDone.reply chain [UserUseApproach, AgentApproachUsed]
+
+    User presses Escape:
+
+    State: threadStack = [{parent: Agent1, savedIndex: 0}]
+    Display: Agent1.reply chain, cursor at index 1 (AgentTweakDone)
+
+    User presses Escape:
+
+    State: threadStack = []
+    Display: main chain, cursor at index 0 (Agent1)
+
+
+When/where markRepliesSeen is called:
+
+  - On enterThread: marks replies of the message being threaded into.
+    This is the moment the user "opens" that thread, so unseen replies
+    become seen.
+
+  - On exitThread: marks replies again. This catches any new replies
+    that arrived while the user was inside the thread (if the data
+    updates in real-time). Also addresses the bug noted in section 16.
+
+  Both calls happen inside DetailView. The markRepliesSeen function
+  becomes fully internal to detail.tsx -- no export needed.
+
+
+=========================================================================
+4. VIRTUAL SCROLLING
+=========================================================================
+
+Keep the scrolling math in ResponseChain. Here is why:
+
+  - ResponseChain is the only consumer of firstVisible/lastVisible.
+  - The math depends on per-message heights and viewport height, which
+    are ResponseChain's props.
+  - Moving the math into standalone functions would require passing the
+    same arguments that ResponseChain already has. No gain.
+  - Keeping it in ResponseChain means the component is self-contained:
+    give it a list of messages, a selected index, and a viewport height,
+    and it figures out what to render.
+
+Changes to the current implementation:
+
+  a) deriveFirstVisible and computeLastVisible are pure functions of
+     their inputs. They should be extracted from the class as standalone
+     pure functions (still in response-chain.tsx) so they can be unit
+     tested without instantiating a component. ResponseChain calls them
+     in render.
+
+     function deriveFirstVisible(
+       messages: Response[],
+       selectedIndex: number,
+       columns: number,
+       height: number,
+     ): number { ... }
+
+     function computeLastVisible(
+       messages: Response[],
+       firstVisible: number,
+       columns: number,
+       height: number,
+     ): number { ... }
+
+  b) Remove onSelectedIndexChange from ResponseChain's props. Currently
+     ResponseChain has this callback but never uses it (selection changes
+     are handled by DetailView's handleKey). The prop is dead code.
+
+  c) ResponseChain should become a PureComponent (or implement
+     shouldComponentUpdate) since it receives immutable-ish props.
+     This avoids unnecessary re-renders when only the input value
+     changes.
+
+  d) The lazy height computation via ResponseContainer.computeLineCount
+     is fine. It is called per-message on each render, but since we only
+     iterate from firstVisible to the selected message (worst case
+     O(messages.length)), and the computation is cheap (string splitting +
+     arithmetic), caching is not necessary. If profiling later shows
+     this is hot, a WeakMap<Response, number> keyed by response + columns
+     can memoize it.
+
+
+=========================================================================
+5. DATA FLOW
+=========================================================================
+
+Props flow:
+
+  App
+   |
+   +-- Header  (currentView, columns, activeAgents, unreadCount, threadInfo)
+   |
+   +-- DetailView  (all DetailViewProps -- see below)
+   |    |
+   |    +-- IssueHeader  (inum, issue, group, blockedByStr, blocksStr,
+   |    |                  columns, focusedField)
+   |    |   OR
+   |    +-- ThreadParentHeader  (threadParent, columns)
+   |    |
+   |    +-- ResponseChain  (rootResponse, columns, height,
+   |    |                    userLastViewedAt, selectedIndex)
+   |    |    |
+   |    |    +-- ResponseContainer  (response, columns, selected,
+   |    |                             hasNewReplies)
+   |    |
+   |    +-- InputBox  (value, focused, columns, onChange, onSubmit)
+   |    |
+   |    +-- GroupPicker / IssueListPicker  (when overlay is active)
+   |
+   +-- Footer  (viewType, inThread)
+
+
+New DetailViewProps (after rewrite):
+
+  interface DetailViewProps {
+      inum: number;
+      issue: Issue;
+      rootResponse: Response | null;
+      blockedBy: number[];
+      blocks: number[];
+      group: string;
+      columns: number;
+      rows: number;
+      containers?: Container[];
+      allIssues?: Issue[];
+      userLastViewedAt?: string | null;
+      onBack: () => void;
+      onSend: (message: string) => void;
+      onQuit: () => void;
+      onGroupChange: (containerId: number) => void;
+      onGroupCreate: (name: string) => void;
+      onBlockedByChange: (blockerInums: number[]) => void;
+      onBlocksChange: (blockedInums: number[]) => void;
+      onNavigateIssue: (inum: number) => void;
+      onThreadStateChange: (info: ThreadInfo) => void;
+  }
+
+  interface ThreadInfo {
+      inThread: boolean;
+      depth: number;
+  }
+
+Removed from props:
+  - threadParentResponse (now internal to DetailView)
+  - onNavigate (thread nav is internal; issue nav uses onNavigateIssue)
+
+New callback:
+  - onThreadStateChange: called on enter/exit thread. App uses this to
+    update Header subtitle and Footer shortcuts without needing
+    ViewType.Thread.
+
+
+How App uses onThreadStateChange:
+
+  App stores threadInfo: ThreadInfo | null as instance state. DetailView
+  calls onThreadStateChange whenever the thread stack changes. App
+  passes threadInfo to Header and Footer.
+
+  Header uses threadInfo to change the subtitle:
+    - null or {inThread: false}: "Viewing issue I-{N}"
+    - {inThread: true}: "Thread on I-{N}"
+
+  Footer uses threadInfo to swap shortcut sets:
+    - inThread=false: Detail shortcuts
+    - inThread=true: Thread shortcuts
+
+  This eliminates ViewType.Thread entirely. App never pushes a Thread
+  view. It just passes a different set of shortcuts to Footer based on
+  the threadInfo it received from DetailView.
+
+
+=========================================================================
+6. WHAT TO KEEP VS REWRITE
+=========================================================================
+
+KEEP (copy forward with minimal changes):
+
+  ResponseContainer rendering (borders, badges, colors):
+    This is the most polished part of the codebase. The border rendering
+    logic (renderTopBorder, renderBottomBorder) is complex but correct.
+    The color scheme (cyan/green/white), reply badges, continuation
+    handling, and selected-state display all work. Keep the entire
+    component. The only change is Phase 4 (self-compute hasNewReplies),
+    which is additive.
+
+  Virtual scrolling math (deriveFirstVisible, computeLastVisible):
+    The algorithm is correct and handles edge cases (selected message
+    near top, near bottom, exactly filling viewport). Extract to
+    standalone functions for testability, but keep the logic.
+
+  Overlay components (GroupPicker, IssueListPicker):
+    Self-contained, no issues. Keep as-is.
+
+  The Response/Message/Issue data model:
+    Definitely keep. The doubly-linked list with two axes is elegant and
+    well-suited to the threading model. The Excalidraw diagram maps
+    directly to it.
+
+  InputBox:
+    Simple, correct, no changes needed.
+
+  flattenToArray:
+    Simple utility, keep as-is.
+
+  markRepliesSeen:
+    Keep the function, make it internal to detail.tsx (remove export).
+
+  findResponseById:
+    Keep the function but only if needed for issue-level operations.
+    After the rewrite, it is no longer needed for thread entry (we
+    have the Response reference directly from the flat array). It may
+    still be useful for other operations. If not, remove it.
+
+
+REWRITE (do not recycle code):
+
+  DetailView.render():
+    The entire render method needs rewriting. The current version has
+    render-phase mutations (rootResponse change detection, stack
+    restoration, initialScrollDone). The new version derives everything
+    from state.
+
+  DetailView state management:
+    Replace all instance properties (inputValue, focusedField, overlay,
+    selectedMessage, blockedBySet, blocksSet, threadParentStack,
+    lastRootResponse, initialScrollDone) with a single state object
+    managed by setState.
+
+  DetailView.handleKey:
+    Rewrite to use the internal enterThread/exitThread methods instead
+    of calling onNavigate. Also fix the Escape key to check thread
+    stack first (exit thread) before calling onBack.
+
+  IssueHeader:
+    Remove the threadParent branch. IssueHeader should only know about
+    issue metadata. The thread parent display moves to
+    ThreadParentHeader.
+
+  App's ViewType.Thread case:
+    Remove entirely. App only renders DetailView for ViewType.Detail.
+    Thread navigation is invisible to App.
+
+  Header getViewLabel / getSubtitle:
+    Rewrite to accept threadInfo prop instead of checking for
+    ViewType.Thread.
+
+  Footer VIEW_SHORTCUTS:
+    Remove the ViewType.Thread entry. Footer accepts inThread boolean
+    and selects between Detail shortcuts and Thread shortcuts.
+
+  views.ts:
+    Remove ViewType.Thread and its View union member.
+
+
+=========================================================================
+7. EXCALIDRAW ALIGNMENT
+=========================================================================
+
+Validating the proposed architecture against each scenario in the diagram:
+
+
+Scenario 1: Linear issue conversation (5 messages)
+
+  threadStack = []
+  displayedRoot = issue.body (the root Response)
+  messages = flattenToArray(issue.body)
+    = [Agent1, User2, Agent3, User4, Agent5]
+  selectedMessage defaults to 4 (last, scroll to bottom)
+
+  CORRECT. Standard issue mode, no threading involved.
+
+
+Scenario 2: Thread off message #1 (4 replies deep)
+
+  User scrolls to Agent1 (selectedMessage = 0), presses Ctrl+Right.
+  enterThread:
+    threadStack = [{parent: Agent1, savedIndex: 0}]
+    displayedRoot = Agent1.reply = UserTweak
+    messages = [UserTweak, AgentTweakDone, UserAddComment, UserLooksGood]
+    selectedMessage = 3 (last in thread)
+
+  Header area shows Agent1 as thread parent (via ThreadParentHeader).
+  ResponseChain shows the 4 reply messages.
+  Footer shows "Exit thread" for Escape.
+
+  CORRECT. Matches the diagram's horizontal branch from message #1.
+
+
+Scenario 3: Nested thread (reply to AgentTweakDone within the thread)
+
+  While in the thread from Scenario 2, user selects AgentTweakDone
+  (selectedMessage = 1), presses Ctrl+Right.
+  enterThread:
+    threadStack = [
+      {parent: Agent1, savedIndex: 0},
+      {parent: AgentTweakDone, savedIndex: 1}
+    ]
+    displayedRoot = AgentTweakDone.reply = UserUseApproach
+    messages = [UserUseApproach, AgentApproachUsed]
+    selectedMessage = 1 (last in nested thread)
+
+  Header area shows AgentTweakDone as thread parent.
+  ResponseChain shows the 2 nested reply messages.
+
+  Exit (Escape):
+    threadStack = [{parent: Agent1, savedIndex: 0}]
+    selectedMessage restored to 1 (AgentTweakDone)
+    Header area shows Agent1 as thread parent.
+    ResponseChain shows [UserTweak, AgentTweakDone, UserAddComment, UserLooksGood]
+    Cursor is on AgentTweakDone.
+
+  Exit again (Escape):
+    threadStack = []
+    selectedMessage restored to 0 (Agent1)
+    IssueHeader shows full metadata.
+    ResponseChain shows main chain.
+    Cursor is on Agent1.
+
+  CORRECT. Two levels of nesting, cursor restoration at each level.
+
+
+Scenario 4: Thread off message #5 (bug report)
+
+  User scrolls to Agent5 (selectedMessage = 4), presses Ctrl+Right.
+  enterThread:
+    threadStack = [{parent: Agent5, savedIndex: 4}]
+    displayedRoot = Agent5.reply = UserBugReport
+    messages = [UserBugReport]
+    selectedMessage = 0
+
+  Header area shows Agent5 as thread parent.
+  ResponseChain shows the single bug report message.
+
+  CORRECT. Short thread, single reply.
+
+
+Scenario 5: Enter thread on a message with NO replies yet
+
+  User selects User4 (which has no .reply), presses Ctrl+Right.
+  enterThread:
+    threadStack = [{parent: User4, savedIndex: 3}]
+    displayedRoot = User4.reply = null
+    messages = [] (empty)
+    selectedMessage = 0
+
+  Header area shows User4 as thread parent.
+  ResponseChain shows empty viewport.
+  InputBox allows typing a reply (which would create the first reply).
+
+  CORRECT. The requirement states "any message can be threaded into, even
+  if no replies yet exist." The empty chain is valid.
+
+
+Scenario 6: "Resolve Thread" action
+
+  Not yet implemented in the keyboard handling, but the architecture
+  supports it. A "Resolve Thread" action would:
+    - Operate on the current threadStack top's parent
+    - Mark the thread as resolved (data model change needed)
+    - Potentially exit the thread afterward
+
+  The architecture does not block this future addition.
+
+
+Scenario 7: "Resolve Issue" action
+
+  Already partially modeled (the 'r' key is listed as disabled in
+  footer shortcuts). Would operate on the issue regardless of thread
+  state. No architectural concern.
+
+
+=========================================================================
+IMPLEMENTATION PHASES
+=========================================================================
+
+The rewrite should proceed in this order:
+
+
+Phase A -- State migration (detail.tsx only, no behavior change)
+
+  1. Convert all instance properties to a state object.
+  2. Replace all forceUpdate() with setState().
+  3. Move rootResponse change detection from render() to
+     componentDidUpdate().
+  4. Verify all existing behavior is preserved.
+  5. Write tests for selection, scrolling, overlay open/close.
+
+
+Phase B -- Thread internalization (detail.tsx, big behavior change)
+
+  1. Add threadStack to state.
+  2. Implement enterThread() and exitThread() as methods.
+  3. Derive displayedRoot and threadParent from state in render().
+  4. Change Escape handling: check threadStack before calling onBack.
+  5. Add onThreadStateChange callback.
+  6. Remove threadParentResponse prop.
+  7. Remove onNavigate prop.
+  8. Move markRepliesSeen calls into enter/exit methods.
+
+
+Phase C -- Extract ThreadParentHeader (new file, small)
+
+  1. Create thread-parent-header.tsx.
+  2. Remove threadParent branch from IssueHeader.
+  3. DetailView conditionally renders IssueHeader or ThreadParentHeader.
+
+
+Phase D -- App/Header/Footer cleanup
+
+  1. Remove ViewType.Thread from views.ts enum and View union.
+  2. Remove Thread case from App.render().
+  3. Remove findResponseById and markRepliesSeen imports from App.
+  4. Add threadInfo state to App, wire onThreadStateChange.
+  5. Update Header to accept threadInfo, remove Thread case from
+     getViewLabel/getSubtitle.
+  6. Update Footer to accept inThread, remove Thread shortcut set,
+     use conditional logic to pick Detail or Thread shortcuts.
+
+
+Phase E -- ResponseChain cleanup
+
+  1. Extract deriveFirstVisible/computeLastVisible to standalone pure
+     functions.
+  2. Remove onSelectedIndexChange prop (dead code).
+  3. Add unit tests for viewport math edge cases.
+
+
+Phase F -- ResponseContainer Phase 4 (optional, separate)
+
+  1. Pass userLastViewedAt to ResponseContainer instead of hasNewReplies.
+  2. Move checkNewReplies logic into ResponseContainer.
+  3. Remove checkNewReplies from response-chain.tsx.
+
+
+=========================================================================
+SUMMARY OF KEY DECISIONS
+=========================================================================
+
+  1. Class component with setState, not function component with hooks.
+     Reason: consistency with codebase, natural method organization,
+     avoids style mismatch.
+
+  2. Thread stack as React state, not instance property.
+     Reason: changes to thread stack must trigger re-render; setState
+     is the correct mechanism.
+
+  3. Thread navigation fully internal to DetailView.
+     Reason: eliminates the fragile split between App and DetailView,
+     removes render-phase mutations, simplifies App.
+
+  4. New ThreadParentHeader component split from IssueHeader.
+     Reason: separation of concerns -- IssueHeader is about issue
+     metadata, thread parent display is about showing a message.
+
+  5. Virtual scrolling stays in ResponseChain but extracted to pure
+     functions for testability.
+     Reason: the math is ResponseChain's concern; extraction enables
+     unit tests without component instantiation.
+
+  6. onThreadStateChange callback replaces ViewType.Thread.
+     Reason: App does not need to manage thread views. It just needs
+     to know "is DetailView in a thread?" for header/footer display.
+
+  7. markRepliesSeen called on both enter AND exit.
+     Reason: fixes the existing bug where replies added during thread
+     viewing are not marked as seen.
+
+  8. ResponseContainer rendering kept as-is.
+     Reason: it is correct, polished, and complex. Rewriting it adds
+     risk with no benefit.
+
+  9. No data model changes.
+     Reason: the Response linked list with two axes is the right
+     abstraction for the threading model.
+
+  10. Phased implementation (A through F).
+      Reason: each phase is independently testable and deployable.
+      Phase A is pure refactor (no behavior change), giving a solid
+      foundation for Phase B's larger behavioral change.

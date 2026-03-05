@@ -1,0 +1,715 @@
+Debugger listening on ws://127.0.0.1:57611/d0a4b0ee-461a-493d-a2a7-86e2e47d1c62
+For help, see: https://nodejs.org/en/docs/inspector
+Debugger attached.
+Reading prompt from stdin...
+OpenAI Codex v0.101.0 (research preview)
+--------
+workdir: /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator
+model: gpt-5.3-codex
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: high
+reasoning summaries: auto
+session id: 019cbc36-ed3e-7a23-a29d-b82fa10cfc60
+--------
+user
+DEBATE TOPIC: Complete DetailView Rewrite Architecture
+
+You are reviewing a plan to completely rewrite a DetailView component in a
+React/Ink terminal UI application. The current implementation is poorly
+structured and needs a ground-up rewrite with no recycled code.
+
+Read the following files for context:
+- Message_threads_plan_v2.txt (comprehensive requirements — 21 sections)
+- Message_threads_excalidraw.txt (threading model from Excalidraw diagram)
+- src/tui/detail.tsx (current implementation — the orchestrator)
+- src/tui/app.tsx (current App — manages view stack and thread navigation)
+- src/tui/views.ts (view type definitions including ViewType.Thread)
+- src/tui/response-chain.tsx (virtual-scrolled message list)
+- src/tui/response-container.tsx (individual message rendering)
+- src/tui/issue-header.tsx (5-line header or thread parent display)
+- src/tui/input-box.tsx (text input area)
+- src/types.ts (Response linked-list data model)
+
+CONTEXT:
+The Response data model is a doubly-linked list with two axes:
+  .response / .responding_to — vertical chain (main conversation)
+  .reply / .replying_to — horizontal branching (thread from any message)
+  .is_continuation — true when this node is paragraph 2+ of a split message
+
+The Excalidraw diagram shows:
+  - 5-message main chain (alternating Agent/User)
+  - Thread off message #1 (4 replies deep)
+  - Nested thread off a reply within that thread (2 levels)
+  - Thread off message #5 (bug report)
+  - "Resolve Thread" and "Resolve Issue" actions at terminal nodes
+
+CURRENT PROBLEMS:
+1. Thread navigation is split between App (ViewType.Thread, findResponseById,
+   markRepliesSeen) and DetailView (threadParentStack, render-phase restoration)
+2. State management uses forceUpdate + instance properties instead of React patterns
+3. Render-phase mutations (stack restoration, initial scroll, rootResponse change detection)
+4. ViewType.Thread exists as a separate view type when it should be internal to DetailView
+5. Overlay management is tangled with the main component
+6. The component has too many responsibilities
+
+YOUR TASK:
+Analyze the requirements in Message_threads_plan_v2.txt and propose a clean
+architecture for a complete rewrite. Address:
+
+1. COMPONENT HIERARCHY: What components should exist and what does each own?
+   Consider: DetailView, ResponseChain, ResponseContainer, IssueHeader,
+   InputBox, overlays. Should any be merged or split differently?
+
+2. STATE MANAGEMENT: How should state be managed? Options include:
+   - React.Component with setState (not forceUpdate)
+   - Function components with useState/useReducer
+   - Class components with explicit instance properties (current approach)
+   What are the tradeoffs in an Ink/terminal context?
+
+3. THREAD NAVIGATION: The thread stack should be internal to DetailView.
+   Design the enterThread/exitThread flow. Key questions:
+   - How is the displayed chain derived from the stack?
+   - How is cursor position restored on exit?
+   - When/where should markRepliesSeen be called?
+   - How does nested threading work (thread within a thread)?
+
+4. VIRTUAL SCROLLING: The viewport windowing math (deriveFirstVisible,
+   computeLastVisible) needs to work with lazy height computation.
+   Should this live in ResponseChain or be standalone functions?
+
+5. DATA FLOW: How should props flow from App -> DetailView -> sub-components?
+   What callbacks are needed? How does thread state communicate back to App
+   (for header/footer updates)?
+
+6. WHAT TO KEEP vs REWRITE:
+   - ResponseContainer rendering (borders, badges, colors) — keep or rewrite?
+   - Virtual scrolling math — keep or rewrite?
+   - Overlay components (GroupPicker, IssueListPicker) — keep or rewrite?
+   - The Response/Message data model — definitely keep
+
+7. EXCALIDRAW ALIGNMENT: Does the proposed architecture correctly model the
+   threading shown in the diagram? Specifically:
+   - Can it handle the 2-level nested thread case?
+   - Does entering a thread correctly show threadParent.reply as the chain?
+   - Does exiting restore cursor to the thread parent in the outer chain?
+
+Provide a concrete, opinionated architecture proposal. Include file names,
+component interfaces (props), and state ownership. Favor simplicity over
+abstraction.
+
+mcp startup: no servers
+codex
+I’m going to read the planning docs and current TUI files first, then map the threading/scroll/state responsibilities into a concrete rewrite proposal with explicit component boundaries and prop interfaces.
+
+thinking
+**Planning file enumeration strategy**
+exec
+/bin/zsh -lc 'ls -la' in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+total 1064
+drwxr-xr-x   33 matkatmusicllc  staff    1056 Mar  4 19:53 .
+drwxr-xr-x   29 matkatmusicllc  staff     928 Mar  2 09:42 ..
+drwxr-xr-x@  10 matkatmusicllc  staff     320 Mar  3 12:16 .claude
+drwxr-xr-x@   6 matkatmusicllc  staff     192 Mar  2 23:29 .claude-octopus
+-rw-r--r--@   1 matkatmusicllc  staff      50 Feb 28 10:02 .git
+-rw-r--r--@   1 matkatmusicllc  staff     105 Mar  2 17:39 .gitignore
+drwxr-xr-x@  10 matkatmusicllc  staff     320 Mar  4 20:17 Debates
+-rw-r--r--    1 matkatmusicllc  staff   35149 Feb 26 17:41 LICENSE
+-rw-------@   1 matkatmusicllc  staff  152050 Mar  4 12:29 Message_threads.excalidraw
+-rw-r--r--@   1 matkatmusicllc  staff    2643 Mar  4 19:45 Message_threads_excalidraw.txt
+-rw-r--r--@   1 matkatmusicllc  staff   14332 Mar  4 19:53 Message_threads_plan_v2.txt
+drwxr-xr-x    3 matkatmusicllc  staff      96 Mar  2 10:05 Questions
+-rw-r--r--@   1 matkatmusicllc  staff     205 Mar  2 17:40 config.json
+drwxr-xr-x@  11 matkatmusicllc  staff     352 Mar  2 23:27 dist
+-rwxr-xr-x@   1 matkatmusicllc  staff    2145 Mar  2 17:45 install.sh
+-rw-r--r--@   1 matkatmusicllc  staff   24779 Mar  3 13:58 keypress_handling.txt
+-rw-r--r--@   1 matkatmusicllc  staff    3677 Mar  3 14:09 keypress_handling_impl.txt
+-rw-r--r--    1 matkatmusicllc  staff    6587 Mar  2 09:59 merge redesign.md
+-rw-r--r--@   1 matkatmusicllc  staff    8790 Mar  4 13:22 message_threads.txt
+
+thinking
+**Planning parallel large-file reads**
+codex
+I’ve located the target files. Next I’m extracting the requirements doc and threading diagram text to anchor the architecture against explicit behaviors rather than the current implementation quirks.
+exec
+/bin/zsh -lc "sed -n '1,260p' Message_threads_plan_v2.txt" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,260p' Message_threads_excalidraw.txt" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+DETAIL VIEW — COMPLETE REQUIREMENTS
+====================================
+
+Derived from: app.tsx, detail.tsx, response-chain.tsx, issue-header.tsx,
+input-box.tsx, header.tsx, footer.tsx, response-container.tsx, views.ts,
+types.ts, and Message_threads_excalidraw.txt
+
+
+1. DATA MODEL
+-------------
+
+Response is a doubly-linked list node with two axes:
+  .response / .responding_to  — vertical chain (main conversation or within-thread)
+  .reply / .replying_to       — horizontal branching (start a thread from any message)
+  .is_continuation             — true when this node is paragraph 2+ of a split message
+
+Issue.body is the root Response. Walking .response gives the main conversation.
+Any Response can have a .reply, which starts a thread. Threads can nest
+arbitrarily (reply to a reply, etc).
+
+ succeeded in 52ms:
+Message_threads.excalidraw — Text Analysis
+============================================
+
+Main Response Chain (vertical, top to bottom — the "Issue view"):
+
+1. Agent: "I worked on..." (red/pink background — first message)
+2. User: "great, now work on..."
+3. Agent: "I completed work on ..."
+4. User: "can you change ..."
+5. Agent: "I have implemented the change" (yellow/orange background)
+
+Arrows between these are labeled "User creates a Response" or "Agent creates a
+Response" — these follow the .response pointer (down).
+
+------------------------------------------------------------------------
+
+Reply Thread off Message #1 (horizontal, to the right — the "Reply view"):
+
+Starting from the first agent message "I worked on...", a horizontal arrow
+labeled "User creates a reply" leads to:
+
+thinking
+**Extending plan file read**
+exec
+/bin/zsh -lc "sed -n '261,520p' Message_threads_plan_v2.txt" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+    clears input
+
+onChange: updates inputValue instance property + forceUpdate
+Focus: TextInput.focus prop is true when focusedField === null
+
+
+14. DATA CHANGE HANDLING
+--------------------------
+
+When props.rootResponse changes (detected by reference comparison in render):
+  - If threadParentStack has a matching entry: restore selection to that index
+  - Otherwise: set selectedMessage to last message (scroll to bottom)
+  - Reset initialScrollDone flag
+
+initialScrollDone flag ensures we scroll to bottom on first render even if
+rootResponse doesn't change between constructor and first render.
+
+
+15. APP-LEVEL THREAD ENTRY
+----------------------------
+
+thinking
+**Planning source inspection strategy**
+codex
+I have the full requirements list now. I’m reading the current `detail/app/chain/container/header/input/types` code next to identify what should be kept intact versus replaced.
+exec
+/bin/zsh -lc "sed -n '1,260p' src/tui/views.ts" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,260p' src/tui/app.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,260p' src/tui/detail.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+export enum ViewType {
+    Dashboard,
+    Detail,
+    NewIssue,
+    AgentStatus,
+    BlockingMap,
+    GroupView,
+    Thread,
+}
+
+export const ViewTypeStringsMap = new Map<ViewType, string>([
+    [ViewType.Dashboard, "Dashboard"],
+    [ViewType.Detail, "Detail"],
+    [ViewType.NewIssue, "New Issue"],
+    [ViewType.AgentStatus, "Agent Status"],
+    [ViewType.BlockingMap, "Blocking Map"],
+    [ViewType.GroupView, "Group View"],
+    [ViewType.Thread, "Thread"],
+]);
+
+ succeeded in 52ms:
+import React from 'react';
+import { Box, Text, useInput, type Key } from 'ink';
+import type { Issue, Response, Container } from '../types.js';
+import type { View } from './views.js';
+import { ViewType } from './views.js';
+import { HEADER_LINES } from './header.js';
+import { GroupPicker } from './group-picker.js';
+import { IssueListPicker } from './issue-list-picker.js';
+import { ResponseContainer } from './response-container.js';
+import { IssueHeader, ISSUE_HEADER_LINE_COUNT } from './issue-header.js';
+import { InputBox, INPUT_AREA_LINES } from './input-box.js';
+import { ResponseChain, flattenToArray } from './response-chain.js';
+
+// ---- Helper functions ----
+
+/** Mark all replies on a node as seen. */
+function markRepliesSeen(node: Response): void {
+    const now = new Date().toISOString();
+    let r = node.reply;
+    while (r) {
+ succeeded in 52ms:
+import React from 'react';
+import { Box, Text } from 'ink';
+import { type View, ViewType } from './views.js';
+import { Header, HEADER_LINES } from './header.js';
+import { Footer } from './footer.js';
+import { NewIssue } from './newissue.js';
+import type { NewIssueData } from './newissue.js';
+import { Dashboard } from './dashboard.js';
+import { MOCK_ISSUES, MOCK_UNREAD_INUMS, MOCK_MAX_AGENTS, MOCK_DETAIL_DATA, MOCK_CONTAINERS } from './mock-data.js';
+import { DetailView, findResponseById, markRepliesSeen } from './detail.js';
+import { AgentStatus } from './agent-status.js';
+import { BlockingMap } from './blocking-map.js';
+import { GroupView, GROUP_MODE_INITIAL } from './group-view.js';
+import type { GroupMode } from './group-view.js';
+import { IssueStatus } from '../types.js';
+
+// [Phase A] Commented out — views now handle all their own keys via handleGlobalKey.
+// No App-level useInput needed. See keypress_handling.txt Step A.2.
+//
+// import type { ViewType } from './views.js';
+
+thinking
+**Continuing file exploration**
+exec
+/bin/zsh -lc "sed -n '261,520p' src/tui/detail.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,320p' src/tui/response-chain.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,320p' src/tui/response-container.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 50ms:
+            const stackTop = this.threadParentStack.length > 0
+                ? this.threadParentStack[this.threadParentStack.length - 1]
+                : null;
+            const restoredIndex = stackTop
+                ? messages.findIndex(r => r === stackTop)
+                : -1;
+            if (restoredIndex >= 0) {
+                this.threadParentStack.pop();
+                this.selectedMessage = restoredIndex;
+                this.initialScrollDone = true;
+            } else {
+                this.selectedMessage = Math.max(0, messages.length - 1);
+                this.initialScrollDone = false;
+            }
+        }
+
+        // Initial scroll to bottom
+        if (!this.initialScrollDone) {
+            const messages = flattenToArray(rootResponse);
+            if (messages.length > 0) {
+ succeeded in 50ms:
+import React from 'react';
+import { Box, Text } from 'ink';
+import type { Response } from '../types.js';
+import { AuthorType, AuthorTypeStringsMap, ResponseTypeStringsMap } from '../types.js';
+
+export interface ResponseContainerProps {
+    response: Response;
+    columns: number;
+    selected: boolean;
+    hasNewReplies: boolean;
+}
+
+/** Count nodes in a reply chain. */
+function countReplies(node: Response): number {
+    let count = 0;
+    let r = node.reply;
+    while (r) {
+        count++;
+        r = r.response;
+    }
+ succeeded in 50ms:
+import React from 'react';
+import { Box } from 'ink';
+import type { Response } from '../types.js';
+import { ResponseContainer } from './response-container.js';
+
+/** Check if any reply has a timestamp after userLastViewedAt and hasn't been seen. */
+function checkNewReplies(node: Response, userLastViewedAt: string): boolean {
+    let r = node.reply;
+    while (r) {
+        if (r.content.seen === null && r.content.timestamp > userLastViewedAt) return true;
+        r = r.response;
+    }
+    return false;
+}
+
+/** Walk a .response chain into a flat array. */
+export function flattenToArray(root: Response | null): Response[] {
+    const arr: Response[] = [];
+    let current = root;
+    while (current) {
+
+thinking
+**Inspecting header input types**
+exec
+/bin/zsh -lc "sed -n '1,300p' src/tui/issue-header.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,260p' src/tui/input-box.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,320p' src/types.ts" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+import React from 'react';
+import { Box, Text } from 'ink';
+import TextInput from 'ink-text-input';
+
+export const INPUT_AREA_LINES = 3; // separator + input prompt + (line from Box)
+
+export interface InputBoxProps {
+    value: string;
+    focused: boolean;
+    columns: number;
+    onChange: (value: string) => void;
+    onSubmit: (value: string) => void;
+}
+
+export class InputBox extends React.Component<InputBoxProps> {
+    render() {
+        const { value, focused, columns, onChange, onSubmit } = this.props;
+
+        return (
+            <>
+ succeeded in 52ms:
+
+/**
+ * The list of possible statuses that an issue can have
+ */
+
+export enum IssueStatus {
+  Active,
+  Awaiting,
+  Blocked,
+  Deferred,
+  Resolved
+}
+
+export const IssueStatusStringsMap = new Map<IssueStatus, string>([
+  [IssueStatus.Active, "Active"],
+  [IssueStatus.Awaiting, "Awaiting"],
+  [IssueStatus.Blocked, "Blocked"],
+  [IssueStatus.Deferred, "Deferred"],
+  [IssueStatus.Resolved, "Resolved"],
+]);
+ succeeded in 52ms:
+import React from 'react';
+import { Text } from 'ink';
+import type { Issue, Response } from '../types.js';
+import { IssueStatusStringsMap } from '../types.js';
+import { ResponseContainer } from './response-container.js';
+
+export const ISSUE_HEADER_LINE_COUNT = 5; // title + status + deps + hint + separator
+
+export interface IssueHeaderProps {
+    inum: number;
+    issue: Issue;
+    group: string;
+    blockedByStr: string;
+    blocksStr: string;
+    columns: number;
+    focusedField: number | null;
+    threadParent: Response | null;
+}
+
+// Field indices (must match detail.tsx constants)
+
+thinking
+**Assessing thread state communication**
+exec
+/bin/zsh -lc "sed -n '1,260p' src/tui/footer.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,260p' src/tui/header.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 51ms:
+import React, { memo } from 'react';
+import { Box, Text } from 'ink';
+import { type View, ViewType, ViewTypeStringsMap } from './views.js';
+
+export const HEADER_LINES = 3;
+
+export interface HeaderProps {
+    currentView: View;
+    columns: number;
+    activeAgents?: number;
+    unreadCount?: number;
+}
+
+const assertNever = (x: never): never => {
+    throw new Error(`Unhandled view: ${JSON.stringify(x)}`);
+};
+
+function getViewLabel(view: View): string {
+    if (view.type === ViewType.Detail) {
+        return `I-${view.inum} Detail`;
+ succeeded in 51ms:
+import React, { memo } from 'react';
+import { Box, Text } from 'ink';
+import { ViewType } from './views.js';
+
+export const FOOTER_LINES = 1;
+
+export interface Shortcut {
+    readonly key: string;
+    readonly label: string;
+    readonly disabled?: boolean;
+}
+
+export interface FooterProps {
+    readonly viewType: ViewType;
+}
+
+export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
+    [ViewType.Dashboard]: [
+        { key: 'Enter', label: 'View' },
+        { key: 'n',     label: 'New' },
+
+thinking
+**Reviewing overlay components**
+codex
+I’ve confirmed where thread/view labels currently leak into `Header/Footer`. I’m quickly checking overlay picker components so I can explicitly call keep-vs-rewrite with confidence.
+exec
+/bin/zsh -lc "sed -n '1,340p' src/tui/group-picker.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,340p' src/tui/issue-list-picker.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 51ms:
+import React from 'react';
+import { Box, Text, useInput, type Key } from 'ink';
+import type { Issue } from '../types.js';
+import { IssueStatusStringsMap } from '../types.js';
+import { statusToColor } from './status-color.js';
+
+// ---- Types ----
+
+export interface IssueListPickerProps {
+    title: string;
+    issues: Issue[];
+    selected: Set<number>;
+    onToggle: (inum: number) => void;
+    onClose: () => void;
+}
+
+// ---- Input bridge ----
+
+function IssueListInputBridge({ onKey }: { onKey: (input: string, key: Key) => void }) {
+    useInput(onKey);
+ succeeded in 51ms:
+import React from 'react';
+import { Box, Text, useInput, type Key } from 'ink';
+import TextInput from 'ink-text-input';
+import type { Container } from '../types.js';
+
+// ---- Types ----
+
+export interface GroupPickerProps {
+    containers: Container[];
+    currentGroup: string;
+    onSelect: (containerId: number) => void;
+    onCreate: (name: string) => void;
+    onClose: () => void;
+}
+
+// ---- Input bridge ----
+
+function GroupPickerInputBridge({ onKey }: { onKey: (input: string, key: Key) => void }) {
+    useInput(onKey);
+    return null;
+
+thinking
+**Proposing detailed architecture plan**
+codex
+No listed skill applies here (`skill-creator`/`skill-installer` are unrelated), so this is a direct architecture proposal.
+
+**1. Component Hierarchy**
+1. Keep `App` as global navigator only (no thread view type): [app.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/app.tsx), [views.ts](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/views.ts).
+2. Rewrite `DetailView` as one stateful controller component: [detail.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/detail.tsx).
+3. Split header rendering into two presentational components.
+`IssueMetaHeader` (5-line issue header), `ThreadParentHeader` (single `ResponseContainer` of parent).
+4. Keep `ResponseChain` as list renderer, but move windowing math to pure helpers: [response-chain.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/response-chain.tsx).
+5. Keep `InputBox` presentational: [input-box.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/input-box.tsx).
+6. Keep overlay UIs as leaf components, but host/route them from `DetailView`: [group-picker.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/group-picker.tsx), [issue-list-picker.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/issue-list-picker.tsx).
+
+**2. State Management**
+1. Use function components + `useReducer` in `DetailView`.
+2. Reason: this screen has coordinated transitions (thread enter/exit, overlay open/close, selection restore, focus mode) and reducer actions are clearer/safer than instance fields + `forceUpdate`.
+3. Ink-specific tradeoff: class components are fine, but reducer gives deterministic transitions and simpler testability for keyboard-heavy flows.
+
+Suggested state:
+```ts
+type FocusField = 'group' | 'blockedBy' | 'blocks' | null;
+type Overlay = 'none' | 'group' | 'blockedBy' | 'blocks';
+type ThreadFrame = { parentId: number; returnSelectedId: number | null };
+
+type DetailState = {
+  selectedIndex: number;
+  inputValue: string;
+  focusField: FocusField;
+  overlay: Overlay;
+  threadStack: ThreadFrame[];
+  blockedByDraft: Set<number>;
+  blocksDraft: Set<number>;
+};
+```
+
+**3. Thread Navigation (internal to DetailView)**
+1. `displayRoot` is derived from stack top.
+If `threadStack.length === 0`, use issue root.
+Else resolve top `parentId`, and use `parent.reply`.
+2. `enterThread()`:
+Get selected node from current visible chain.
+Push `{ parentId: selected.id, returnSelectedId: selected.id }`.
+Call `markRepliesSeen(selected)` immediately.
+Set `selectedIndex` to last message in new chain (or `0` if empty).
+3. `exitThread()`:
+If stack empty, call `onBack`.
+Else pop one frame, call `markRepliesSeen(poppedParent)` (fixes current bug).
+Recompute outer chain and restore selection by `parentId`; fallback to last index if missing.
+4. Nested threads are automatic because each level is just another frame push/pop.
+5. This removes App-level `findResponseById`/`ViewType.Thread` coupling entirely.
+
+**4. Virtual Scrolling**
+1. Move `deriveFirstVisible` and `computeLastVisible` into pure helpers (new `detail-windowing.ts`).
+2. Keep rendering in `ResponseChain`.
+3. Use lazy height cache keyed by `(response.id, columns)` to avoid recomputing line counts every render.
+4. Keep `ResponseContainer.computeLineCount` as the source of truth for layout consistency.
+
+**5. Data Flow**
+1. App -> DetailView should pass only issue-level data and callbacks, never thread-root props.
+2. Remove `threadParentResponse` and `onNavigate` from Detail props.
+3. Add `onThreadStateChange(info)` so App can update header/footer mode.
+```ts
+type ThreadInfo = { inThread: boolean; depth: number; parentId: number | null };
+
+interface DetailViewProps {
+  inum: number;
+  issue: Issue;
+  rootResponse: Response | null;
+  columns: number;
+  rows: number;
+  blockedBy: number[];
+  blocks: number[];
+  group: string;
+  containers?: Container[];
+  allIssues?: Issue[];
+  userLastViewedAt?: string | null;
+  onBack?: () => void;
+  onSend?: (message: string) => void;
+  onNavigateIssue?: (inum: number) => void;
+  onGroupChange?: (containerId: number) => void;
+  onGroupCreate?: (name: string) => void;
+  onBlockedByChange?: (blockerInums: number[]) => void;
+  onBlocksChange?: (blockedInums: number[]) => void;
+  onThreadStateChange?: (info: ThreadInfo) => void;
+}
+```
+4. Header/Footer consume `inThread` from App, not `ViewType.Thread`: [header.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/header.tsx), [footer.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/footer.tsx).
+
+**6. Keep vs Rewrite**
+1. Keep data model unchanged: [types.ts](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/types.ts).
+2. Keep `ResponseContainer` visual rendering mostly intact, but move new-reply detection into it (as planned): [response-container.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/response-container.tsx).
+3. Rewrite `DetailView` completely.
+4. Rewrite `ResponseChain` structure lightly (math extraction + cache), not full visual rewrite.
+5. Keep overlay picker components; rewrite only their orchestration lifecycle in `DetailView`.
+
+**7. Excalidraw Alignment**
+1. Yes, supports 2-level nested thread: stack depth naturally handles `main -> thread -> sub-thread`.
+2. Yes, entering thread shows `threadParent.reply` as chain root.
+3. Yes, exiting restores cursor to `threadParent` in the outer chain by `parentId`.
+4. Yes, terminal actions (“Resolve Thread/Issue”) can be surfaced by checking whether current selected node has `response === null` in current `displayRoot` context.
+
+Strong recommendation: remove `ViewType.Thread` entirely and make `DetailView` a self-contained state machine with reducer + stack-by-id. This is the clean break that eliminates the current fragility.
+tokens used
+26,726
+No listed skill applies here (`skill-creator`/`skill-installer` are unrelated), so this is a direct architecture proposal.
+
+**1. Component Hierarchy**
+1. Keep `App` as global navigator only (no thread view type): [app.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/app.tsx), [views.ts](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/views.ts).
+2. Rewrite `DetailView` as one stateful controller component: [detail.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/detail.tsx).
+3. Split header rendering into two presentational components.
+`IssueMetaHeader` (5-line issue header), `ThreadParentHeader` (single `ResponseContainer` of parent).
+4. Keep `ResponseChain` as list renderer, but move windowing math to pure helpers: [response-chain.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/response-chain.tsx).
+5. Keep `InputBox` presentational: [input-box.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/input-box.tsx).
+6. Keep overlay UIs as leaf components, but host/route them from `DetailView`: [group-picker.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/group-picker.tsx), [issue-list-picker.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/issue-list-picker.tsx).
+
+**2. State Management**
+1. Use function components + `useReducer` in `DetailView`.
+2. Reason: this screen has coordinated transitions (thread enter/exit, overlay open/close, selection restore, focus mode) and reducer actions are clearer/safer than instance fields + `forceUpdate`.
+3. Ink-specific tradeoff: class components are fine, but reducer gives deterministic transitions and simpler testability for keyboard-heavy flows.
+
+Suggested state:
+```ts
+type FocusField = 'group' | 'blockedBy' | 'blocks' | null;
+type Overlay = 'none' | 'group' | 'blockedBy' | 'blocks';
+type ThreadFrame = { parentId: number; returnSelectedId: number | null };
+
+type DetailState = {
+  selectedIndex: number;
+  inputValue: string;
+  focusField: FocusField;
+  overlay: Overlay;
+  threadStack: ThreadFrame[];
+  blockedByDraft: Set<number>;
+  blocksDraft: Set<number>;
+};
+```
+
+**3. Thread Navigation (internal to DetailView)**
+1. `displayRoot` is derived from stack top.
+If `threadStack.length === 0`, use issue root.
+Else resolve top `parentId`, and use `parent.reply`.
+2. `enterThread()`:
+Get selected node from current visible chain.
+Push `{ parentId: selected.id, returnSelectedId: selected.id }`.
+Call `markRepliesSeen(selected)` immediately.
+Set `selectedIndex` to last message in new chain (or `0` if empty).
+3. `exitThread()`:
+If stack empty, call `onBack`.
+Else pop one frame, call `markRepliesSeen(poppedParent)` (fixes current bug).
+Recompute outer chain and restore selection by `parentId`; fallback to last index if missing.
+4. Nested threads are automatic because each level is just another frame push/pop.
+5. This removes App-level `findResponseById`/`ViewType.Thread` coupling entirely.
+
+**4. Virtual Scrolling**
+1. Move `deriveFirstVisible` and `computeLastVisible` into pure helpers (new `detail-windowing.ts`).
+2. Keep rendering in `ResponseChain`.
+3. Use lazy height cache keyed by `(response.id, columns)` to avoid recomputing line counts every render.
+4. Keep `ResponseContainer.computeLineCount` as the source of truth for layout consistency.
+
+**5. Data Flow**
+1. App -> DetailView should pass only issue-level data and callbacks, never thread-root props.
+2. Remove `threadParentResponse` and `onNavigate` from Detail props.
+3. Add `onThreadStateChange(info)` so App can update header/footer mode.
+```ts
+type ThreadInfo = { inThread: boolean; depth: number; parentId: number | null };
+
+interface DetailViewProps {
+  inum: number;
+  issue: Issue;
+  rootResponse: Response | null;
+  columns: number;
+  rows: number;
+  blockedBy: number[];
+  blocks: number[];
+  group: string;
+  containers?: Container[];
+  allIssues?: Issue[];
+  userLastViewedAt?: string | null;
+  onBack?: () => void;
+  onSend?: (message: string) => void;
+  onNavigateIssue?: (inum: number) => void;
+  onGroupChange?: (containerId: number) => void;
+  onGroupCreate?: (name: string) => void;
+  onBlockedByChange?: (blockerInums: number[]) => void;
+  onBlocksChange?: (blockedInums: number[]) => void;
+  onThreadStateChange?: (info: ThreadInfo) => void;
+}
+```
+4. Header/Footer consume `inThread` from App, not `ViewType.Thread`: [header.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/header.tsx), [footer.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/footer.tsx).
+
+**6. Keep vs Rewrite**
+1. Keep data model unchanged: [types.ts](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/types.ts).
+2. Keep `ResponseContainer` visual rendering mostly intact, but move new-reply detection into it (as planned): [response-container.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/response-container.tsx).
+3. Rewrite `DetailView` completely.
+4. Rewrite `ResponseChain` structure lightly (math extraction + cache), not full visual rewrite.
+5. Keep overlay picker components; rewrite only their orchestration lifecycle in `DetailView`.
+
+**7. Excalidraw Alignment**
+1. Yes, supports 2-level nested thread: stack depth naturally handles `main -> thread -> sub-thread`.
+2. Yes, entering thread shows `threadParent.reply` as chain root.
+3. Yes, exiting restores cursor to `threadParent` in the outer chain by `parentId`.
+4. Yes, terminal actions (“Resolve Thread/Issue”) can be surfaced by checking whether current selected node has `response === null` in current `displayRoot` context.
+
+Strong recommendation: remove `ViewType.Thread` entirely and make `DetailView` a self-contained state machine with reducer + stack-by-id. This is the clean break that eliminates the current fragility.
+Waiting for the debugger to disconnect...

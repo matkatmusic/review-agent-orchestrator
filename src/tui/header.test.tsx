@@ -17,16 +17,16 @@ describe('Header', () => {
 
     it('shows app title on Dashboard', () => {
         const { lastFrame } = render(
-            <Header currentView={{ type: ViewType.Dashboard }} columns={defaultColumns} />
+            <Header currentView={{ type: ViewType.Home }} columns={defaultColumns} />
         );
         expect(lastFrame()).toContain('Review Agent Orchestrator');
     });
 
-    it('shows view name "Dashboard" in title', () => {
+    it('shows view name "Home" in title', () => {
         const { lastFrame } = render(
-            <Header currentView={{ type: ViewType.Dashboard }} columns={defaultColumns} />
+            <Header currentView={{ type: ViewType.Home }} columns={defaultColumns} />
         );
-        expect(lastFrame()).toContain('Dashboard');
+        expect(lastFrame()).toContain('Home');
     });
 
     it('shows view name "Detail" with inum in title', () => {
@@ -68,7 +68,7 @@ describe('Header', () => {
 
     it('title line contains ─ box-drawing characters', () => {
         const { lastFrame } = render(
-            <Header currentView={{ type: ViewType.Dashboard }} columns={defaultColumns} />
+            <Header currentView={{ type: ViewType.Home }} columns={defaultColumns} />
         );
         const lines = lastFrame()!.split('\n');
         expect(lines[0]).toContain('─');
@@ -76,12 +76,12 @@ describe('Header', () => {
 
     // ---- Subtitle line (line 3) — view-specific description ----
 
-    it('Dashboard subtitle describes overview', () => {
+    it('Home subtitle describes issues', () => {
         const { lastFrame } = render(
-            <Header currentView={{ type: ViewType.Dashboard }} columns={defaultColumns} />
+            <Header currentView={{ type: ViewType.Home }} columns={defaultColumns} />
         );
         const frame = lastFrame()!;
-        expect(frame).toMatch(/overview/i);
+        expect(frame).toMatch(/issues/i);
     });
 
     it('Detail subtitle references the inum', () => {
@@ -129,7 +129,7 @@ describe('Header', () => {
     it('shows active agent count when provided', () => {
         const { lastFrame } = render(
             <Header
-                currentView={{ type: ViewType.Dashboard }}
+                currentView={{ type: ViewType.Home }}
                 columns={defaultColumns}
                 activeAgents={3}
             />
@@ -140,7 +140,7 @@ describe('Header', () => {
     it('shows unread count when provided', () => {
         const { lastFrame } = render(
             <Header
-                currentView={{ type: ViewType.Dashboard }}
+                currentView={{ type: ViewType.Home }}
                 columns={defaultColumns}
                 unreadCount={5}
             />
@@ -151,7 +151,7 @@ describe('Header', () => {
     it('shows both indicators together', () => {
         const { lastFrame } = render(
             <Header
-                currentView={{ type: ViewType.Dashboard }}
+                currentView={{ type: ViewType.Home }}
                 columns={defaultColumns}
                 activeAgents={2}
                 unreadCount={8}
@@ -164,7 +164,7 @@ describe('Header', () => {
 
     it('omits indicators when not provided', () => {
         const { lastFrame } = render(
-            <Header currentView={{ type: ViewType.Dashboard }} columns={defaultColumns} />
+            <Header currentView={{ type: ViewType.Home }} columns={defaultColumns} />
         );
         const frame = lastFrame()!;
         expect(frame).not.toContain('Agents:');
@@ -175,7 +175,7 @@ describe('Header', () => {
 
     it('renders without crash at narrow width (40 columns)', () => {
         const { lastFrame } = render(
-            <Header currentView={{ type: ViewType.Dashboard }} columns={40} />
+            <Header currentView={{ type: ViewType.Home }} columns={40} />
         );
         expect(lastFrame()).toBeDefined();
         expect(lastFrame()).toContain('Review Agent Orchestrator');
@@ -183,7 +183,7 @@ describe('Header', () => {
 
     it('renders without crash at wide width (160 columns)', () => {
         const { lastFrame } = render(
-            <Header currentView={{ type: ViewType.Dashboard }} columns={160} />
+            <Header currentView={{ type: ViewType.Home }} columns={160} />
         );
         expect(lastFrame()).toBeDefined();
         expect(lastFrame()).toContain('Review Agent Orchestrator');
@@ -194,7 +194,7 @@ describe('Header', () => {
     it('renders exactly 3 lines with indicators', () => {
         const { lastFrame } = render(
             <Header
-                currentView={{ type: ViewType.Dashboard }}
+                currentView={{ type: ViewType.Home }}
                 columns={defaultColumns}
                 activeAgents={1}
                 unreadCount={2}
@@ -206,7 +206,7 @@ describe('Header', () => {
 
     it('renders exactly 3 lines without indicators', () => {
         const { lastFrame } = render(
-            <Header currentView={{ type: ViewType.Dashboard }} columns={defaultColumns} />
+            <Header currentView={{ type: ViewType.Home }} columns={defaultColumns} />
         );
         const lines = lastFrame()!.split('\n');
         expect(lines).toHaveLength(3);
@@ -217,7 +217,7 @@ describe('Header', () => {
     it('shows Agents: 0 when activeAgents is 0', () => {
         const { lastFrame } = render(
             <Header
-                currentView={{ type: ViewType.Dashboard }}
+                currentView={{ type: ViewType.Home }}
                 columns={defaultColumns}
                 activeAgents={0}
             />
@@ -228,7 +228,7 @@ describe('Header', () => {
     it('shows Unread: 0 when unreadCount is 0', () => {
         const { lastFrame } = render(
             <Header
-                currentView={{ type: ViewType.Dashboard }}
+                currentView={{ type: ViewType.Home }}
                 columns={defaultColumns}
                 unreadCount={0}
             />

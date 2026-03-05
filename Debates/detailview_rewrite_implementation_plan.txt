@@ -1,0 +1,676 @@
+DETAIL VIEW REWRITE — IMPLEMENTATION PLAN
+==========================================
+
+This plan implements the architecture from detailview_rewrite_debate_synthesis.txt.
+All three agents (Gemini, Codex, Claude) reached consensus on the core design.
+User decision: class components with forceUpdate(). setState migration deferred.
+
+
+GUIDING PRINCIPLES
+==================
+
+1. Thread navigation is INTERNAL to DetailView. App never knows about threads.
+2. The displayed chain is always derived from the thread stack at render time.
+3. No render-phase mutations. All state changes happen in event handlers.
+4. Class components with forceUpdate() throughout (matching existing codebase).
+5. No new files. No new abstractions. Minimal delta from current file set.
+
+
+========================================================================
+PHASE A: DetailView Rewrite (detail.tsx)
+========================================================================
+
+Rewrite detail.tsx from scratch. This is the largest change.
+
+FILE: src/tui/detail.tsx
+
+INSTANCE PROPERTIES (all set in constructor):
+
+    inputValue: string = ''
+    focusedField: number | null = null
+    overlay: OverlayType = OverlayType.None
+    blockedBySet: Set<number>              // from props.blockedBy
+    blocksSet: Set<number>                 // from props.blocks
+    selectedMessage: number                // initialized to last message
+    threadStack: Array<ThreadStackEntry> = []
+
+    where ThreadStackEntry = {
+        parent: Response,              // the Response node we threaded into
+        savedSelectedIndex: number     // cursor position to restore on exit
+    }
+
+    No lastRootResponse. No initialScrollDone. No threadParentStack.
+    Those were render-phase mutation hacks. Gone.
+
+DERIVED VALUES (computed in render, not stored):
+
+    const isInThread = this.threadStack.length > 0
+    const threadParent = isInThread
+        ? this.threadStack[this.threadStack.length - 1].parent
+        : null
+    const displayedRoot = isInThread
+        ? threadParent.reply
+        : this.props.rootResponse
+    const messages = flattenToArray(displayedRoot)
+
+CONSTRUCTOR:
+
+    constructor(props: DetailViewProps) {
+        super(props);
+        this.inputValue = '';
+        this.focusedField = null;
+        this.overlay = OverlayType.None;
+        this.blockedBySet = new Set(props.blockedBy);
+        this.blocksSet = new Set(props.blocks);
+        this.threadStack = [];
+        const messages = flattenToArray(props.rootResponse);
+        this.selectedMessage = Math.max(0, messages.length - 1);
+    }
+
+ENTER THREAD (new method):
+
+    enterThread() {
+        const messages = this.currentMessages();   // flattenToArray of current chain
+        const selected = messages[this.selectedMessage];
+        if (!selected || !selected.reply) return;  // nothing to thread into
+
+        // Mark replies seen on enter
+        markRepliesSeen(selected);
+
+        // Push current position onto stack
+        this.threadStack.push({
+            parent: selected,
+            savedSelectedIndex: this.selectedMessage,
+        });
+
+        // Move cursor to last message in new chain
+        const threadMessages = flattenToArray(selected.reply);
+        this.selectedMessage = Math.max(0, threadMessages.length - 1);
+
+        // Notify App of thread state change
+        this.props.onThreadStateChange({ inThread: true });
+
+        this.forceUpdate();
+    }
+
+EXIT THREAD (new method):
+
+    exitThread() {
+        if (this.threadStack.length === 0) {
+            // Not in a thread — exit the view
+            this.props.onBack();
+            return;
+        }
+
+        // Pop the stack
+        const popped = this.threadStack.pop()!;
+
+        // Mark replies seen on exit (fixes the existing bug)
+        markRepliesSeen(popped.parent);
+
+        // Restore cursor position
+        this.selectedMessage = popped.savedSelectedIndex;
+
+        // Notify App of thread state change
+        const stillInThread = this.threadStack.length > 0;
+        this.props.onThreadStateChange({ inThread: stillInThread });
+
+        this.forceUpdate();
+    }
+
+HELPER (used by enterThread, exitThread, handleKey, render):
+
+    currentMessages(): Response[] {
+        const isInThread = this.threadStack.length > 0;
+        const threadParent = isInThread
+            ? this.threadStack[this.threadStack.length - 1].parent
+            : null;
+        const displayedRoot = threadParent
+            ? threadParent.reply
+            : this.props.rootResponse;
+        return flattenToArray(displayedRoot);
+    }
+
+HEADER LINE COUNT (getter, replaces current):
+
+    get headerLineCount(): number {
+        if (this.threadStack.length > 0) {
+            const parent = this.threadStack[this.threadStack.length - 1].parent;
+            return ResponseContainer.computeLineCount(
+                parent.content.body,
+                this.props.columns,
+            );
+        }
+        return ISSUE_HEADER_LINE_COUNT;
+    }
+
+CONVERSATION HEIGHT (getter, unchanged):
+
+    get conversationHeight(): number {
+        return Math.max(
+            1,
+            this.props.rows - HEADER_LINES - this.headerLineCount - INPUT_AREA_LINES,
+        );
+    }
+
+HANDLE KEY (rewrite — key changes marked with ***):
+
+    handleKey = (_input: string, key: Key) => {
+        if (this.overlay !== OverlayType.None) return;
+
+        // *** Esc: exit thread if in thread, otherwise exit view
+        if (key.escape) {
+            this.exitThread();      // exitThread handles both cases
+            return;
+        }
+
+        // *** Thread enter: Ctrl+Shift+.  (i.e. Ctrl+>)
+        if (key.ctrl && key.shift && _input === '.') {
+            this.enterThread();
+            return;
+        }
+
+        // Thread exit is handled by Esc above — no separate keybind needed.
+
+        // Adjacent issue navigation (unchanged)
+        if (key.shift && (key.leftArrow || key.rightArrow)) {
+            this.navigateToAdjacentIssue(key.rightArrow ? 1 : -1);
+            return;
+        }
+
+        // Tab field cycling (unchanged)
+        if (key.tab) {
+            this.cycleField(key.shift ? -1 : 1);
+            return;
+        }
+
+        // Enter on focused field opens overlay (unchanged)
+        if (key.return && this.focusedField !== null) {
+            this.openOverlayForField();
+            return;
+        }
+
+        // Up/down scrolling (*** uses currentMessages instead of props)
+        const messages = this.currentMessages();
+        if (key.upArrow) {
+            if (this.selectedMessage > 0) {
+                this.selectedMessage--;
+                this.forceUpdate();
+            }
+        } else if (key.downArrow) {
+            if (this.selectedMessage < messages.length - 1) {
+                this.selectedMessage++;
+                this.forceUpdate();
+            }
+        }
+    };
+
+RENDER (rewrite — key changes marked with ***):
+
+    render() {
+        // ... overlay rendering stays the same ...
+
+        // *** Derive the displayed chain from the thread stack
+        const isInThread = this.threadStack.length > 0;
+        const threadParent = isInThread
+            ? this.threadStack[this.threadStack.length - 1].parent
+            : null;
+        const displayedRoot = threadParent
+            ? threadParent.reply
+            : this.props.rootResponse;
+
+        // *** Build dep strings (only used in issue mode)
+        const blockedByArr = [...this.blockedBySet];
+        const blockedByStr = blockedByArr.length > 0
+            ? blockedByArr.map(n => `I-${n}`).join(', ')
+            : '(none)';
+        const blocksArr = [...this.blocksSet];
+        const blocksStr = blocksArr.length > 0
+            ? blocksArr.map(n => `I-${n}`).join(', ')
+            : '(none)';
+
+        return (
+            <Box flexDirection="column">
+                <DetailInputBridge onKey={this.handleKey} />
+
+                {/* *** INLINE CONDITIONAL — no ThreadParentHeader component */}
+                {isInThread ? (
+                    <ResponseContainer
+                        response={threadParent!}
+                        columns={columns}
+                        selected={false}
+                        hasNewReplies={false}
+                    />
+                ) : (
+                    <IssueHeader
+                        inum={inum}
+                        issue={issue}
+                        group={group}
+                        blockedByStr={blockedByStr}
+                        blocksStr={blocksStr}
+                        columns={columns}
+                        focusedField={this.focusedField}
+                    />
+                )}
+
+                {/* *** Pass displayedRoot instead of props.rootResponse */}
+                <ResponseChain
+                    rootResponse={displayedRoot}
+                    columns={columns}
+                    height={this.conversationHeight}
+                    userLastViewedAt={this.props.userLastViewedAt ?? null}
+                    selectedIndex={this.selectedMessage}
+                />
+
+                <InputBox
+                    value={this.inputValue}
+                    focused={this.focusedField === null}
+                    columns={columns}
+                    onChange={this.handleInputChange}
+                    onSubmit={this.handleInputSubmit}
+                />
+            </Box>
+        );
+    }
+
+PROPS INTERFACE (after rewrite):
+
+    export interface DetailViewProps {
+        inum: number;
+        issue: Issue;
+        rootResponse: Response | null;
+        blockedBy: number[];
+        blocks: number[];
+        group: string;
+        columns: number;
+        rows: number;
+        containers?: Container[];
+        allIssues?: Issue[];
+        userLastViewedAt?: string | null;
+        onBack: () => void;
+        onSend: (message: string) => void;
+        onQuit: () => void;
+        onGroupChange: (containerId: number) => void;
+        onGroupCreate: (name: string) => void;
+        onBlockedByChange: (blockerInums: number[]) => void;
+        onBlocksChange: (blockedInums: number[]) => void;
+        onNavigateIssue: (inum: number) => void;
+        onThreadStateChange: (info: { inThread: boolean }) => void;
+    }
+
+    REMOVED: threadParentResponse, onNavigate
+    ADDED:   onThreadStateChange
+    CHANGED: onBack, onSend now required (not optional)
+
+WHAT IS REMOVED FROM detail.tsx:
+
+    - lastRootResponse instance property
+    - initialScrollDone instance property
+    - threadParentStack instance property (replaced by threadStack)
+    - Render-phase rootResponse change detection (lines 256-284 of current)
+    - Render-phase initialScrollDone logic (lines 278-284 of current)
+    - findResponseById export (moved or kept only if needed by tests)
+    - markRepliesSeen export (kept but used only internally + by App during navigateToView)
+
+WHAT IS KEPT:
+
+    - DetailInputBridge (tiny useInput bridge into class)
+    - OverlayType enum and DETAIL_FIELD_COUNT/FIELD_* constants
+    - cycleField, openOverlayForField, closeOverlay methods
+    - navigateToAdjacentIssue method
+    - handleInputChange, handleInputSubmit methods
+    - All overlay rendering (GroupPicker, IssueListPicker)
+    - markRepliesSeen function (stays at top of file)
+    - findResponseById function (stays at top of file)
+
+
+========================================================================
+PHASE B: IssueHeader Cleanup (issue-header.tsx)
+========================================================================
+
+FILE: src/tui/issue-header.tsx
+
+CHANGES:
+
+1. Remove threadParent from IssueHeaderProps.
+2. Remove the lineCount getter entirely.
+   DetailView now computes headerLineCount itself.
+3. Remove the if (threadParent) branch in render().
+4. Remove the ResponseContainer import.
+
+AFTER:
+
+    export interface IssueHeaderProps {
+        inum: number;
+        issue: Issue;
+        group: string;
+        blockedByStr: string;
+        blocksStr: string;
+        columns: number;
+        focusedField: number | null;
+        // NO threadParent
+    }
+
+    export class IssueHeader extends React.Component<IssueHeaderProps> {
+        render() {
+            // Only the 5-line metadata block. No conditional.
+            // Identical to current code lines 50-68, minus the threadParent branch.
+        }
+    }
+
+
+========================================================================
+PHASE C: App / Header / Footer Cleanup
+========================================================================
+
+THREE FILES: src/tui/views.ts, src/tui/app.tsx, src/tui/header.tsx, src/tui/footer.tsx
+
+--- views.ts ---
+
+1. Remove ViewType.Thread from enum.
+2. Remove Thread entry from ViewTypeStringsMap.
+3. Remove Thread variant from View union type.
+
+AFTER:
+
+    export enum ViewType {
+        Dashboard,
+        Detail,
+        NewIssue,
+        AgentStatus,
+        BlockingMap,
+        GroupView,
+    }
+
+    export type View =
+        | { type: ViewType.Dashboard }
+        | { type: ViewType.Detail; inum: number }
+        | { type: ViewType.NewIssue }
+        | { type: ViewType.AgentStatus }
+        | { type: ViewType.BlockingMap }
+        | { type: ViewType.GroupView };
+
+--- app.tsx ---
+
+1. Remove the ViewType.Thread case from App.render() (lines 157-184).
+2. Remove Thread-specific logic from navigateToView() (lines 81-87).
+3. Remove findResponseById and markRepliesSeen imports.
+4. Add threadInfo instance property:
+
+    threadInfo: { inThread: boolean } = { inThread: false };
+
+5. Wire onThreadStateChange into DetailView:
+
+    <DetailView
+        ...
+        onBack={() => this.goBackToPreviousView()}
+        onSend={(msg) => { /* send logic */ }}
+        onNavigateIssue={(inum) => this.replaceCurrentView({ type: ViewType.Detail, inum })}
+        onQuit={() => this.props.onExit?.()}
+        onThreadStateChange={(info) => {
+            this.threadInfo = info;
+            this.forceUpdate();
+        }}
+    />
+
+6. Pass threadInfo to Header:
+
+    <Header
+        currentView={this.currentView}
+        columns={this.columns}
+        activeAgents={...}
+        unreadCount={...}
+        threadInfo={this.threadInfo}
+    />
+
+7. Pass threadInfo.inThread to Footer:
+
+    <Footer
+        viewType={this.currentView.type}
+        inThread={this.threadInfo.inThread}
+    />
+
+--- header.tsx ---
+
+1. Add threadInfo to HeaderProps:
+
+    export interface HeaderProps {
+        currentView: View;
+        columns: number;
+        activeAgents?: number;
+        unreadCount?: number;
+        threadInfo?: { inThread: boolean };
+    }
+
+2. Update getViewLabel: remove Thread case. Use threadInfo:
+
+    function getViewLabel(view: View, threadInfo?: { inThread: boolean }): string {
+        if (view.type === ViewType.Detail) {
+            if (threadInfo?.inThread) return `I-${view.inum} Thread`;
+            return `I-${view.inum} Detail`;
+        }
+        return ViewTypeStringsMap.get(view.type) ?? String(view.type);
+    }
+
+3. Update getSubtitle: remove Thread case. Use threadInfo:
+
+    function getSubtitle(view: View, threadInfo?: { inThread: boolean }): string {
+        switch (view.type) {
+            case ViewType.Dashboard: ...
+            case ViewType.Detail:
+                if (threadInfo?.inThread) return `Thread on I-${view.inum}`;
+                return `Viewing issue I-${view.inum}`;
+            ...
+        }
+    }
+
+4. Remove assertNever Thread case (it will now be exhaustive without Thread).
+
+--- footer.tsx ---
+
+1. Remove ViewType.Thread entry from VIEW_SHORTCUTS.
+
+2. Add inThread prop to FooterProps:
+
+    export interface FooterProps {
+        readonly viewType: ViewType;
+        readonly inThread?: boolean;
+    }
+
+3. Update FooterComponent to swap shortcuts when inThread:
+
+    const FooterComponent: React.FC<FooterProps> = ({ viewType, inThread }) => {
+        let shortcuts = VIEW_SHORTCUTS[viewType];
+        if (viewType === ViewType.Detail && inThread) {
+            shortcuts = [
+                { key: 'Enter', label: 'Send' },
+                { key: '\u2191\u2193', label: 'Scroll' },
+                { key: 'C->', label: 'Sub-thread' },
+                { key: 'Esc', label: 'Exit thread' },
+            ];
+        }
+        // ... rest unchanged
+    };
+
+
+========================================================================
+PHASE D: ResponseChain Cleanup (response-chain.tsx)
+========================================================================
+
+FILE: src/tui/response-chain.tsx
+
+1. Extract deriveFirstVisible as a standalone exported function:
+
+    export function deriveFirstVisible(
+        messages: Response[],
+        selectedIndex: number,
+        columns: number,
+        height: number,
+    ): number {
+        // ... same logic, but uses function params instead of this.props
+    }
+
+2. Extract computeLastVisible as a standalone exported function:
+
+    export function computeLastVisible(
+        messages: Response[],
+        firstVisible: number,
+        columns: number,
+        height: number,
+    ): number {
+        // ... same logic, but uses function params instead of this.props
+    }
+
+3. Remove onSelectedIndexChange from ResponseChainProps (dead code — never
+   actually called in current implementation):
+
+    export interface ResponseChainProps {
+        rootResponse: Response | null;
+        columns: number;
+        height: number;
+        userLastViewedAt: string | null;
+        selectedIndex: number;
+        // NO onSelectedIndexChange
+    }
+
+4. Update render() to call standalone functions instead of this.methods:
+
+    render() {
+        const { rootResponse, columns, height, userLastViewedAt, selectedIndex } = this.props;
+        const messages = flattenToArray(rootResponse);
+        if (messages.length === 0) return <Box .../>;
+
+        const firstVisible = deriveFirstVisible(messages, selectedIndex, columns, height);
+        const lastVisible = computeLastVisible(messages, firstVisible, columns, height);
+        // ... rest unchanged
+    }
+
+
+========================================================================
+IMPLEMENTATION ORDER
+========================================================================
+
+The phases have dependencies:
+
+    A (detail.tsx) can be done first — it's the foundation.
+    B (issue-header.tsx) can be done in parallel with A.
+    C (views.ts, app.tsx, header.tsx, footer.tsx) depends on A.
+    D (response-chain.tsx) can be done in parallel with A/B/C.
+
+Recommended order for a single developer:
+
+    1. Phase D — ResponseChain cleanup (smallest, no deps)
+    2. Phase B — IssueHeader cleanup (small, no deps)
+    3. Phase A — DetailView rewrite (largest, depends on B for IssueHeader interface)
+    4. Phase C — App/Header/Footer cleanup (depends on A for DetailViewProps)
+
+This order means each phase's outputs are available when the next phase needs them.
+
+
+========================================================================
+TESTING STRATEGY
+========================================================================
+
+Each phase should be testable independently:
+
+Phase D: Unit test deriveFirstVisible and computeLastVisible with mock
+         Response arrays. These are now pure functions — no React mount needed.
+
+Phase B: Snapshot test IssueHeader with the new (simpler) props interface.
+
+Phase A: Integration test DetailView with:
+         - Basic render (issue mode, no thread)
+         - enterThread: verify thread stack push, cursor moves to end of thread chain
+         - exitThread: verify thread stack pop, cursor restored
+         - Nested thread: enter -> enter -> exit -> exit, verify cursor at each level
+         - markRepliesSeen called on enter AND exit
+         - Esc in issue mode calls onBack
+         - Esc in thread mode calls exitThread (not onBack)
+         - Up/down scrolling respects current chain (not always props.rootResponse)
+
+Phase C: Integration test App:
+         - Verify ViewType.Thread is gone from the enum
+         - Verify Header shows "Thread" label when threadInfo.inThread is true
+         - Verify Footer shows thread shortcuts when inThread is true
+
+
+========================================================================
+EXCALIDRAW SCENARIO VALIDATION
+========================================================================
+
+These scenarios from the Excalidraw diagram are all handled by the architecture:
+
+1. LINEAR 5-MESSAGE ISSUE CONVERSATION:
+   threadStack = []
+   displayedRoot = props.rootResponse
+   messages = flattenToArray(rootResponse) = [msg1, msg2, msg3, msg4, msg5]
+   IssueHeader renders 5-line metadata block.
+
+2. THREAD OFF MESSAGE #1 (4 REPLIES DEEP):
+   User selects msg1, presses Ctrl+Shift+..
+   enterThread() pushes { parent: msg1, savedSelectedIndex: 0 }.
+   displayedRoot = msg1.reply
+   messages = flattenToArray(msg1.reply) = [reply1, reply2, reply3, reply4]
+   Header area shows msg1 as a ResponseContainer (inline conditional).
+   selectedMessage = 3 (last reply).
+
+3. NESTED THREAD (reply to reply2 "Tweak implemented"):
+   While in thread from step 2, user selects reply2, presses Ctrl+Shift+..
+   enterThread() pushes { parent: reply2, savedSelectedIndex: 1 }.
+   threadStack now has 2 entries.
+   displayedRoot = reply2.reply
+   messages = flattenToArray(reply2.reply) = [nestedReply1, nestedReply2]
+   Header area shows reply2 as a ResponseContainer.
+   selectedMessage = 1 (last nested reply).
+
+4. EXIT NESTED THREAD:
+   User presses Esc.
+   exitThread() pops { parent: reply2, savedSelectedIndex: 1 }.
+   threadStack back to 1 entry.
+   displayedRoot = msg1.reply (back to first-level thread).
+   selectedMessage = 1 (restored to reply2).
+   markRepliesSeen(reply2) called.
+
+5. EXIT FIRST-LEVEL THREAD:
+   User presses Esc again.
+   exitThread() pops { parent: msg1, savedSelectedIndex: 0 }.
+   threadStack empty.
+   displayedRoot = props.rootResponse (back to issue view).
+   selectedMessage = 0 (restored to msg1).
+   markRepliesSeen(msg1) called.
+   IssueHeader renders 5-line metadata block again.
+
+6. THREAD OFF MESSAGE #5 (BUG REPORT, 1 REPLY):
+   User selects msg5 (index 4), presses Ctrl+Shift+..
+   enterThread() pushes { parent: msg5, savedSelectedIndex: 4 }.
+   displayedRoot = msg5.reply
+   messages = [bugReply]
+   selectedMessage = 0.
+
+7. THREAD INTO MESSAGE WITH NO REPLIES:
+   User selects a message with no reply. Ctrl+Right.
+   enterThread() checks: if (!selected.reply) return;
+   Nothing happens. Correct behavior — can't thread into nothing.
+
+
+========================================================================
+FILES TOUCHED (summary)
+========================================================================
+
+REWRITTEN:
+  src/tui/detail.tsx          — complete rewrite from scratch
+
+MODIFIED (small changes):
+  src/tui/issue-header.tsx    — remove threadParent prop + branch
+  src/tui/response-chain.tsx  — extract pure functions, remove dead prop
+  src/tui/views.ts            — remove ViewType.Thread
+  src/tui/app.tsx             — remove Thread case, add threadInfo wiring
+  src/tui/header.tsx          — add threadInfo, remove Thread cases
+  src/tui/footer.tsx          — add inThread, remove Thread shortcuts entry
+
+UNTOUCHED:
+  src/tui/response-container.tsx
+  src/tui/input-box.tsx
+  src/tui/group-picker.tsx
+  src/tui/issue-list-picker.tsx
+  src/types.ts

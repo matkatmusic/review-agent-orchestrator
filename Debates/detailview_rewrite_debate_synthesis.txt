@@ -1,0 +1,221 @@
+DETAIL VIEW REWRITE — DEBATE SYNTHESIS
+=======================================
+
+Agents: Gemini (gemini-3-pro-preview), Codex (gpt-5.3-codex), Claude (backend-architect)
+
+
+FULL CONSENSUS (all 3 agree)
+=============================
+
+1. Remove ViewType.Thread entirely.
+   Thread navigation becomes internal to DetailView. App never knows
+   about threads except through an onThreadStateChange callback.
+
+2. Thread stack is a simple array internal to DetailView.
+   Each entry stores the thread parent and the cursor position to
+   restore on exit. Push on enter, pop on exit. Nested threads work
+   automatically (push another frame onto the stack).
+
+3. The displayed chain is derived from the stack.
+   If stack is empty: display = props.rootResponse
+   If stack has entries: display = stack.top().parent.reply
+
+4. markRepliesSeen on BOTH enter AND exit.
+   Fixes the existing bug where replies arriving during thread viewing
+   are not marked as seen.
+
+5. IssueHeader should NOT handle thread parent display.
+   All three propose separating thread parent display from issue metadata.
+   IssueHeader becomes strictly about the 5-line metadata block.
+
+6. Keep ResponseContainer as-is.
+   The border rendering, badges, colors, continuation handling, and
+   selected-state display are correct and polished. Only Phase 4 change
+   (self-compute hasNewReplies) is planned.
+
+7. Keep overlays, InputBox, data model, flattenToArray as-is.
+
+8. Keep virtual scrolling math but extract to pure functions.
+   deriveFirstVisible and computeLastVisible become standalone functions
+   for unit testability.
+
+9. Remove from DetailViewProps:
+   - threadParentResponse (now internal)
+   - onNavigate (replaced by internal enterThread/exitThread)
+
+10. Add to DetailViewProps:
+    - onThreadStateChange: (info: ThreadInfo) => void
+
+11. App wires threadInfo to Header (subtitle) and Footer (shortcuts).
+
+12. Excalidraw alignment confirmed by all three agents.
+    The architecture correctly handles:
+    - Linear 5-message issue conversation
+    - Thread off any message (4 replies deep)
+    - Nested 2-level thread
+    - Thread with single reply (bug report)
+    - Thread into message with no replies (empty chain, input ready)
+    - Cursor restoration at each nesting level on exit
+
+
+DISAGREEMENTS
+==============
+
+1. STATE MANAGEMENT: Class vs Function components
+
+   Gemini:  Function component + useState/useRef
+   Codex:   Function component + useReducer
+   Claude:  Class component + setState
+
+   Gemini's argument: useState is declarative, eliminates render-phase
+   mutation bugs, aligns with modern React patterns.
+
+   Codex's argument: useReducer is better for coordinated transitions
+   (thread enter/exit, overlay open/close, selection restore). Reducer
+   actions are clearer than instance fields + forceUpdate.
+
+   Claude's argument: The entire codebase uses class components (App,
+   DetailView, ResponseChain, ResponseContainer, IssueHeader, InputBox).
+   Class + setState is a strict improvement over class + forceUpdate
+   while maintaining consistency. Instance methods (handleKey,
+   enterThread, exitThread) read naturally as class methods.
+
+   RECOMMENDATION: This is a style decision for the user. Both approaches
+   are valid. Class + setState is lower-risk (smaller delta from current
+   codebase). Function + useReducer is a cleaner fresh start.
+
+
+2. THREAD STACK ENTRY: Response reference vs ID
+
+   Gemini:  { parent: Response, restoreIndex: number }
+   Claude:  { parent: Response, savedSelectedIndex: number }
+   Codex:   { parentId: number, returnSelectedId: number | null }
+
+   Codex stores an integer ID, requiring a lookup to resolve the
+   Response. Gemini and Claude store the Response reference directly,
+   which is simpler since the reference is already available from the
+   flat array at the moment of entering the thread.
+
+   RECOMMENDATION: Store the Response reference, not the ID. The
+   reference is stable (the linked-list nodes don't get replaced
+   mid-session), and it avoids a findResponseById lookup on every
+   frame of the stack.
+
+
+3. SCROLLING MATH LOCATION
+
+   Gemini:  New file (scroll-utils.ts or bottom of response-chain.tsx)
+   Codex:   New file (detail-windowing.ts)
+   Claude:  Stay in response-chain.tsx as standalone functions
+
+   The functions are only used by ResponseChain. Creating a separate
+   file for two functions is unnecessary.
+
+   RECOMMENDATION: Keep in response-chain.tsx as exported standalone
+   functions. No new file needed.
+
+
+4. HEIGHT CACHING
+
+   Codex:   Lazy height cache keyed by (response.id, columns)
+   Claude:  No cache needed (computation is cheap — string split + math)
+   Gemini:  Not mentioned
+
+   RECOMMENDATION: No cache. Profile first if performance is an issue.
+   The computation iterates through the body string once per message
+   per render, and we only compute heights for messages between
+   firstVisible and the selected message (not the entire chain).
+
+
+5. HEADER SPLIT: New component vs inline conditional
+
+   Gemini:  Inline conditional in DetailView render:
+            {inThread ? <ResponseContainer .../> : <IssueHeader .../>}
+   Codex:   Two components: IssueMetaHeader + ThreadParentHeader
+   Claude:  New ThreadParentHeader component file
+
+   Gemini's inline approach is simplest — ThreadParentHeader is just
+   a ResponseContainer with fixed props (selected=false, hasNewReplies=false).
+   Creating a component for that single JSX expression is over-engineering.
+
+   RECOMMENDATION: Use Gemini's inline conditional. No new file needed.
+
+
+PROPOSED ARCHITECTURE (synthesized)
+=====================================
+
+Files:
+
+  detail.tsx          — DetailView (rewrite from scratch)
+  response-chain.tsx  — ResponseChain + pure scrolling functions (light rewrite)
+  response-container.tsx — keep as-is (Phase 4 change later)
+  issue-header.tsx    — remove threadParent logic, keep metadata rendering
+  input-box.tsx       — keep as-is
+  views.ts            — remove ViewType.Thread
+  header.tsx          — accept threadInfo prop, remove Thread cases
+  footer.tsx          — accept inThread prop, remove Thread shortcuts entry
+  app.tsx             — remove Thread case, add threadInfo state
+
+
+State (in DetailView):
+
+  selectedMessage: number
+  focusedField: number | null
+  overlay: OverlayType
+  inputValue: string
+  blockedBySet: Set<number>
+  blocksSet: Set<number>
+  threadStack: Array<{ parent: Response, savedSelectedIndex: number }>
+
+
+Derived (computed, not stored):
+
+  isInThread = threadStack.length > 0
+  threadParent = isInThread ? threadStack[threadStack.length - 1].parent : null
+  displayedRoot = isInThread ? threadParent.reply : props.rootResponse
+  messages = flattenToArray(displayedRoot)
+  headerLineCount = isInThread ? computeLineCount(threadParent.body, columns) : 5
+  conversationHeight = rows - HEADER_LINES - headerLineCount - INPUT_AREA_LINES
+
+
+DetailViewProps (after rewrite):
+
+  inum: number
+  issue: Issue
+  rootResponse: Response | null
+  blockedBy: number[]
+  blocks: number[]
+  group: string
+  columns: number
+  rows: number
+  containers?: Container[]
+  allIssues?: Issue[]
+  userLastViewedAt?: string | null
+  onBack: () => void
+  onSend: (message: string) => void
+  onQuit: () => void
+  onGroupChange: (containerId: number) => void
+  onGroupCreate: (name: string) => void
+  onBlockedByChange: (blockerInums: number[]) => void
+  onBlocksChange: (blockedInums: number[]) => void
+  onNavigateIssue: (inum: number) => void
+  onThreadStateChange: (info: { inThread: boolean }) => void
+
+
+Implementation phases:
+
+  A. Thread internalization — add threadStack, enterThread, exitThread
+  B. IssueHeader cleanup — remove threadParent logic
+  C. App/Header/Footer — remove ViewType.Thread, wire threadInfo
+  D. ResponseChain cleanup — extract pure functions, remove dead props
+  E. ResponseContainer Phase 4 — self-compute hasNewReplies (optional, separate)
+
+
+DECIDED BY USER
+=================
+
+Class components with forceUpdate(). Migration to setState comes later
+as a separate phase. This keeps the architectural rewrite focused on
+the correct concerns (thread internalization, component decomposition,
+ViewType.Thread removal) without also changing the state management
+pattern. The forceUpdate pattern is already used throughout the codebase.

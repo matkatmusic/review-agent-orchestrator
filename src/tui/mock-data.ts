@@ -107,20 +107,20 @@ const { root: i1Root, nodes: i1Nodes } = buildMixedChain([
 buildReplyChain(i1Nodes[1], [
     createMessage(AuthorType.User, ResponseType.None,
         'one minor tweak — use camelCase for the category names',
-        '2026-01-01T10:10:00Z'),
+        '2026-01-01T10:10:00Z', '2026-01-01T10:10:00Z'),
     createMessage(AuthorType.Agent, ResponseType.Implementation,
         'Tweak implemented. All category names now use camelCase.',
-        '2026-01-01T10:15:00Z'),
+        '2026-01-01T10:15:00Z', '2026-01-01T10:16:00Z'),
     createMessage(AuthorType.User, ResponseType.None,
         'great, add a comment explaining the naming convention',
-        '2026-01-01T10:20:00Z'),
+        '2026-01-01T10:20:00Z', '2026-01-01T10:20:00Z'),
 ]);
 
-// Reply thread on D (nodes[5]): R4 seen, R5 new (after 12:00:00)
+// Reply thread on D (nodes[5]): R1 seen (before cutoff), R2 new (after 12:00:00)
 buildReplyChain(i1Nodes[5], [
     createMessage(AuthorType.Agent, ResponseType.Implementation,
         'Updated sync interval to 60s in all config files.',
-        '2026-01-01T11:20:00Z'),
+        '2026-01-01T11:20:00Z', '2026-01-01T11:25:00Z'),
     createMessage(AuthorType.User, ResponseType.None,
         "that's fine for now, we can tune it later",
         '2026-01-01T13:00:00Z'),

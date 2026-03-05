@@ -1,0 +1,396 @@
+DETAIL VIEW — COMPLETE REQUIREMENTS
+====================================
+
+Derived from: app.tsx, detail.tsx, response-chain.tsx, issue-header.tsx,
+input-box.tsx, header.tsx, footer.tsx, response-container.tsx, views.ts,
+types.ts, and Message_threads_excalidraw.txt
+
+
+1. DATA MODEL
+-------------
+
+Response is a doubly-linked list node with two axes:
+  .response / .responding_to  — vertical chain (main conversation or within-thread)
+  .reply / .replying_to       — horizontal branching (start a thread from any message)
+  .is_continuation             — true when this node is paragraph 2+ of a split message
+
+Issue.body is the root Response. Walking .response gives the main conversation.
+Any Response can have a .reply, which starts a thread. Threads can nest
+arbitrarily (reply to a reply, etc).
+
+The Excalidraw diagram shows:
+  - 5-message main chain (alternating Agent/User)
+  - Thread off message #1 (4 replies deep)
+  - Nested thread off a reply within that thread (2 replies deep)
+  - Thread off message #5 (1 reply — a bug report)
+  - "Resolve Thread" and "Resolve Issue" actions at terminal nodes
+
+
+2. VIEW STACK & NAVIGATION (App level)
+---------------------------------------
+
+App maintains a View[] stack. Current view = stack top.
+  - navigateToView(view): push
+  - goBackToPreviousView(): pop (if stack.length > 1)
+  - replaceCurrentView(view): swap top without changing depth
+
+Current ViewType.Thread is a separate view that App pushes when entering a
+thread. This is scheduled for removal — thread navigation should be internal
+to DetailView (Phase 2 of the rewrite).
+
+
+3. DETAIL VIEW — ISSUE MODE
+-----------------------------
+
+Displays one issue's conversation. Composed of:
+
+a) IssueHeader (5 lines):
+   - Line 1: "I-{inum}: {title}" (bold)
+   - Line 2: "Status: {status} | Group: {group}" (group is Tab-focusable)
+   - Line 3: "Blocked by: {list} | Blocks: {list}" (both Tab-focusable)
+   - Line 4: "(Tab to change Group, Blocked By, Blocks)" (dim)
+   - Line 5: horizontal rule
+
+b) ResponseChain (virtual-scrolled message list):
+   - Walks rootResponse.response chain into flat Response[]
+   - Computes heights lazily: ResponseContainer.computeLineCount(body, columns)
+   - Derives viewport window from selectedIndex
+   - Renders visible ResponseContainers
+   - Initial selection = last message (scroll to bottom)
+
+c) InputBox (3 lines):
+   - Separator line
+   - "Enter response: > " + TextInput
+   - Always present
+
+Height math: chainHeight = rows - HEADER_LINES(3) - headerLineCount(5) - INPUT_AREA_LINES(3)
+
+
+4. DETAIL VIEW — THREAD MODE
+------------------------------
+
+When user enters a thread, the display changes:
+
+a) IssueHeader is REPLACED by a ResponseContainer showing the thread parent
+   message (the message whose replies we're viewing). Height is dynamic based
+   on the parent message body length.
+
+b) ResponseChain shows the reply chain: threadParent.reply walked via .response
+
+c) InputBox stays the same (replies go into the thread)
+
+d) The thread parent is NOT part of the scrollable chain — it's fixed at top
+
+e) Footer shortcuts change:
+   Issue mode:  [Enter] Send  [up/down] Scroll  [C-right] Thread  [Esc] Back
+   Thread mode: [Enter] Send  [up/down] Scroll  [C-right] Sub-thread  [Esc] Exit thread
+
+f) Header subtitle changes: "Viewing issue I-{N}" -> "Thread on I-{N}"
+
+
+5. THREAD NAVIGATION KEYS
+---------------------------
+
+Enter thread:
+  - Ctrl+Right
+  - Ctrl+Alt+> (Ctrl+Meta+period or Ctrl+Meta+>)
+  - Only works if the selected message exists (guard against empty chain)
+  - Currently does NOT check whether the selected message has replies
+    (any message can be threaded into, even if no replies yet exist —
+    this enables "start thread from here")
+
+Exit thread:
+  - Escape (if in thread, exits thread; if at top level, calls onBack)
+  - Ctrl+Left
+  - Ctrl+Alt+< (Ctrl+Meta+comma or Ctrl+Meta+<)
+
+Nesting: threads can be entered recursively. Each enter pushes onto a stack,
+each exit pops. The Excalidraw diagram shows 2 levels of nesting.
+
+
+6. THREAD STACK (current implementation)
+-----------------------------------------
+
+DetailView maintains threadParentStack: Response[] as an instance property.
+
+Enter thread:
+  1. Get selected Response from the flat chain
+  2. Push it onto threadParentStack
+  3. Call onNavigate({ type: ViewType.Thread, inum, rootResponseId })
+     -> App pushes a Thread view, re-renders DetailView with new props
+
+Exit thread:
+  1. App pops the Thread view
+  2. DetailView receives original rootResponse again
+  3. In render(), detects rootResponse changed, checks threadParentStack
+  4. If stack has an entry matching a message in the restored chain,
+     pops it and sets selectedMessage to that index (restores cursor position)
+
+Problem: this is fragile — render-phase mutations, and the stack lives in
+DetailView but the actual view transition is in App. Phase 2 goal: internalize
+the stack so DetailView handles everything.
+
+
+7. MESSAGE SELECTION & SCROLLING
+---------------------------------
+
+selectedMessage: number — index into the flat Response[]
+
+Up arrow: selectedMessage-- (clamped to 0)
+Down arrow: selectedMessage++ (clamped to messages.length - 1)
+
+Virtual scrolling:
+  - deriveFirstVisible: starts from 0, accumulates heights until selected
+    message is visible. If not, works backwards from selection.
+  - computeLastVisible: starts from firstVisible, accumulates heights until
+    viewport is full.
+  - Only messages in [firstVisible, lastVisible] are rendered.
+
+Initial scroll: on first render and on rootResponse change, selectedMessage
+is set to messages.length - 1 (last message — scroll to bottom).
+
+
+8. RESPONSE CONTAINER RENDERING
+---------------------------------
+
+Each message is rendered in a bordered box:
+
+Top border:
+  - Non-continuation, unselected, no replies:
+    "┌─ Author - Type - Timestamp ────────┐"
+  - Non-continuation, unselected, with replies:
+    "┌─ Author - Type - Timestamp ─── [N replies] ─┐"
+    (reply badge right-aligned; red+bold if hasNewReplies)
+  - Non-continuation, selected:
+    "┌─ Author ───────────────────────────┐" (author only, bold white)
+  - Continuation, unselected, with replies:
+    "┌─────────────────── [N replies] ─┐" (reply badge right-aligned)
+  - Continuation, selected or no replies:
+    "┌────────────────────────────────┐" (plain)
+
+Body: word-wrapped at columns-4, with "│ " / " │" borders
+
+Bottom border:
+  - Unselected: plain dashes "└──────────────────────────────┘"
+  - Selected, no replies: "└──────────── reply to this ─┘"
+  - Selected, with replies: "└──────── view replies (N) ─┘"
+  - Selected, with new replies: "└──────── view replies (N new) ─┘"
+  - Labels are right-justified (dashes fill the left side)
+
+Separator: single blank line between each container
+
+Color: cyan for User messages, green for Agent messages.
+Selected: white borders, bold.
+
+Height computation: 1 (top) + bodyLines + 1 (bottom) + 1 (separator)
+  bodyLines = sum of ceil(rawLine.length / innerWidth) for each \n-split line
+
+
+9. NEW REPLIES BADGE
+----------------------
+
+hasNewReplies is true when:
+  - userLastViewedAt is not null
+  - Any reply in the response's .reply chain has seen === null
+    AND timestamp > userLastViewedAt
+
+Currently computed in response-chain.tsx (checkNewReplies function) and
+passed as a boolean prop to ResponseContainer.
+
+Phase 4 plan: move this computation into ResponseContainer itself
+(pass userLastViewedAt instead of the pre-computed boolean).
+
+
+10. METADATA FIELD EDITING (Tab cycling)
+-----------------------------------------
+
+Three focusable fields: Group (0), Blocked By (1), Blocks (2).
+Tab cycles forward, Shift+Tab cycles backward, wraps to null (input focused).
+
+Focused field is rendered with inverse+bold text.
+
+Enter on a focused field opens an overlay picker:
+  - Group: GroupPicker (list of containers, can create new)
+  - Blocked By: IssueListPicker (toggle issues, multi-select)
+  - Blocks: IssueListPicker (toggle issues, multi-select)
+
+Overlays replace the entire content area (same height as contentHeight).
+While an overlay is open, handleKey returns early (keys go to the overlay).
+
+In thread mode, focusedField is forced to null (no Tab cycling — the fields
+aren't visible since IssueHeader shows the thread parent instead).
+
+
+11. OVERLAY PICKERS
+---------------------
+
+GroupPicker:
+  - Lists containers, highlights current group
+  - onSelect(containerId): calls props.onGroupChange, closes overlay
+  - onCreate(name): calls props.onGroupCreate, closes overlay
+  - onClose: closes overlay
+
+IssueListPicker (used for both Blocked By and Blocks):
+  - Lists all issues except current (filtered by inum)
+  - Multi-select with toggle
+  - onToggle(inum): toggles in local Set, calls props.onBlockedByChange
+    or onBlocksChange with the full set as array
+  - onClose: closes overlay
+
+blockedBySet and blocksSet are instance-level Set<number> initialized from
+props in constructor. These are local copies — changes are propagated via
+callbacks but the local set is the source of truth for rendering.
+
+
+12. ADJACENT ISSUE NAVIGATION
+-------------------------------
+
+Shift+Left / Shift+Right: navigate to previous/next issue in allIssues array.
+Calls replaceCurrentView({ type: ViewType.Detail, inum: adjacentInum }).
+
+Only works when allIssues is provided and the current inum is found in it.
+
+
+13. TEXT INPUT
+---------------
+
+InputBox captures text. Submit (Enter) behavior depends on focusedField:
+  - If focusedField is not null: opens the overlay for that field (Enter
+    acts as "activate focused field")
+  - If focusedField is null and input has content: calls onSend(trimmedValue),
+    clears input
+
+onChange: updates inputValue instance property + forceUpdate
+Focus: TextInput.focus prop is true when focusedField === null
+
+
+14. DATA CHANGE HANDLING
+--------------------------
+
+When props.rootResponse changes (detected by reference comparison in render):
+  - If threadParentStack has a matching entry: restore selection to that index
+  - Otherwise: set selectedMessage to last message (scroll to bottom)
+  - Reset initialScrollDone flag
+
+initialScrollDone flag ensures we scroll to bottom on first render even if
+rootResponse doesn't change between constructor and first render.
+
+
+15. APP-LEVEL THREAD ENTRY
+----------------------------
+
+When App pushes ViewType.Thread:
+  - Finds the thread root via findResponseById(rootResponse, rootResponseId)
+  - Calls markRepliesSeen(threadRoot) — sets seen timestamp on all replies
+  - Renders DetailView with:
+    rootResponse = threadRoot.reply (the reply chain)
+    threadParentResponse = threadRoot (for display in IssueHeader)
+    No containers/allIssues (thread mode hides metadata editing)
+
+This is the part being internalized in Phase 2.
+
+
+16. MARK REPLIES SEEN
+-----------------------
+
+markRepliesSeen(node): walks node.reply chain, sets each reply's
+content.seen = new Date().toISOString()
+
+Called when entering a thread (currently by App in navigateToView).
+Should also be called when exiting a thread (per review feedback,
+not currently implemented — this is a bug).
+
+
+17. FIND RESPONSE BY ID
+-------------------------
+
+findResponseById(root, id): walks the .response chain AND each node's
+.reply chain to find a Response with matching id. Returns null if not found.
+
+Used by App to locate the thread root when pushing ViewType.Thread.
+Will become internal to DetailView after Phase 2.
+
+
+18. HEADER RENDERING
+----------------------
+
+3 lines (HEADER_LINES constant):
+  Line 1: "──── Review Agent Orchestrator · {viewLabel} ────" (centered rule)
+  Line 2: "Agents: N  |  Unread: N"
+  Line 3: subtitle (dim)
+
+View labels:
+  Detail: "I-{N} Detail"
+  Thread: "I-{N} Thread" (to be replaced by threadInfo prop)
+
+Subtitles:
+  Detail: "Viewing issue I-{N}"
+  Thread: "Thread on I-{N}" (to be replaced)
+
+
+19. FOOTER RENDERING
+----------------------
+
+Single line of keyboard shortcuts. Each shortcut: "[key] label"
+Disabled shortcuts rendered dim.
+
+ViewType.Detail shortcuts:
+  [Enter] Send  [up/down] Scroll  [C-right] Thread  [Esc] Back
+  [d] Defer (dim)  [r] Resolve (dim)  [b] Block (dim)
+  [w] Rebase (dim)  [s] Show pane (dim)
+
+ViewType.Thread shortcuts:
+  [Enter] Send  [up/down] Scroll  [C-right] Sub-thread  [Esc] Exit thread
+
+
+20. PROPS INTERFACE (current)
+------------------------------
+
+DetailViewProps:
+  inum: number
+  issue: Issue
+  rootResponse: Response | null
+  threadParentResponse?: Response        <-- to be removed (Phase 2)
+  blockedBy: number[]
+  blocks: number[]
+  group: string
+  columns: number
+  rows: number
+  containers?: Container[]
+  allIssues?: Issue[]
+  userLastViewedAt?: string | null
+  onBack?: () => void
+  onSend?: (message: string) => void
+  onNavigate?: (view: View) => void      <-- to be removed (Phase 2)
+  onQuit?: () => void
+  onGroupChange?: (containerId: number) => void
+  onGroupCreate?: (name: string) => void
+  onBlockedByChange?: (blockerInums: number[]) => void
+  onBlocksChange?: (blockedInums: number[]) => void
+  onNavigateIssue?: (inum: number) => void
+
+
+21. PLANNED CHANGES (from DetailViewRewrite.md)
+-------------------------------------------------
+
+Phase 2: Thread navigation internalized
+  - threadParentStack: Response[] stays in DetailView
+  - enterThread/exitThread methods replace view navigation
+  - Add onThreadStateChange callback (replaces onNavigate for thread)
+  - Remove threadParentResponse, onNavigate from props
+
+Phase 3: Wire up App/Header/Footer
+  - Remove ViewType.Thread from enum, views, header, footer
+  - Header accepts threadInfo?: { inThread: boolean }
+  - Footer accepts inThread?: boolean
+
+Phase 4: ResponseContainer self-computes hasNewReplies
+  - Pass userLastViewedAt prop instead of boolean
+  - Move checkNewReplies into ResponseContainer
+
+Phase 5: Tests and cleanup
+  - Remove FlatNode, flattenChain (already done in Phase 1)
+  - Remove findResponseById export from detail.tsx
+  - Make markRepliesSeen internal
+  - New test fixtures with reply chains
+  - Test enter/exit/nested threads

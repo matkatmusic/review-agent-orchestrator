@@ -1,0 +1,320 @@
+SYNTHESIS: Serializing Threaded Issue Conversations into issue.md
+================================================================
+Three-Model Debate (Claude Opus 4.6, Gemini 3 Pro Preview, GPT-5.3 Codex)
+Date: 2026-03-05
+
+
+CONSENSUS SUMMARY
+-----------------
+
+Unanimous agreement on 6 of 8 questions. Majority agreement on the
+remaining 2. No fundamental disagreements. The synthesis below
+represents the merged recommendation.
+
+
+========================================================================
+Q1. SERIALIZATION FORMAT — Hybrid section-based + inline parent refs
+========================================================================
+
+Status: UNANIMOUS
+
+All three models converge on the same architecture:
+  1. Structured header with metadata (inum, status, revision, deps)
+  2. "What's New" summary section (Claude+Codex; see Q3 note)
+  3. Main conversation section with sequential messages
+  4. Thread sections grouped after the main chain
+  5. Nested sub-threads within thread sections
+  6. Stable numeric message IDs (#N) on every message
+  7. Explicit parent references ("-> reply to #N") on thread messages
+
+Agreed format:
+
+    # I-7: migrate_ServerDerivedFields
+    Revision: 14
+    Status: Active
+    Blocked by: (none)
+    Blocks: I-14, I-15
+
+    --- New since your last read (revision 12) ---
+    - #11 [User] in Thread on #5: "there's a bug in your revision..."
+    - #12 [User] in Main: "also, please update the tests"
+    --- End new ---
+
+    === Main Conversation ===
+
+    [#1 Agent - Analysis - 2026-01-01 10:00]
+    I worked on the server-derived field migration...
+
+    [#2 User - 2026-01-01 10:30]
+    great, now work on the dual-write logic...
+
+    [#3 Agent - Implementation - 2026-01-01 11:00]
+    I completed work on the dual-write logic...
+
+    [#5 Agent - Implementation - 2026-01-01 12:00]
+    I have implemented the change.
+    Thread: #5 has 1 reply (open) [NEW]
+
+    === Thread on #1 (Agent: "I worked on...") [3 messages, open] ===
+
+    [#6 User - 2026-01-01 10:15 -> reply to #1]
+    one minor tweak: ...
+
+    [#7 Agent - Fix - 2026-01-01 10:20 -> reply to #6]
+    Tweak implemented, please review.
+
+    [#8 User - 2026-01-01 10:25 -> reply to #7]
+    looks good.
+
+      --- Sub-thread on #7 (Agent: "Tweak implemented...") [2 messages] ---
+
+      [#9 User - 2026-01-01 10:22 -> reply to #7]
+      use an approach like this: ...
+
+      [#10 Agent - Fix - 2026-01-01 10:24 -> reply to #9]
+      user-preferred approach used, please review.
+
+    === Thread on #5 (Agent: "I have implemented...") [1 message, open] ===
+
+    [#11 User - 2026-01-01 12:15 -> reply to #5] [NEW]
+    there's a bug in your revision: ...
+
+
+Key design decisions:
+  - Thread sections appear AFTER the main chain, not interleaved
+  - Each thread header includes a truncated preview of the parent msg
+  - Sub-threads use deeper header markers (--- vs ===) with indentation
+  - For zero-thread issues, format degrades cleanly to flat sequential
+  - Thread-ref annotations on main-chain messages ("Thread: #5 has 1
+    reply") give the agent a heads-up while reading the main chain
+
+
+========================================================================
+Q2. THREAD RENDERING — Expand active, collapse resolved
+========================================================================
+
+Status: UNANIMOUS
+
+- Active/open threads: fully expanded, all messages shown
+- Resolved threads: collapsed to one-line summary (see Q6)
+
+Rationale: issue.md is the agent's SOLE context source. Omitted or
+summarized active threads are permanently lost context. LLM context
+windows are large enough to handle expanded threads. The section-based
+format lets the agent efficiently skip irrelevant threads.
+
+
+========================================================================
+Q3. NEW MESSAGE INDICATORS — Summary at top + inline [NEW] markers
+========================================================================
+
+Status: MAJORITY (Claude+Codex yes; Gemini inline-only)
+
+Adopted: Both mechanisms.
+
+1. "New since revision N" summary section at the top of issue.md
+   listing all new messages with their location (main chain or thread).
+   This gives the agent an immediate orientation before the full read.
+
+2. Per-message [NEW] tag on each new message's header line, in its
+   correct semantic position within the conversation or thread.
+
+Gemini's concern (top section strips context) is valid but mitigated:
+the summary is a quick-scan index that POINTS TO the in-context
+messages, not a replacement. The agent still encounters the [NEW]
+messages in their full conversational context during the body read.
+
+"New" is computed from agent_last_read_at / last acked revision.
+Do NOT rely on agent memory.
+
+
+========================================================================
+Q4. DELTA SIGNAL — Structured hint with location
+========================================================================
+
+Status: MAJORITY (all agree on hint; format varies)
+
+Adopted format:
+    "I7:rev14:main"         -- new message on main chain
+    "I7:rev14:thread#5"     -- new reply in thread on #5
+    "I7:rev14:multi"        -- multiple new messages
+    "I7:rev15:meta"         -- metadata-only change (no new messages)
+
+Rationale: The agent re-reads the full file regardless. The signal
+serves as an attention hint, not a data source. Including the revision
+number lets the agent verify file freshness. Including the location
+helps the agent focus its initial attention.
+
+Signals are kept short for tmux send-keys compatibility.
+
+
+========================================================================
+Q5. CONTINUATION HANDLING — Merge into parent, invisible to agent
+========================================================================
+
+Status: UNANIMOUS
+
+Continuations (is_continuation=true) are a TUI pagination artifact.
+The serializer merges them into the parent message with double-newline
+separation. Only the root message's ID, author, type, and timestamp
+appear in the header.
+
+Edge case: if a thread branches off a continuation node, the thread
+header references the root (non-continuation) message ID. The
+serializer must resolve continuation IDs to their root.
+
+
+========================================================================
+Q6. RESOLVED THREADS — Collapse to one-line summary
+========================================================================
+
+Status: UNANIMOUS
+
+Resolved threads render as:
+
+    === Thread on #1 (Agent: "I worked on...") [RESOLVED - 3 messages] ===
+    (Resolved 2026-01-01 11:00. Last message: User: "looks good.")
+
+Rationale:
+  - Full omission loses audit trail and decision context
+  - Full inclusion wastes context window on finished discussions
+  - One-line summary preserves existence, resolution time, and outcome
+  - If a resolved thread receives a new message (re-opened), it
+    auto-expands back to full in the next rewrite
+
+
+========================================================================
+Q7. AGENT REPLY TO THREADS — aidi respond --reply-to <response_id>
+========================================================================
+
+Status: UNANIMOUS
+
+Extended aidi CLI:
+    aidi respond <inum> --reply-to <response_id> --type <type> "message"
+
+When --reply-to is provided:
+  - New response's replying_to_id set to <response_id>
+  - Orchestrator links it into the thread chain
+  - Does NOT appear on main chain
+
+When --reply-to is omitted:
+  - Backward compatible: response goes on main chain
+  - responding_to_id set to current last main-chain message
+
+Validation:
+  - CLI validates that response_id belongs to the given inum
+  - CLI validates that response_id exists
+  - responding_to_id (vertical chain linkage) computed by orchestrator,
+    not set by agent
+
+Agent sees IDs in issue.md ("[#11 User -> reply to #5]") and can
+reference them: `aidi respond 7 --reply-to 11 --type fix "Fixed..."`
+
+
+========================================================================
+Q8. SCALABILITY — Configurable recency window
+========================================================================
+
+Status: MAJORITY (all agree on windowing; details vary)
+
+Config parameters:
+    issuemd.maxMainChainMessages: 30    (default)
+    issuemd.maxThreadMessages: 10       (default)
+    issuemd.alwaysIncludeNewMessages: true
+    issuemd.alwaysIncludeThreadRoots: true
+
+Rules:
+  1. Main chain: last N messages. Older messages get:
+     "(... 20 earlier messages omitted. Earliest shown: #21)"
+
+  2. Threads: include if parent message is in the window, OR if thread
+     has [NEW] messages. Otherwise omit.
+
+  3. Within threads: last M messages. Older messages truncated with
+     count marker. Thread root (first reply) always included.
+
+  4. [NEW] messages always included regardless of window position.
+     The window shifts to accommodate them.
+
+  5. Issue description (first message) always included.
+
+  6. Resolved threads always collapsed (one-line summary) regardless
+     of window.
+
+
+========================================================================
+ADDITIONAL CONCERNS — CONSOLIDATED FROM ALL 3 MODELS
+========================================================================
+
+MUST ADDRESS (raised by 2+ models or critical):
+
+  1. Marker safety: message bodies could contain text that looks like
+     headers ("[#42 Agent - ...]"). Use delimiters or escape sequences
+     to prevent spoofing. (Codex, Gemini)
+
+  2. Hallucinated IDs: agent may hallucinate a --reply-to ID. aidi
+     must return a clear error message so agent can self-correct.
+     (Gemini)
+
+  3. Atomic file writes: write-to-temp + fsync + rename, already in
+     the v2.1 spec. Confirm implementation. (Gemini, Claude)
+
+  4. Continuation-to-root resolution: threads branching off
+     continuations must reference the root message ID. (Claude)
+
+  5. Ordering: thread messages ordered by chain position (.response
+     pointers), not by timestamp. (Claude)
+
+SHOULD ADDRESS:
+
+  6. Reproducibility: same DB state should produce byte-identical
+     issue.md. Useful for debugging and diffing. (Codex)
+
+  7. Circular reference guard: visited-set in serializer to detect
+     malformed linked lists. (Claude)
+
+  8. Ghost threads: policy for agent replying to just-resolved thread.
+     Recommend: accept the reply, reopen the thread. (Gemini)
+
+  9. Orphan handling: if parent IDs are missing, render under an error
+     section rather than dropping silently. (Codex)
+
+  10. Metadata-only changes: revision bumps even without new messages.
+      Signal: "I7:rev15:meta". (Claude)
+
+  11. Agent prompt documentation: CLAUDE.md must document the issue.md
+      format and --reply-to usage. (Claude)
+
+DEFER:
+
+  12. Multi-issue thread references / ID namespacing. (Claude)
+  13. aidi read-thread for expanding collapsed resolved threads. (Claude)
+
+
+========================================================================
+IMPLEMENTATION PRIORITY
+========================================================================
+
+Phase A — Foundation (unblocks serializer):
+  1. Add responding_to_id, replying_to_id to responses INSERT/schema
+  2. Implement continuation merging in serializer
+  3. Build core serializer (Q1 format) for main chain only
+  4. Add thread section serialization
+
+Phase B — Agent participation:
+  5. Add aidi respond --reply-to flag
+  6. Add [NEW] marker computation (compare against agent_last_read_at)
+  7. Add "What's New" summary section generation
+  8. Update CLAUDE.md with format docs and --reply-to usage
+
+Phase C — Polish:
+  9. Resolved thread collapsing
+  10. Scalability windowing (configurable limits)
+  11. Structured tmux signal format
+  12. Marker safety / body delimiter escaping
+
+Phase D — Robustness:
+  13. Circular reference guard
+  14. Orphan handling
+  15. Ghost thread policy
+  16. Reproducibility (deterministic output)

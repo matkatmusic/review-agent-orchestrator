@@ -33,6 +33,8 @@ const TEST_MESSAGES: Message[] = [
 
 const { root: TEST_ROOT } = buildResponseChain(TEST_MESSAGES);
 
+const noop = () => {};
+
 const defaultProps = {
     inum: 1,
     issue: TEST_ISSUE,
@@ -42,6 +44,11 @@ const defaultProps = {
     group: 'Sprint 1',
     columns: 80,
     rows: 24,
+    onBack: noop as (selectedMessage: number) => void,
+    onHome: noop as (selectedMessage: number) => void,
+    onSend: noop as (message: string) => void,
+    onQuit: noop,
+    onThreadStateChange: noop as (info: { inThread: boolean }) => void,
 };
 
 describe('DetailView', () => {
@@ -274,18 +281,93 @@ describe('DetailView', () => {
         expect(lastFrame()).toContain('─');
     });
 
-    // ---- Thread view ----
+    // ---- Thread navigation (unit tests via component instance) ----
 
-    it('shows parent message in header when threadParentResponse provided', () => {
-        const { lastFrame } = render(
-            <DetailView {...defaultProps} threadParentResponse={TEST_ROOT} />
+    it('enterThread pushes to stack and notifies parent', () => {
+        // Build a chain where message 0 has a reply
+        const { root: chainRoot, nodes } = buildResponseChain(TEST_MESSAGES);
+        const replyNode: Response = {
+            id: 100,
+            content: createMessage(AuthorType.Agent, ResponseType.None, 'Thread reply content', '2025-01-15T12:00:00Z'),
+            responding_to: null,
+            response: null,
+            replying_to: nodes[0],
+            reply: null,
+            is_continuation: false,
+        };
+        nodes[0].reply = replyNode;
+
+        const onThreadStateChange = vi.fn();
+        const ref = React.createRef<DetailView>();
+        render(
+            <DetailView
+                {...defaultProps}
+                rootResponse={chainRoot}
+                onThreadStateChange={onThreadStateChange}
+                ref={ref}
+            />
         );
-        expect(lastFrame()).toContain('Please implement JWT auth.');
+
+        // Move cursor to first message
+        ref.current!.selectedMessage = 0;
+        ref.current!.enterThread();
+
+        expect(ref.current!.threadStack).toHaveLength(1);
+        expect(ref.current!.threadStack[0].parent).toBe(nodes[0]);
+        expect(ref.current!.threadStack[0].savedSelectedIndex).toBe(0);
+        expect(onThreadStateChange).toHaveBeenCalledWith({ inThread: true });
     });
 
-    it('shows input label in thread', () => {
+    it('exitThread pops stack and restores cursor', () => {
+        const { root: chainRoot, nodes } = buildResponseChain(TEST_MESSAGES);
+        const replyNode: Response = {
+            id: 100,
+            content: createMessage(AuthorType.Agent, ResponseType.None, 'Thread reply', '2025-01-15T12:00:00Z'),
+            responding_to: null,
+            response: null,
+            replying_to: nodes[0],
+            reply: null,
+            is_continuation: false,
+        };
+        nodes[0].reply = replyNode;
+
+        const onThreadStateChange = vi.fn();
+        const ref = React.createRef<DetailView>();
+        render(
+            <DetailView
+                {...defaultProps}
+                rootResponse={chainRoot}
+                onThreadStateChange={onThreadStateChange}
+                ref={ref}
+            />
+        );
+
+        // Enter thread at index 0
+        ref.current!.selectedMessage = 0;
+        ref.current!.enterThread();
+
+        // Now exit
+        ref.current!.exitThread();
+
+        expect(ref.current!.threadStack).toHaveLength(0);
+        expect(ref.current!.selectedMessage).toBe(0); // restored
+        expect(onThreadStateChange).toHaveBeenLastCalledWith({ inThread: false });
+    });
+
+    it('exitThread calls onBack when not in a thread', () => {
+        const onBack = vi.fn();
+        const ref = React.createRef<DetailView>();
+        render(
+            <DetailView {...defaultProps} onBack={onBack} ref={ref} />
+        );
+
+        ref.current!.exitThread();
+        expect(onBack).toHaveBeenCalledOnce();
+    });
+
+    it('shows input label in issue view', () => {
         const { lastFrame } = render(
-            <DetailView {...defaultProps} threadParentResponse={TEST_ROOT} />
+            <DetailView {...defaultProps} />
         );
         expect(lastFrame()).toContain('Enter response:');
     });

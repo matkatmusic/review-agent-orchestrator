@@ -12,10 +12,11 @@ export interface Shortcut {
 
 export interface FooterProps {
     readonly viewType: ViewType;
+    readonly inThread?: boolean;
 }
 
 export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
-    [ViewType.Dashboard]: [
+    [ViewType.Home]: [
         { key: 'Enter', label: 'View' },
         { key: 'n',     label: 'New' },
         { key: 'a',     label: 'Activate' },
@@ -29,8 +30,9 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
     [ViewType.Detail]: [
         { key: 'Enter', label: 'Send' },
         { key: '\u2191\u2193', label: 'Scroll' },
-        { key: 'C-\u25b8', label: 'Thread' },
+        { key: '^⇧→', label: 'Thread' },
         { key: 'Esc',   label: 'Back' },
+        { key: '⌥h',   label: 'Home' },
         { key: 'd',     label: 'Defer', disabled: true },
         { key: 'r',     label: 'Resolve', disabled: true },
         { key: 'b',     label: 'Block', disabled: true },
@@ -57,16 +59,21 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
         { key: 'p',     label: 'Prev issue' },
         { key: 'Esc',   label: 'Back' },
     ],
-    [ViewType.Thread]: [
-        { key: 'Enter', label: 'Send' },
-        { key: '\u2191\u2193',   label: 'Scroll' },
-        { key: 'C-\u25b8',  label: 'Sub-thread' },
-        { key: 'Esc',  label: 'Exit thread' },
-    ],
 };
 
-const FooterComponent: React.FC<FooterProps> = ({ viewType }) => {
-    const shortcuts = VIEW_SHORTCUTS[viewType];
+const THREAD_SHORTCUTS: readonly Shortcut[] = [
+    { key: 'Enter', label: 'Send' },
+    { key: '\u2191\u2193', label: 'Scroll' },
+    { key: '^⇧→', label: 'Sub-thread' },
+    { key: '^⇧←', label: 'Exit thread' },
+    { key: 'Esc', label: 'Back' },
+    { key: '⌥h', label: 'Home' },
+];
+
+const FooterComponent: React.FC<FooterProps> = ({ viewType, inThread }) => {
+    const shortcuts = (viewType === ViewType.Detail && inThread)
+        ? THREAD_SHORTCUTS
+        : VIEW_SHORTCUTS[viewType];
 
     return (
         <Box>
