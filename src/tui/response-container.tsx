@@ -9,6 +9,7 @@ export interface ResponseContainerProps {
     selected: boolean;
     hasNewReplies: boolean;
     threadResolved?: boolean;
+    isThreadParent?: boolean;
 }
 
 /** Count nodes in a reply chain. */
@@ -33,7 +34,8 @@ export class ResponseContainer extends React.Component<ResponseContainerProps> {
     }
 
     private renderTopBorder(innerWidth: number, color: string, selected: boolean): React.ReactNode {
-        const { response, hasNewReplies, threadResolved } = this.props;
+        const { response, hasNewReplies, threadResolved, isThreadParent } = this.props;
+        const typeTagColor = isThreadParent ? 'gray' : 'yellow';
         const replyCount = countReplies(response);
         const borderColor = selected ? 'white' : color;
 
@@ -94,7 +96,7 @@ export class ResponseContainer extends React.Component<ResponseContainerProps> {
             return (
                 <Text>
                     <Text color={borderColor}>{'┌─ '}{authorStr}{' - '}</Text>
-                    <Text color={'yellow'} bold>{typeStr}</Text>
+                    <Text color={typeTagColor}>{typeStr}</Text>
                     <Text color={borderColor}>{' - '}{timeStr}{' '}{'─'.repeat(fillLen)}</Text>
                     <Text color={badgeColor} dimColor={!!threadResolved} bold={hasNewReplies && !threadResolved}>{rightContent}</Text>
                     <Text color={borderColor}>{'─┐'}</Text>
@@ -108,7 +110,7 @@ export class ResponseContainer extends React.Component<ResponseContainerProps> {
         return (
             <Text>
                 <Text color={borderColor}>{'┌─ '}{authorStr}{' - '}</Text>
-                <Text color={'yellow'} bold>{typeStr}</Text>
+                <Text color={typeTagColor}>{typeStr}</Text>
                 <Text color={borderColor}>{' - '}{timeStr}{' '}{'─'.repeat(fillLen)}{'─┐'}</Text>
             </Text>
         );
@@ -147,16 +149,20 @@ export class ResponseContainer extends React.Component<ResponseContainerProps> {
             : ` view replies (${replyCount}${resolvedMark}) `;
         const leftDashes = Math.max(0, innerWidth - label.length);
         return (
-            <Text color={borderColor} bold={selected}>
-                {'└─'}{'─'.repeat(leftDashes)}{label}{'─┘'}
+            <Text>
+                <Text color={borderColor} bold={selected}>{'└─'}{'─'.repeat(leftDashes)}</Text>
+                <Text color={borderColor}>{label}</Text>
+                <Text color={borderColor} bold={selected}>{'─┘'}</Text>
             </Text>
         );
     }
 
     render() {
-        const { response, columns, selected, threadResolved } = this.props;
-        const dimResolved = !!threadResolved && !selected;
-        const color = response.content.author === AuthorType.User ? 'cyan' : 'green';
+        const { response, columns, selected, isThreadParent } = this.props;
+        const isUser = response.content.author === AuthorType.User;
+        const baseColor = isUser ? 'cyan' : 'green';
+        const color = isThreadParent ? 'gray' : baseColor;
+        const bodyColor = isThreadParent ? '#aaaaaa' : baseColor;
         const innerWidth = Math.max(10, columns - 4);
 
         // Word-wrap body at innerWidth
@@ -174,26 +180,22 @@ export class ResponseContainer extends React.Component<ResponseContainerProps> {
         return (
             <Box flexDirection="column" flexShrink={0}>
                 {/* Top border */}
-                {dimResolved
-                    ? <Text dimColor>{this.renderTopBorder(innerWidth, color, selected)}</Text>
-                    : this.renderTopBorder(innerWidth, color, selected)}
+                {this.renderTopBorder(innerWidth, color, selected)}
 
                 {/* Body lines: │ text │ */}
                 {bodyLines.map((line, i) => {
                     const padLen = Math.max(0, innerWidth - line.length);
                     return (
-                        <Text key={i} dimColor={dimResolved}>
+                        <Text key={i}>
                             <Text color={borderColor} bold={selected}>{'│ '}</Text>
-                            <Text color={color}>{line}{' '.repeat(padLen)}</Text>
+                            <Text color={bodyColor}>{line}{' '.repeat(padLen)}</Text>
                             <Text color={borderColor} bold={selected}>{' │'}</Text>
                         </Text>
                     );
                 })}
 
                 {/* Bottom border */}
-                {dimResolved
-                    ? <Text dimColor>{this.renderBottomBorder(innerWidth, color, selected)}</Text>
-                    : this.renderBottomBorder(innerWidth, color, selected)}
+                {this.renderBottomBorder(innerWidth, color, selected)}
 
                 {/* Separator */}
                 <Text>{' '}</Text>

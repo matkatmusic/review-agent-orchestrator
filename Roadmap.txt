@@ -112,6 +112,9 @@ Views implemented:
 
 Supporting components:
   [x] header.tsx — 3-line header with view name, agents, unread
+      RULE: Line 3 (subtitle) must always be a general hint of the
+      current view's functionality (e.g. "(add a response, ^R to resolve)"
+      for Thread view). Every view must define a useful hint in getSubtitle().
   [x] footer.tsx — Per-view keyboard shortcuts, thread mode swap
   [x] response-chain.tsx — Virtual scrolling, viewport derivation
   [x] response-container.tsx — Message box renderer with badges
