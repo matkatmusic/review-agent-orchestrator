@@ -23,6 +23,8 @@ Make a currently missing view load by default. Interact with it, identify missin
   - [x] load by default
   - [x] missing feature: no title bar in header ( ---- Review Agent Orchestrator - Issue Detail ---- )
   - [ ] broken feature: footer hotkey components should wrap so that the hot key display and the associated text are not split between lines. 
+  - [ ] UX change: make each footer item into a component that can be tabbed to (possible Fix for above broken feature).  when selected, invert 
+  - [ ] broken feature: pressing tab in text input in a Thread View moves the cursor somewhere outside of the text input, causing it to disappear.  pressing tab again moves the cursor back to the text input.
   - [ ] broken feature: [^R] Resolve: should say "Resolve Thread", change hotkey to Ctrl Shift r
   - [ ] broken feature: [r] resolve issue: issue not resolved when cursor is in text input. Change to Ctrl r
   - [ ] broken feature: adding a response in a thread doesn't create a new response in the thread view, and doesn't update the mock data json.
