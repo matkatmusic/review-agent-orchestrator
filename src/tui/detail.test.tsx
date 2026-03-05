@@ -3,8 +3,9 @@ import React from 'react';
 import { render } from 'ink-testing-library';
 import { DetailView } from './detail.js';
 import { ResponseContainer } from './response-container.js';
-import type { Issue, Response as IssueResponse } from '../types.js';
-import { IssueStatus, ResponseType, AuthorType } from "../types.js"
+import type { Issue, Response, Message } from '../types.js';
+import { IssueStatus, ResponseType, AuthorType } from '../types.js';
+import { createMessage, buildResponseChain, buildMixedChain } from './thread-builders.js';
 
 
 const tick = () => new Promise(r => setTimeout(r, 0));
@@ -23,33 +24,19 @@ const TEST_ISSUE: Issue = {
     user_last_viewed_at: '2025-01-15T11:00:00Z',
 };
 
-const TEST_RESPONSES: IssueResponse[] = [
-    {
-        id: 1, inum: 1, author: AuthorType.User, type: ResponseType.None,
-        body: 'Please implement JWT auth.',
-        created_at: '2025-01-15T10:05:00Z',
-    },
-    {
-        id: 2, inum: 1, author: AuthorType.Agent, type: ResponseType.Analysis,
-        body: 'Examining the existing auth setup.',
-        created_at: '2025-01-15T10:10:00Z',
-    },
-    {
-        id: 3, inum: 1, author: AuthorType.User, type: ResponseType.None,
-        body: 'Also handle token revocation.',
-        created_at: '2025-01-15T11:00:00Z',
-    },
-    {
-        id: 4, inum: 1, author: AuthorType.Agent, type: ResponseType.Implementation,
-        body: 'Added token revocation endpoint.',
-        created_at: '2025-01-15T11:30:00Z',
-    },
+const TEST_MESSAGES: Message[] = [
+    { author: AuthorType.User, type: ResponseType.None, body: 'Please implement JWT auth.', timestamp: '2025-01-15T10:05:00Z', seen: null },
+    { author: AuthorType.Agent, type: ResponseType.Analysis, body: 'Examining the existing auth setup.', timestamp: '2025-01-15T10:10:00Z', seen: null },
+    { author: AuthorType.User, type: ResponseType.None, body: 'Also handle token revocation.', timestamp: '2025-01-15T11:00:00Z', seen: null },
+    { author: AuthorType.Agent, type: ResponseType.Implementation, body: 'Added token revocation endpoint.', timestamp: '2025-01-15T11:30:00Z', seen: null },
 ];
+
+const { root: TEST_ROOT } = buildResponseChain(TEST_MESSAGES);
 
 const defaultProps = {
     inum: 1,
     issue: TEST_ISSUE,
-    responses: TEST_RESPONSES,
+    rootResponse: TEST_ROOT as Response | null,
     blockedBy: [] as number[],
     blocks: [2],
     group: 'Sprint 1',
@@ -115,7 +102,7 @@ describe('DetailView', () => {
 
     it('renders agent messages with Agent label', () => {
         const { lastFrame } = render(<DetailView {...defaultProps} />);
-        expect(lastFrame()).toContain(AuthorType.Agent);
+        expect(lastFrame()).toContain('Agent');
     });
 
     it('renders message bodies', () => {
@@ -124,10 +111,9 @@ describe('DetailView', () => {
         expect(lastFrame()).toContain('Added token revocation endpoint.');
     });
 
-    it('renders type tags in agent message headers', () => {
+    it('renders type tags in unselected agent message headers', () => {
         const { lastFrame } = render(<DetailView {...defaultProps} />);
         expect(lastFrame()).toContain('Analysis');
-        expect(lastFrame()).toContain('Implementation');
     });
 
     it('renders timestamps in conversation', () => {
@@ -137,7 +123,7 @@ describe('DetailView', () => {
 
     it('renders empty conversation without crash', () => {
         const { lastFrame } = render(
-            <DetailView {...defaultProps} responses={[]} />
+            <DetailView {...defaultProps} rootResponse={null} />
         );
         expect(lastFrame()).toBeDefined();
         expect(lastFrame()).toContain('I-1');
@@ -148,32 +134,29 @@ describe('DetailView', () => {
     it('user and agent messages appear with distinct labels', () => {
         const { lastFrame } = render(<DetailView {...defaultProps} />);
         const frame = lastFrame()!;
-        // Both author types should be present in box headers
         expect(frame).toContain('You');
-        expect(frame).toContain(AuthorType.Agent);
+        expect(frame).toContain('Agent');
     });
 
     // ---- Scrolling ----
 
     it('up arrow selects previous message and may scroll', async () => {
-        // Create many messages to force scrolling
-        const manyResponses: IssueResponse[] = Array.from({ length: 20 }, (_, i) => ({
-            id: i + 1,
-            inum: 1,
+        const manyMessages: Message[] = Array.from({ length: 20 }, (_, i) => ({
             author: (i % 2 === 0 ? AuthorType.User : AuthorType.Agent),
             type: ResponseType.None,
             body: `Message ${i + 1} body text here`,
-            created_at: `2025-01-${String(15 + Math.floor(i / 10)).padStart(2, '0')}T${String(10 + (i % 10)).padStart(2, '0')}:00:00Z`,
+            timestamp: `2025-01-${String(15 + Math.floor(i / 10)).padStart(2, '0')}T${String(10 + (i % 10)).padStart(2, '0')}:00:00Z`,
+            seen: null,
         }));
+        const { root: manyRoot } = buildResponseChain(manyMessages);
 
         const { lastFrame, stdin } = render(
-            <DetailView {...defaultProps} responses={manyResponses} rows={15} />
+            <DetailView {...defaultProps} rootResponse={manyRoot} rows={15} />
         );
         await tick();
 
         const frameBefore = lastFrame();
 
-        // Press up arrow to select previous message
         stdin.write('\u001B[A'); // Up arrow
         await tick();
 
@@ -182,18 +165,17 @@ describe('DetailView', () => {
     });
 
     it('does not select above first message', async () => {
-        const fewResponses: IssueResponse[] = [
-            { id: 1, inum: 1, author: AuthorType.User, type: ResponseType.None, body: 'Hello', created_at: '2025-01-15T10:00:00Z' },
-        ];
+        const { root: singleRoot } = buildResponseChain([
+            createMessage(AuthorType.User, ResponseType.None, 'Hello', '2025-01-15T10:00:00Z'),
+        ]);
 
         const { lastFrame, stdin } = render(
-            <DetailView {...defaultProps} responses={fewResponses} rows={24} />
+            <DetailView {...defaultProps} rootResponse={singleRoot} rows={24} />
         );
         await tick();
 
         const frameBefore = lastFrame();
 
-        // Press up arrow when already on first (and only) message
         stdin.write('\u001B[A'); // Up arrow
         await tick();
 
@@ -201,19 +183,18 @@ describe('DetailView', () => {
     });
 
     it('does not select past last message', async () => {
-        const fewResponses: IssueResponse[] = [
-            { id: 1, inum: 1, author: AuthorType.User, type: ResponseType.None, body: 'Hello', created_at: '2025-01-15T10:00:00Z' },
-        ];
+        const { root: singleRoot } = buildResponseChain([
+            createMessage(AuthorType.User, ResponseType.None, 'Hello', '2025-01-15T10:00:00Z'),
+        ]);
 
         const { lastFrame, stdin } = render(
-            <DetailView {...defaultProps} responses={fewResponses} rows={24} />
+            <DetailView {...defaultProps} rootResponse={singleRoot} rows={24} />
         );
         await tick();
 
         const frameBefore = lastFrame();
 
-        // Press down arrow when already on last (and only) message
-        stdin.write('\u001B[B');
+        stdin.write('\u001B[B'); // Down arrow
         await tick();
 
         expect(lastFrame()).toBe(frameBefore);
@@ -254,9 +235,6 @@ describe('DetailView', () => {
         expect(onSend).not.toHaveBeenCalled();
     });
 
-    // Footer shortcuts are rendered centrally by App-level Footer component
-    // and tested in footer.test.tsx
-
     // ---- Edge cases ----
 
     it('renders at narrow width (40 columns)', () => {
@@ -295,6 +273,22 @@ describe('DetailView', () => {
         const { lastFrame } = render(<DetailView {...defaultProps} />);
         expect(lastFrame()).toContain('─');
     });
+
+    // ---- Thread view ----
+
+    it('shows parent message in header when threadParentResponse provided', () => {
+        const { lastFrame } = render(
+            <DetailView {...defaultProps} threadParentResponse={TEST_ROOT} />
+        );
+        expect(lastFrame()).toContain('Please implement JWT auth.');
+    });
+
+    it('shows input label in thread', () => {
+        const { lastFrame } = render(
+            <DetailView {...defaultProps} threadParentResponse={TEST_ROOT} />
+        );
+        expect(lastFrame()).toContain('Enter response:');
+    });
 });
 
 // ---- Unit tests for ResponseContainer ----
@@ -303,68 +297,79 @@ describe('ResponseContainer', () => {
     describe('computeLineCount', () => {
         it('returns 4 for single-line body (top + body + bottom + separator)', () => {
             expect(ResponseContainer.computeLineCount('Hello', 80)).toBe(4);
-    });
+        });
 
         it('counts multi-line body', () => {
-            // 3 body lines + top + bottom + separator = 6
             expect(ResponseContainer.computeLineCount('Line 1\nLine 2\nLine 3', 80)).toBe(6);
         });
 
         it('wraps long lines', () => {
             const innerWidth = Math.max(10, 80 - 4); // 76
-            const longLine = 'x'.repeat(innerWidth + 10); // wraps to 2 lines
-            // 2 body lines + top + bottom + separator = 5
+            const longLine = 'x'.repeat(innerWidth + 10);
             expect(ResponseContainer.computeLineCount(longLine, 80)).toBe(5);
-    });
+        });
 
         it('counts empty body as 1 body line', () => {
-            // top + 1 empty body + bottom + separator = 4
             expect(ResponseContainer.computeLineCount('', 80)).toBe(4);
-    });
+        });
     });
 
     describe('render', () => {
-        const makeResponse = (overrides: Partial<IssueResponse> = {}): IssueResponse => ({
-            id: 1,
-            inum: 1,
-            author: AuthorType.User,
-            type: ResponseType.None,
-            body: 'Hello world',
-            created_at: '2025-01-15T10:00:00Z',
-            ...overrides,
-        });
+        const makeResponse = (overrides: Partial<Message> = {}): Response => {
+            const message: Message = {
+                author: AuthorType.User,
+                type: ResponseType.None,
+                body: 'Hello world',
+                timestamp: '2025-01-15T10:00:00Z',
+                seen: null,
+                ...overrides,
+            };
+            return {
+                id: 1,
+                content: message,
+                responding_to: null,
+                response: null,
+                replying_to: null,
+                reply: null,
+                is_continuation: false,
+            };
+        };
+
+        const containerProps = {
+            hasNewReplies: false,
+        };
 
         it('renders author in header', () => {
             const { lastFrame } = render(
-                <ResponseContainer response={makeResponse()} columns={80} selected={false} />
+                <ResponseContainer response={makeResponse()} columns={80} selected={false} {...containerProps} />
             );
             expect(lastFrame()).toContain('You');
-    });
+        });
 
         it('renders type in header', () => {
             const { lastFrame } = render(
-                <ResponseContainer response={makeResponse({ type: ResponseType.Analysis })} columns={80} selected={false} />
+                <ResponseContainer response={makeResponse({ type: ResponseType.Analysis })} columns={80} selected={false} {...containerProps} />
             );
             expect(lastFrame()).toContain('Analysis');
-    });
+        });
 
         it('renders timestamp in header', () => {
             const { lastFrame } = render(
-                <ResponseContainer response={makeResponse()} columns={80} selected={false} />
+                <ResponseContainer response={makeResponse()} columns={80} selected={false} {...containerProps} />
             );
             expect(lastFrame()).toContain('2025-01-15 10:00:00');
         });
 
         it('renders body text', () => {
             const { lastFrame } = render(
-                <ResponseContainer response={makeResponse({ body: 'Test body content' })} columns={80} selected={false} />
+                <ResponseContainer response={makeResponse({ body: 'Test body content' })} columns={80} selected={false} {...containerProps} />
             );
             expect(lastFrame()).toContain('Test body content');
         });
 
         it('renders box borders', () => {
             const { lastFrame } = render(
-                <ResponseContainer response={makeResponse()} columns={80} selected={false} />
+                <ResponseContainer response={makeResponse()} columns={80} selected={false} {...containerProps} />
             );
             const frame = lastFrame()!;
             expect(frame).toContain('┌');
@@ -372,7 +377,7 @@ describe('ResponseContainer', () => {
             expect(frame).toContain('│');
             expect(frame).toContain('└');
             expect(frame).toContain('┘');
-    });
+        });
 
         it('renders multi-line body', () => {
             const { lastFrame } = render(
@@ -380,28 +385,28 @@ describe('ResponseContainer', () => {
                     response={makeResponse({ body: 'Line 1\nLine 2\nLine 3' })}
                     columns={80}
                     selected={false}
+                    {...containerProps}
                 />
             );
             const frame = lastFrame()!;
             expect(frame).toContain('Line 1');
             expect(frame).toContain('Line 2');
             expect(frame).toContain('Line 3');
-    });
+        });
 
         it('uses cyan color for user messages', () => {
             const { lastFrame } = render(
-                <ResponseContainer response={makeResponse({ author: AuthorType.User })} columns={80} selected={false} />
+                <ResponseContainer response={makeResponse({ author: AuthorType.User })} columns={80} selected={false} {...containerProps} />
             );
-            // User messages should render (basic structural check)
             expect(lastFrame()).toContain('You');
-    });
+        });
 
         it('uses green color for agent messages', () => {
             const { lastFrame } = render(
-                <ResponseContainer response={makeResponse({ author: AuthorType.Agent })} columns={80} selected={false} />
+                <ResponseContainer response={makeResponse({ author: AuthorType.Agent })} columns={80} selected={false} {...containerProps} />
             );
             expect(lastFrame()).toContain('Agent');
-    });
+        });
 
         it('renders header format: Author - Type - timestamp', () => {
             const { lastFrame } = render(
@@ -409,13 +414,51 @@ describe('ResponseContainer', () => {
                     response={makeResponse({ author: AuthorType.Agent, type: ResponseType.Fix })}
                     columns={80}
                     selected={false}
+                    {...containerProps}
                 />
             );
             const frame = lastFrame()!;
-            // Header should contain author, type, and timestamp separated by dashes
             expect(frame).toContain('Agent');
             expect(frame).toContain('Fix');
             expect(frame).toContain('2025-01-15 10:00:00');
+        });
+
+        it('shows button text when selected', () => {
+            const { lastFrame } = render(
+                <ResponseContainer response={makeResponse()} columns={80} selected={true} {...containerProps} />
+            );
+            expect(lastFrame()).toContain('reply to this');
+        });
+
+        it('shows view replies when selected with replies', () => {
+            const resp = makeResponse();
+            // Build a reply chain of 3
+            const r1: Response = { id: 90, content: { ...resp.content }, responding_to: null, response: null, replying_to: resp, reply: null, is_continuation: false };
+            const r2: Response = { id: 91, content: { ...resp.content }, responding_to: r1, response: null, replying_to: null, reply: null, is_continuation: false };
+            const r3: Response = { id: 92, content: { ...resp.content }, responding_to: r2, response: null, replying_to: null, reply: null, is_continuation: false };
+            r1.response = r2;
+            r2.response = r3;
+            resp.reply = r1;
+
+            const { lastFrame } = render(
+                <ResponseContainer response={resp} columns={80} selected={true} hasNewReplies={false} />
+            );
+            expect(lastFrame()).toContain('view replies (3)');
+        });
+
+        it('shows reply count in continuation header', () => {
+            const resp = makeResponse();
+            resp.is_continuation = true;
+            // Build a reply chain of 2
+            const r1: Response = { id: 93, content: { ...resp.content }, responding_to: null, response: null, replying_to: resp, reply: null, is_continuation: false };
+            const r2: Response = { id: 94, content: { ...resp.content }, responding_to: r1, response: null, replying_to: null, reply: null, is_continuation: false };
+            r1.response = r2;
+            resp.reply = r1;
+
+            const { lastFrame } = render(
+                <ResponseContainer response={resp} columns={80} selected={false} hasNewReplies={false} />
+            );
+            expect(lastFrame()).toContain('[2 replies]');
         });
     });
 });

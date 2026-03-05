@@ -1,11 +1,12 @@
-import type { Issue, Response as IssueResponse, Dependency, Container } from '../types.js';
-import { IssueStatus, ResponseType, AuthorType } from "../types.js"
+import type { Issue, Response, Dependency, Container } from '../types.js';
+import { IssueStatus, ResponseType, AuthorType } from '../types.js';
+import { createMessage, buildMixedChain, buildReplyChain, splitAgentMessage, resetIdCounter } from './thread-builders.js';
 
 // ---- Canonical issue list (single source of truth) ----
 
 export const MOCK_ISSUES: Issue[] = [
-    { inum: 1, title: 'migrate_ServerDerivedFields', description: 'Migrate server derived fields to new schema', status: IssueStatus.Active
-        , created_at: '2026-01-01T00:00:00Z', resolved_at: null, issue_revision: 1, agent_last_read_at: null, user_last_viewed_at: null },
+    { inum: 1, title: 'migrate_ServerDerivedFields', description: 'Migrate server derived fields to new schema', status: IssueStatus.Active,
+        created_at: '2026-01-01T00:00:00Z', resolved_at: null, issue_revision: 1, agent_last_read_at: null, user_last_viewed_at: '2026-01-01T12:00:00Z' },
     { inum: 2, title: 'migrate_SessionCredentials', description: 'Migrate session credential handling', status: IssueStatus.Active, created_at: '2026-01-02T00:00:00Z', resolved_at: null, issue_revision: 1, agent_last_read_at: null, user_last_viewed_at: null },
     { inum: 3, title: 'rate_limiting_design', description: 'Design rate limiting strategy', status: IssueStatus.Awaiting, created_at: '2026-01-03T00:00:00Z', resolved_at: null, issue_revision: 2, agent_last_read_at: null, user_last_viewed_at: null },
     { inum: 4, title: 'payload_encryption_flow', description: 'Define payload encryption flow', status: IssueStatus.Awaiting, created_at: '2026-01-04T00:00:00Z', resolved_at: null, issue_revision: 1, agent_last_read_at: null, user_last_viewed_at: null },
@@ -56,118 +57,163 @@ export const MOCK_CONTAINER_ISSUES: Record<number, Issue[]> = {
 
 export interface DetailMockData {
     issue: Issue;
-    responses: IssueResponse[];
+    rootResponse: Response | null;
     blockedBy: number[];
     blocks: number[];
     group: string;
 }
 
+// ---- Build I-1 rich threaded conversation ----
+
+resetIdCounter();
+
+// Main chain items:
+// A1-A3: Agent Analysis split into 3 paragraphs
+const agentAnalysis = splitAgentMessage(
+    'I worked on the server-derived field migration and identified all existing field definitions.\n\nI identified three categories of fields that need migration: computed fields, cached aggregates, and denormalized lookups.\n\nThe computed fields can be migrated first since they have no external dependencies.',
+    { type: ResponseType.Analysis, timestamp: '2026-01-01T10:00:00Z', seen: null },
+);
+
+// B: User message
+const userDirectionMsg = createMessage(AuthorType.User, ResponseType.None,
+    'great, now work on the dual-write logic so old and new schemas stay in sync',
+    '2026-01-01T10:30:00Z');
+
+// C: Agent Implementation
+const agentImplMsg = createMessage(AuthorType.Agent, ResponseType.Implementation,
+    'I completed work on the dual-write logic. Changes:\n- src/schema/migration.ts: Field mapping\n- src/schema/dual-write.ts: Transition logic',
+    '2026-01-01T11:00:00Z');
+
+// D: User question
+const userSyncMsg = createMessage(AuthorType.User, ResponseType.None,
+    'can you change the sync interval from 30s to 60s?',
+    '2026-01-01T11:15:00Z');
+
+// E1-E2: Agent Implementation split into 2 paragraphs
+const agentSyncImpl = splitAgentMessage(
+    'I have implemented the change to the sync interval as requested.\n\nHere are the files modified:\n- src/config/sync.ts: interval 30000 → 60000\n- src/schema/dual-write.ts: updated retry window',
+    { type: ResponseType.Implementation, timestamp: '2026-01-01T11:30:00Z', seen: null },
+);
+
+const { root: i1Root, nodes: i1Nodes } = buildMixedChain([
+    agentAnalysis,        // nodes[0]=A1, nodes[1]=A2, nodes[2]=A3
+    userDirectionMsg,     // nodes[3]=B
+    agentImplMsg,         // nodes[4]=C
+    userSyncMsg,          // nodes[5]=D
+    agentSyncImpl,        // nodes[6]=E1, nodes[7]=E2
+]);
+
+// Reply thread on A2 (nodes[1]): 3 levels deep, all seen (before 12:00:00)
+buildReplyChain(i1Nodes[1], [
+    createMessage(AuthorType.User, ResponseType.None,
+        'one minor tweak — use camelCase for the category names',
+        '2026-01-01T10:10:00Z'),
+    createMessage(AuthorType.Agent, ResponseType.Implementation,
+        'Tweak implemented. All category names now use camelCase.',
+        '2026-01-01T10:15:00Z'),
+    createMessage(AuthorType.User, ResponseType.None,
+        'great, add a comment explaining the naming convention',
+        '2026-01-01T10:20:00Z'),
+]);
+
+// Reply thread on D (nodes[5]): R4 seen, R5 new (after 12:00:00)
+buildReplyChain(i1Nodes[5], [
+    createMessage(AuthorType.Agent, ResponseType.Implementation,
+        'Updated sync interval to 60s in all config files.',
+        '2026-01-01T11:20:00Z'),
+    createMessage(AuthorType.User, ResponseType.None,
+        "that's fine for now, we can tune it later",
+        '2026-01-01T13:00:00Z'),
+]);
+
+// Reply thread on E1 (nodes[6]): both new (after 12:00:00)
+buildReplyChain(i1Nodes[6], [
+    createMessage(AuthorType.User, ResponseType.None,
+        'looks good, but add config.yaml support too',
+        '2026-01-01T14:00:00Z'),
+    createMessage(AuthorType.Agent, ResponseType.Implementation,
+        'Added config.yaml support alongside the existing JSON config.',
+        '2026-01-01T14:05:00Z'),
+]);
+
+// ---- Build simple chains for I-3, I-5, I-8 ----
+
+const { root: i3Root } = buildMixedChain([
+    createMessage(AuthorType.User, ResponseType.None,
+        'Blocked until server field migration is done.',
+        '2026-01-03T08:05:00Z'),
+]);
+
+const { root: i5Root } = buildMixedChain([
+    createMessage(AuthorType.User, ResponseType.None,
+        'Waiting on session credential migration.',
+        '2026-01-05T10:05:00Z'),
+    createMessage(AuthorType.Agent, ResponseType.Analysis,
+        'Reviewing healthcheck patterns and Docker best practices.',
+        '2026-01-05T10:30:00Z'),
+]);
+
+const { root: i8Root } = buildMixedChain([
+    createMessage(AuthorType.Agent, ResponseType.Implementation,
+        'Project scaffolding complete.',
+        '2026-01-09T10:00:00Z'),
+]);
+
+// ---- Assemble MOCK_DETAIL_DATA ----
+
 export const MOCK_DETAIL_DATA: Record<number, DetailMockData> = {
     1: {
         issue: issueByInum(1),
-        responses: [
-            {
-                id: 1, inum: 1, author: AuthorType.User, type: ResponseType.None,
-                body: 'Please migrate the server-derived fields to the new schema.',
-                created_at: '2026-01-01T10:05:00Z',
-            },
-            {
-                id: 2, inum: 1, author: AuthorType.Agent, type: ResponseType.Analysis,
-                body: 'Examining the existing field definitions and planning migration.\n\nKey areas:\n1. Identify all server-derived fields\n2. Map to new schema columns\n3. Write migration script',
-                created_at: '2026-01-01T10:10:00Z',
-            },
-            {
-                id: 3, inum: 1, author: AuthorType.User, type: ResponseType.None,
-                body: 'Make sure to handle backward compatibility during the transition.',
-                created_at: '2026-01-01T11:00:00Z',
-            },
-            {
-                id: 4, inum: 1, author: AuthorType.Agent, type: ResponseType.Implementation,
-                body: 'Added dual-write logic so old and new schemas stay in sync during rollout.\n\nChanges:\n- src/schema/migration.ts: Field mapping\n- src/schema/dual-write.ts: Transition logic',
-                created_at: '2026-01-01T11:30:00Z',
-            },
-            {
-                id: 5, inum: 1, author: AuthorType.Agent, type: ResponseType.Question,
-                body: 'Should we keep the dual-write active for a fixed period, or until a manual cutover command is run?',
-                created_at: '2026-01-01T11:35:00Z',
-            },
-            {
-                id: 6, inum: 1, author: AuthorType.Agent, type: ResponseType.Analysis,
-                body: 'Examining the existing field definitions and planning migration.\n\nKey areas:\n1. Identify all server-derived fields\n2. Map to new schema columns\n3. Write migration script',
-                created_at: '2026-01-01T10:10:00Z',
-            },
-            {
-                id: 7, inum: 1, author: AuthorType.User, type: ResponseType.None,
-                body: 'Make sure to handle backward compatibility during the transition.',
-                created_at: '2026-01-01T11:00:00Z',
-            },
-            {
-                id: 8, inum: 1, author: AuthorType.Agent, type: ResponseType.Implementation,
-                body: 'Added dual-write logic so old and new schemas stay in sync during rollout.\n\nChanges:\n- src/schema/migration.ts: Field mapping\n- src/schema/dual-write.ts: Transition logic',
-                created_at: '2026-01-01T11:30:00Z',
-            },
-            {
-                id: 9, inum: 1, author: AuthorType.Agent, type: ResponseType.Question,
-                body: 'Should we keep the dual-write active for a fixed period, or until a manual cutover command is run?',
-                created_at: '2026-01-01T11:35:00Z',
-            },
-        ],
+        rootResponse: i1Root,
         blockedBy: [],
         blocks: [3, 4],
         group: 'Inbox',
     },
     2: {
         issue: issueByInum(2),
-        responses: [],
+        rootResponse: null,
         blockedBy: [],
         blocks: [5],
         group: 'Backend Sprint 1',
     },
     3: {
         issue: issueByInum(3),
-        responses: [
-            { id: 10, inum: 3, author: AuthorType.User, type: ResponseType.None, body: 'Blocked until server field migration is done.', created_at: '2026-01-03T08:05:00Z' },
-        ],
+        rootResponse: i3Root,
         blockedBy: [1],
         blocks: [6],
         group: 'Inbox',
     },
     4: {
         issue: issueByInum(4),
-        responses: [],
+        rootResponse: null,
         blockedBy: [1],
         blocks: [],
         group: 'Frontend',
     },
     5: {
         issue: issueByInum(5),
-        responses: [
-            { id: 20, inum: 5, author: AuthorType.User, type: ResponseType.None, body: 'Waiting on session credential migration.', created_at: '2026-01-05T10:05:00Z' },
-            { id: 21, inum: 5, author: AuthorType.Agent, type: ResponseType.Analysis, body: 'Reviewing healthcheck patterns and Docker best practices.', created_at: '2026-01-05T10:30:00Z' },
-        ],
+        rootResponse: i5Root,
         blockedBy: [2],
         blocks: [6],
         group: 'Backlog',
     },
     6: {
         issue: issueByInum(6),
-        responses: [],
+        rootResponse: null,
         blockedBy: [3, 5],
         blocks: [],
         group: 'Backend Sprint 1',
     },
     7: {
         issue: issueByInum(7),
-        responses: [],
+        rootResponse: null,
         blockedBy: [],
         blocks: [],
         group: 'Backend Sprint 1',
     },
     8: {
         issue: issueByInum(8),
-        responses: [
-            { id: 30, inum: 8, author: AuthorType.Agent, type: ResponseType.Implementation, body: 'Project scaffolding complete.', created_at: '2026-01-09T10:00:00Z' },
-        ],
+        rootResponse: i8Root,
         blockedBy: [],
         blocks: [],
         group: 'Inbox',

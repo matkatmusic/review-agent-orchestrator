@@ -1,19 +1,27 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { Response as IssueResponse } from '../types.js';
-import { AuthorType, AuthorTypeStringsMap, ResponseType, ResponseTypeStringsMap } from '../types.js';
+import type { Response } from '../types.js';
+import { AuthorType, AuthorTypeStringsMap, ResponseTypeStringsMap } from '../types.js';
 
 export interface ResponseContainerProps {
-    response: IssueResponse;
+    response: Response;
     columns: number;
     selected: boolean;
+    hasNewReplies: boolean;
+}
+
+/** Count nodes in a reply chain. */
+function countReplies(node: Response): number {
+    let count = 0;
+    let r = node.reply;
+    while (r) {
+        count++;
+        r = r.response;
+    }
+    return count;
 }
 
 export class ResponseContainer extends React.Component<ResponseContainerProps> {
-    /**
-     * Compute total terminal lines this container occupies:
-     * 1 (top border) + bodyLines + 1 (bottom border) + 1 (separator)
-     */
     static computeLineCount(body: string, columns: number): number {
         const innerWidth = Math.max(10, columns - 4);
         let bodyLines = 0;
@@ -23,21 +31,128 @@ export class ResponseContainer extends React.Component<ResponseContainerProps> {
         return 1 + bodyLines + 1 + 1;
     }
 
-    render() {
-        const { response, columns, selected } = this.props;
-        const color = response.author === AuthorType.User ? 'cyan' : 'green';
-        const innerWidth = Math.max(10, columns - 4);
-        const timeStr = response.created_at.replace('T', ' ').replace('Z', '');
-        const authorStr = AuthorTypeStringsMap.get(response.author)!;
-        const typeStr = ResponseTypeStringsMap.get(response.type)!;
+    private renderTopBorder(innerWidth: number, color: string, selected: boolean): React.ReactNode {
+        const { response, hasNewReplies } = this.props;
+        const replyCount = countReplies(response);
+        const borderColor = selected ? 'white' : color;
 
-        // Header content for width calculation
+        if( response.is_continuation )
+        {
+            if( replyCount === 0 || selected )
+            {
+                // Plain dashes (no header badge when selected — bottom border shows it)
+                return (
+                    <Text color={borderColor} bold={selected}>
+                        {'┌─'}{'─'.repeat(innerWidth)}{'─┐'}
+                    </Text>
+                );
+            }
+
+            // ┌─────────── [3 replies] ─┐
+            const replyLabel = ` [${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}] `;
+            const leftDashes = Math.max(0, innerWidth - replyLabel.length);
+            return (
+                <Text>
+                    <Text color={borderColor} bold={selected}>{'┌─'}{'─'.repeat(leftDashes)}</Text>
+                    <Text color={hasNewReplies ? 'red' : borderColor} bold={hasNewReplies || selected}>{replyLabel}</Text>
+                    <Text color={borderColor} bold={selected}>{'─┐'}</Text>
+                </Text>
+            );
+        }
+
+        // Non-continuation: full header with author, type, timestamp
+        const authorStr = AuthorTypeStringsMap.get(response.content.author)!;
+        const typeStr = ResponseTypeStringsMap.get(response.content.type)!;
+        const timeStr = response.content.timestamp.replace('T', ' ').replace('Z', '');
+
+        if (selected) {
+            // Selected: author only, no type or timestamp
+            const headerContent = ` ${authorStr} `;
+            const fillLen = Math.max(0, innerWidth - headerContent.length);
+            return (
+                <Text color={borderColor} bold>
+                    {'┌─ '}{authorStr}{' '}{'─'.repeat(fillLen)}{'─┐'}
+                </Text>
+            );
+        }
+
+        if (replyCount > 0) {
+            // Unselected with replies: right-align reply badge in header
+            const replyBadge = hasNewReplies
+                ? `[${replyCount} new ${replyCount === 1 ? 'reply' : 'replies'}]`
+                : `[${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}]`;
+            const leftContent = ` ${authorStr} - ${typeStr} - ${timeStr} `;
+            const rightContent = ` ${replyBadge} `;
+            const fillLen = Math.max(0, innerWidth - leftContent.length - rightContent.length);
+            return (
+                <Text>
+                    <Text color={borderColor}>{'┌─ '}{authorStr}{' - '}</Text>
+                    <Text color={'yellow'} bold>{typeStr}</Text>
+                    <Text color={borderColor}>{' - '}{timeStr}{' '}{'─'.repeat(fillLen)}</Text>
+                    <Text color={hasNewReplies ? 'red' : borderColor} bold={hasNewReplies}>{rightContent}</Text>
+                    <Text color={borderColor}>{'─┐'}</Text>
+                </Text>
+            );
+        }
+
+        // Unselected, no replies: full header
         const headerContent = ` ${authorStr} - ${typeStr} - ${timeStr} `;
         const fillLen = Math.max(0, innerWidth - headerContent.length);
+        return (
+            <Text>
+                <Text color={borderColor}>{'┌─ '}{authorStr}{' - '}</Text>
+                <Text color={'yellow'} bold>{typeStr}</Text>
+                <Text color={borderColor}>{' - '}{timeStr}{' '}{'─'.repeat(fillLen)}{'─┐'}</Text>
+            </Text>
+        );
+    }
+
+    private renderBottomBorder(innerWidth: number, color: string, selected: boolean): React.ReactNode {
+        const replyCount = countReplies(this.props.response);
+        const borderColor = selected ? 'white' : color;
+
+        if( !selected )
+        {
+            // Not selected: plain dashes
+            return (
+                <Text color={borderColor} bold={selected}>
+                    {'└─'}{'─'.repeat(innerWidth)}{'─┘'}
+                </Text>
+            );
+        }
+
+        if (replyCount === 0) {
+            // └──────────── reply to this ─┘
+            const label = ' reply to this ';
+            const leftDashes = Math.max(0, innerWidth - label.length);
+            return (
+                <Text color={borderColor} bold={selected}>
+                    {'└─'}{'─'.repeat(leftDashes)}{label}{'─┘'}
+                </Text>
+            );
+        }
+
+        // └─────────── view replies (N) ─┘  or  └─────────── view replies (N new) ─┘
+        const { hasNewReplies } = this.props;
+        const label = hasNewReplies
+            ? ` view replies (${replyCount} new) `
+            : ` view replies (${replyCount}) `;
+        const leftDashes = Math.max(0, innerWidth - label.length);
+        return (
+            <Text color={borderColor} bold={selected}>
+                {'└─'}{'─'.repeat(leftDashes)}{label}{'─┘'}
+            </Text>
+        );
+    }
+
+    render() {
+        const { response, columns, selected } = this.props;
+        const color = response.content.author === AuthorType.User ? 'cyan' : 'green';
+        const innerWidth = Math.max(10, columns - 4);
 
         // Word-wrap body at innerWidth
         const bodyLines: string[] = [];
-        for (const rawLine of response.body.split('\n')) {
+        for (const rawLine of response.content.body.split('\n')) {
             let remaining = rawLine;
             do {
                 bodyLines.push(remaining.slice(0, innerWidth));
@@ -45,29 +160,27 @@ export class ResponseContainer extends React.Component<ResponseContainerProps> {
             } while (remaining.length > 0);
         }
 
+        const borderColor = selected ? 'white' : color;
+
         return (
             <Box flexDirection="column" flexShrink={0}>
-                {/* Top border: ┌─ Author - Type - timestamp ───┐ */}
-                <Text>
-                    <Text color={selected ? 'white' : color} bold={selected}>{'┌─ '}{authorStr}{' - '}</Text>
-                    <Text color={'yellow'} bold>{typeStr}</Text>
-                    <Text color={selected ? 'white' : color} bold={selected}>{' - '}{timeStr}{' '}{'─'.repeat(fillLen)}{'─┐'}</Text>
-                </Text>
+                {/* Top border */}
+                {this.renderTopBorder(innerWidth, color, selected)}
 
                 {/* Body lines: │ text │ */}
                 {bodyLines.map((line, i) => {
                     const padLen = Math.max(0, innerWidth - line.length);
                     return (
                         <Text key={i}>
-                            <Text color={selected ? 'white' : color} bold={selected}>{'│ '}</Text>
+                            <Text color={borderColor} bold={selected}>{'│ '}</Text>
                             <Text color={color}>{line}{' '.repeat(padLen)}</Text>
-                            <Text color={selected ? 'white' : color} bold={selected}>{' │'}</Text>
+                            <Text color={borderColor} bold={selected}>{' │'}</Text>
                         </Text>
                     );
                 })}
 
-                {/* Bottom border: └───────────────┘ */}
-                <Text color={selected ? 'white' : color} bold={selected}>{'└─'}{'─'.repeat(innerWidth)}{'─┘'}</Text>
+                {/* Bottom border */}
+                {this.renderBottomBorder(innerWidth, color, selected)}
 
                 {/* Separator */}
                 <Text>{' '}</Text>

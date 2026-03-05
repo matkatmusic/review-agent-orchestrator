@@ -19,6 +19,7 @@ function getViewLabel(view: View): string {
     if (view.type === ViewType.Detail) {
         return `I-${view.inum} Detail`;
     }
+    if (view.type === ViewType.Thread) return `I-${view.inum} Thread`;
     return ViewTypeStringsMap.get(view.type) ?? String(view.type);
 }
 
@@ -36,6 +37,8 @@ function getSubtitle(view: View): string {
             return 'Dependency and blocking relationships';
         case ViewType.GroupView:
             return 'Issues grouped by container';
+        case ViewType.Thread:
+            return `Thread on I-${view.inum}`;
         default:
             return assertNever(view);
     }

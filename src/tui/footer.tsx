@@ -29,6 +29,7 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
     [ViewType.Detail]: [
         { key: 'Enter', label: 'Send' },
         { key: '\u2191\u2193', label: 'Scroll' },
+        { key: 'C-\u25b8', label: 'Thread' },
         { key: 'Esc',   label: 'Back' },
         { key: 'd',     label: 'Defer', disabled: true },
         { key: 'r',     label: 'Resolve', disabled: true },
@@ -55,6 +56,12 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
         { key: 'n',     label: 'Next issue' },
         { key: 'p',     label: 'Prev issue' },
         { key: 'Esc',   label: 'Back' },
+    ],
+    [ViewType.Thread]: [
+        { key: 'Enter', label: 'Send' },
+        { key: '\u2191\u2193',   label: 'Scroll' },
+        { key: 'C-\u25b8',  label: 'Sub-thread' },
+        { key: 'Esc',  label: 'Exit thread' },
     ],
 };
 

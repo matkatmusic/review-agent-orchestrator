@@ -1,0 +1,124 @@
+Code Review: src/tui/detail.tsx
+Architecture assessment focused on maintainability and test coverage.
+
+4 Major | 4 Minor | 1 Suggestion | 0 Critical
+
+================================================================================
+MAJOR FINDINGS
+================================================================================
+
+1. All mutable state stored as instance properties, bypassing React's state model
+
+12 mutable instance properties are driven by forceUpdate() calls scattered
+across 8 methods. React can't track these changes — you lose batched updates,
+DevTools visibility, and shouldComponentUpdate. Multiple mutations in one path
+(e.g., handleInputSubmit mutates inputValue then calls openOverlayForField
+which also calls forceUpdate) cause redundant renders.
+
+Fix: Move everything into a proper state object or convert to a function
+component with useState.
+
+--------------------------------------------------------------------------------
+
+2. Side effects inside render()
+
+Lines 310-320 mutate flatList/containerHeights during render. Lines 443-447
+mutate scroll position during render. Lines 420/439 mutate issueHeaderLineCount
+during render. React may call render() multiple times (StrictMode), making
+these mutations non-deterministic.
+
+Fix: Use getDerivedStateFromProps for flat list recalculation, componentDidMount
+for initial scroll, and compute issueHeaderLineCount as a derived value from
+props.
+
+--------------------------------------------------------------------------------
+
+3. Component has too many responsibilities
+
+DetailView handles: issue metadata display, conversation scrolling, text input,
+tab-based field focus, three overlay modes, thread navigation, adjacent issue
+navigation, and keyboard dispatch. The render method is 185 lines with four
+return paths.
+
+Fix: Extract IssueHeader and ConversationScroller sub-components. The parent
+becomes an orchestrator.
+
+--------------------------------------------------------------------------------
+
+4. blockedBySet and blocksSet are duplicated state
+
+Constructor copies props.blockedBy into a Set at construction time (line
+133-134) but never re-syncs if props change. If the parent re-renders with
+updated dependency data, the UI shows stale values.
+
+Fix: Lift the Sets into the parent, or add componentDidUpdate to detect prop
+changes.
+
+================================================================================
+MINOR FINDINGS
+================================================================================
+
+5. Class component vs function component
+
+The DetailInputBridge wrapper (line 93) exists solely because class components
+can't use hooks. Converting to a function component eliminates this boilerplate.
+
+--------------------------------------------------------------------------------
+
+6. String comparison for timestamps
+
+Line 38: r.content.timestamp > userLastViewedAt works only for ISO 8601
+strings. No type-level guarantee enforces this. Parsing to Date would be safer.
+
+--------------------------------------------------------------------------------
+
+7. findResponseById only searches depth-1 replies
+
+The exported function (line 45-58) walks the main chain and direct replies but
+won't find reply-to-a-reply. Either make it recursive or document the depth
+limitation.
+
+--------------------------------------------------------------------------------
+
+8. Thread header line count uses hardcoded constant
+
+Line 420: THREAD_HEADER_LINES = 2 is used for the thread path, but the
+non-thread path correctly uses issueHeader.length. If someone adds a line to
+the thread header, the constant goes stale. Use issueHeader.length for both
+paths.
+
+================================================================================
+SUGGESTION
+================================================================================
+
+9. Optional props without defaults
+
+7 optional callbacks mean the component silently does nothing when they're
+missing. The input area renders even without onSend. Consider making
+always-visible callbacks required, or hiding UI elements when their callbacks
+aren't provided.
+
+================================================================================
+TEST COVERAGE GAPS
+================================================================================
+
+The test file has 25 tests but only covers up/down arrow navigation. Untested:
+- Escape (onBack)
+- Tab cycling through fields
+- Enter to open overlays
+- Thread entry/exit (Ctrl+Right, Ctrl+Left)
+- Shift+Arrow for adjacent issue navigation
+- All three overlay render branches
+- Input submission when a field is focused (early return at line 295)
+
+The ink-testing-library infrastructure is already in place — these just need
+to be written.
+
+================================================================================
+PRIORITY ORDER
+================================================================================
+
+1. Move instance properties to React state (foundation for everything else)
+2. Extract sub-components (reduces complexity, enables isolated testing)
+3. Add keyboard handler tests (highest-risk untested code)
+4. Fix stale blockedBySet/blocksSet (correctness bug)

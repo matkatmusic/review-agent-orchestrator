@@ -1,20 +1,79 @@
 import React from 'react';
 import { Box, Text, useInput, type Key } from 'ink';
 import TextInput from 'ink-text-input';
-import type { Issue, Response as IssueResponse, Container } from '../types.js';
+import type { Issue, Response, Container } from '../types.js';
 import { IssueStatusStringsMap } from '../types.js';
 import type { View } from './views.js';
+import { ViewType } from './views.js';
 import { HEADER_LINES } from './header.js';
 import { GroupPicker } from './group-picker.js';
 import { IssueListPicker } from './issue-list-picker.js';
 import { ResponseContainer } from './response-container.js';
+
+// ---- FlatNode ----
+
+interface FlatNode {
+    response: Response;
+    hasNewReplies: boolean;
+}
+
+/**
+ * Walk a .response chain from root, computing metadata for each node.
+ */
+function flattenChain(root: Response | null, userLastViewedAt: string | null): FlatNode[] {
+    const nodes: FlatNode[] = [];
+    let current = root;
+    while (current) {
+        const hasNewReplies = userLastViewedAt !== null && checkNewReplies(current, userLastViewedAt);
+        nodes.push({ response: current, hasNewReplies });
+        current = current.response;
+    }
+    return nodes;
+}
+
+/** Check if any reply is unseen (timestamp after userLastViewedAt and not yet seen). */
+function checkNewReplies(node: Response, userLastViewedAt: string): boolean {
+    let r = node.reply;
+    while (r) {
+        if (r.content.seen === null && r.content.timestamp > userLastViewedAt) return true;
+        r = r.response;
+    }
+    return false;
+}
+
+/** Mark all replies on a node as seen. */
+function markRepliesSeen(node: Response): void {
+    const now = new Date().toISOString();
+    let r = node.reply;
+    while (r) {
+        r.content.seen = now;
+        r = r.response;
+    }
+}
+
+/** Find a Response node by id in a linked-list chain. */
+function findResponseById(root: Response | null, id: number): Response | null {
+    let current = root;
+    while (current) {
+        if (current.id === id) return current;
+        // Also search reply chains
+        let reply = current.reply;
+        while (reply) {
+            if (reply.id === id) return reply;
+            reply = reply.response;
+        }
+        current = current.response;
+    }
+    return null;
+}
 
 // ---- Props ----
 
 export interface DetailViewProps {
     inum: number;
     issue: Issue;
-    responses: IssueResponse[];
+    rootResponse: Response | null;
+    threadParentResponse?: Response;
     blockedBy: number[];
     blocks: number[];
     group: string;
@@ -22,6 +81,7 @@ export interface DetailViewProps {
     rows: number;
     containers?: Container[];
     allIssues?: Issue[];
+    userLastViewedAt?: string | null;
     onBack?: () => void;
     onSend?: (message: string) => void;
     onNavigate?: (view: View) => void;
@@ -30,6 +90,7 @@ export interface DetailViewProps {
     onGroupCreate?: (name: string) => void;
     onBlockedByChange?: (blockerInums: number[]) => void;
     onBlocksChange?: (blockedInums: number[]) => void;
+    onNavigateIssue?: (inum: number) => void;
 }
 
 // ---- Layout constants ----
@@ -68,9 +129,11 @@ export class DetailView extends React.Component<DetailViewProps> {
     issueHeaderLineCount: number;
     selectedMessage: number;
     firstVisibleMessage: number;
+    private flatList: FlatNode[];
     private containerHeights: number[];
-    private lastResponses: IssueResponse[] | null;
+    private lastRootResponse: Response | null;
     private initialScrollDone: boolean;
+    private threadParentStack: Response[];
 
     constructor(props: DetailViewProps) {
         super(props);
@@ -80,12 +143,14 @@ export class DetailView extends React.Component<DetailViewProps> {
         this.blockedBySet = new Set(props.blockedBy);
         this.blocksSet = new Set(props.blocks);
         this.issueHeaderLineCount = 0;
-        this.containerHeights = props.responses.map(r =>
-            ResponseContainer.computeLineCount(r.body, props.columns),
+        this.flatList = flattenChain(props.rootResponse, props.userLastViewedAt ?? null);
+        this.containerHeights = this.flatList.map(n =>
+            ResponseContainer.computeLineCount(n.response.content.body, props.columns),
         );
-        this.lastResponses = props.responses;
+        this.lastRootResponse = props.rootResponse;
         this.initialScrollDone = false;
-        this.selectedMessage = Math.max(0, props.responses.length - 1);
+        this.threadParentStack = [];
+        this.selectedMessage = Math.max(0, this.flatList.length - 1);
         this.firstVisibleMessage = 0;
     }
 
@@ -96,27 +161,20 @@ export class DetailView extends React.Component<DetailViewProps> {
         );
     }
 
-    /**
-     * Adjust firstVisibleMessage so that selectedMessage is within the viewport.
-     */
     deriveFirstVisible(): number {
-        const responses = this.props.responses;
-        if (responses.length === 0) return 0;
+        if (this.flatList.length === 0) return 0;
 
         const sel = this.selectedMessage;
         let first = this.firstVisibleMessage;
 
-        // If selected is above current first visible, jump to it
         if (sel < first) return sel;
 
-        // Check if selected fits in viewport starting from first
         let used = 0;
         for (let i = first; i <= sel; i++) {
             used += this.containerHeights[i];
         }
         if (used <= this.conversationHeight) return first;
 
-        // Selected doesn't fit — work backwards from sel
         used = this.containerHeights[sel];
         first = sel;
         while (first > 0 && used + this.containerHeights[first - 1] <= this.conversationHeight) {
@@ -126,17 +184,12 @@ export class DetailView extends React.Component<DetailViewProps> {
         return first;
     }
 
-    /**
-     * Find the last container index that overlaps the viewport.
-     * Includes partially-visible containers so the Box clips them.
-     */
     computeLastVisible(): number {
-        const responses = this.props.responses;
-        if (responses.length === 0) return 0;
+        if (this.flatList.length === 0) return 0;
 
         let last = this.firstVisibleMessage;
         let used = this.containerHeights[last];
-        while (last + 1 < responses.length && used < this.conversationHeight) {
+        while (last + 1 < this.flatList.length && used < this.conversationHeight) {
             last++;
             used += this.containerHeights[last];
         }
@@ -175,12 +228,51 @@ export class DetailView extends React.Component<DetailViewProps> {
         this.forceUpdate();
     };
 
+    navigateToAdjacentIssue(direction: 1 | -1) {
+        const issues = this.props.allIssues;
+        if (!issues || issues.length === 0) return;
+        const idx = issues.findIndex(i => i.inum === this.props.inum);
+        const nextIdx = idx + direction;
+        if (nextIdx >= 0 && nextIdx < issues.length) {
+            this.props.onNavigateIssue?.(issues[nextIdx].inum);
+        }
+    }
+
     handleKey = (_input: string, key: Key) => {
         // When an overlay is open, it handles its own input
         if (this.overlay !== OverlayType.None) return;
 
         if (key.escape) {
             this.props.onBack?.();
+            return;
+        }
+
+        // Thread navigation: Ctrl+Alt+> or Ctrl+Right to enter thread
+        const enterThread = (key.ctrl && key.meta && (_input === '>' || _input === '.'))
+            || (key.ctrl && key.rightArrow);
+        if (enterThread) {
+            const selectedNode = this.flatList[this.selectedMessage];
+            if (selectedNode) {
+                this.threadParentStack.push(selectedNode.response);
+                this.props.onNavigate?.({
+                    type: ViewType.Thread,
+                    inum: this.props.inum,
+                    rootResponseId: selectedNode.response.id,
+                });
+            }
+            return;
+        }
+
+        // Thread exit: Ctrl+Alt+< or Ctrl+Left
+        const exitThread = (key.ctrl && key.meta && (_input === '<' || _input === ','))
+            || (key.ctrl && key.leftArrow);
+        if (exitThread && this.props.threadParentResponse) {
+            this.props.onBack?.();
+            return;
+        }
+
+        if (key.shift && (key.leftArrow || key.rightArrow)) {
+            this.navigateToAdjacentIssue(key.rightArrow ? 1 : -1);
             return;
         }
         if (key.tab) {
@@ -198,7 +290,7 @@ export class DetailView extends React.Component<DetailViewProps> {
                 this.forceUpdate();
             }
         } else if (key.downArrow) {
-            if (this.selectedMessage < this.props.responses.length - 1) {
+            if (this.selectedMessage < this.flatList.length - 1) {
                 this.selectedMessage++;
                 this.firstVisibleMessage = this.deriveFirstVisible();
                 this.forceUpdate();
@@ -212,7 +304,6 @@ export class DetailView extends React.Component<DetailViewProps> {
     };
 
     handleInputSubmit = (value: string) => {
-        // When a header field is focused, Enter opens its overlay instead
         if (this.focusedField !== null) {
             this.openOverlayForField();
             return;
@@ -225,18 +316,34 @@ export class DetailView extends React.Component<DetailViewProps> {
     };
 
     render() {
-        const { inum, issue, responses, blocks, group, columns, containers } = this.props;
+        const { inum, issue, rootResponse, blocks, group, columns, containers } = this.props;
 
-        // Recompute container heights if responses changed
-        if (responses !== this.lastResponses) {
-            this.containerHeights = responses.map(r =>
-                ResponseContainer.computeLineCount(r.body, columns),
+        // Recompute flat list if root response changed
+        if (rootResponse !== this.lastRootResponse) {
+            this.flatList = flattenChain(rootResponse, this.props.userLastViewedAt ?? null);
+            this.containerHeights = this.flatList.map(n =>
+                ResponseContainer.computeLineCount(n.response.content.body, columns),
             );
-            this.lastResponses = responses;
-            if (this.selectedMessage >= responses.length) {
-                this.selectedMessage = Math.max(0, responses.length - 1);
+            this.lastRootResponse = rootResponse;
+
+            // Restore selection from stack when returning from a thread
+            const stackTop = this.threadParentStack.length > 0
+                ? this.threadParentStack[this.threadParentStack.length - 1]
+                : null;
+            const restoredIndex = stackTop
+                ? this.flatList.findIndex(n => n.response === stackTop)
+                : -1;
+            if (restoredIndex >= 0) {
+                this.threadParentStack.pop();
+                this.selectedMessage = restoredIndex;
+                this.firstVisibleMessage = 0;
+                this.initialScrollDone = true;
+                this.firstVisibleMessage = this.deriveFirstVisible();
+            } else {
+                this.selectedMessage = Math.max(0, this.flatList.length - 1);
+                this.firstVisibleMessage = 0;
+                this.initialScrollDone = false;
             }
-            this.firstVisibleMessage = this.deriveFirstVisible();
         }
 
         const blockedByArr = [...this.blockedBySet];
@@ -248,7 +355,6 @@ export class DetailView extends React.Component<DetailViewProps> {
             ? blocksArr.map(n => `I-${n}`).join(', ')
             : '(none)';
 
-        // Total content height below the App header (conversation + input + issue header)
         const contentHeight = this.props.rows - HEADER_LINES;
 
         // ---- Overlay: Group picker ----
@@ -324,39 +430,60 @@ export class DetailView extends React.Component<DetailViewProps> {
         }
 
         // ---- Normal view ----
-        const groupFocused = this.focusedField === FIELD_GROUP;
-        const blockedByFocused = this.focusedField === FIELD_BLOCKED_BY;
-        const blocksFocused = this.focusedField === FIELD_BLOCKS;
+        const isThread = this.props.threadParentResponse !== undefined;
 
-        const issueHeader: React.ReactNode[] = [
-            <Text key="title" bold wrap="truncate">
-                I-{inum}: {issue.title}
-            </Text>,
-            <Text key="status" wrap="truncate">
-                Status: <Text color="yellow">{IssueStatusStringsMap.get(issue.status) ?? issue.status}</Text>  |  Group: <Text inverse={groupFocused} bold={groupFocused}>{` ${group} `}</Text>
-            </Text>,
-            <Text key="deps" wrap="truncate">
-                Blocked by: <Text inverse={blockedByFocused} bold={blockedByFocused}>{` ${blockedByStr} `}</Text>  |  Blocks: <Text inverse={blocksFocused} bold={blocksFocused}>{` ${blocksStr} `}</Text>
-            </Text>,
-            <Text key="hint" dimColor>(Tab to change Group, Blocked By, Blocks)</Text>,
-            <Text key="sep" dimColor>{'─'.repeat(columns)}</Text>,
-        ];
-        this.issueHeaderLineCount = issueHeader.length;
+        // Build header
+        let issueHeader: React.ReactNode[];
+        if (isThread) {
+            const parentResponse = this.props.threadParentResponse!;
+            const parentHeight = ResponseContainer.computeLineCount(parentResponse.content.body, columns);
+            issueHeader = [
+                <ResponseContainer
+                    key="parent-msg"
+                    response={parentResponse}
+                    columns={columns}
+                    selected={false}
+                    hasNewReplies={false}
+                />,
+            ];
+            this.issueHeaderLineCount = parentHeight;
+        } else {
+            const groupFocused = this.focusedField === FIELD_GROUP;
+            const blockedByFocused = this.focusedField === FIELD_BLOCKED_BY;
+            const blocksFocused = this.focusedField === FIELD_BLOCKS;
+
+            issueHeader = [
+                <Text key="title" bold wrap="truncate">
+                    I-{inum}: {issue.title}
+                </Text>,
+                <Text key="status" wrap="truncate">
+                    Status: <Text color="yellow">{IssueStatusStringsMap.get(issue.status) ?? issue.status}</Text>  |  Group: <Text inverse={groupFocused} bold={groupFocused}>{` ${group} `}</Text>
+                </Text>,
+                <Text key="deps" wrap="truncate">
+                    Blocked by: <Text inverse={blockedByFocused} bold={blockedByFocused}>{` ${blockedByStr} `}</Text>  |  Blocks: <Text inverse={blocksFocused} bold={blocksFocused}>{` ${blocksStr} `}</Text>
+                </Text>,
+                <Text key="hint" dimColor>(Tab to change Group, Blocked By, Blocks)</Text>,
+                <Text key="sep" dimColor>{'─'.repeat(columns)}</Text>,
+            ];
+            this.issueHeaderLineCount = issueHeader.length;
+        }
 
         // Initial scroll to bottom
-        if (!this.initialScrollDone && responses.length > 0) {
-            this.selectedMessage = responses.length - 1;
+        if (!this.initialScrollDone && this.flatList.length > 0) {
+            this.selectedMessage = this.flatList.length - 1;
             this.firstVisibleMessage = this.deriveFirstVisible();
             this.initialScrollDone = true;
         }
 
-        // Determine visible range of containers
-        const lastVisible = responses.length > 0
+        // Determine visible range
+        const lastVisible = this.flatList.length > 0
             ? this.computeLastVisible()
             : -1;
-        const visibleResponses = responses.length > 0
-            ? responses.slice(this.firstVisibleMessage, lastVisible + 1)
+        const visibleNodes = this.flatList.length > 0
+            ? this.flatList.slice(this.firstVisibleMessage, lastVisible + 1)
             : [];
+
+        const inputLabel = 'Enter response: > ';
 
         return (
             <Box flexDirection="column">
@@ -365,12 +492,13 @@ export class DetailView extends React.Component<DetailViewProps> {
 
                 {/* Scrollable conversation */}
                 <Box flexDirection="column" height={this.conversationHeight} overflow="hidden">
-                    {visibleResponses.map((resp, i) => (
+                    {visibleNodes.map((node, i) => (
                         <ResponseContainer
-                            key={resp.id}
-                            response={resp}
+                            key={node.response.id}
+                            response={node.response}
                             columns={columns}
                             selected={this.firstVisibleMessage + i === this.selectedMessage}
+                            hasNewReplies={node.hasNewReplies}
                         />
                     ))}
                 </Box>
@@ -378,7 +506,7 @@ export class DetailView extends React.Component<DetailViewProps> {
                 {/* Input area */}
                 <Text dimColor>{'─'.repeat(columns)}</Text>
                 <Box>
-                    <Text color="cyan">Enter message: &gt; </Text>
+                    <Text color="cyan">{inputLabel}</Text>
                     <TextInput
                         value={this.inputValue}
                         focus={this.focusedField === null}
@@ -391,3 +519,5 @@ export class DetailView extends React.Component<DetailViewProps> {
         );
     }
 }
+
+export { findResponseById, markRepliesSeen };

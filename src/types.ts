@@ -61,13 +61,34 @@ export const AuthorTypeStringsMap = new Map<AuthorType, string>([
     [AuthorType.Agent, "Agent"],
 ]);
 
-export interface Response {
-    id: number;
-    inum: number;
+export interface Message {
     author: AuthorType;
     type: ResponseType;
     body: string;
+    timestamp: string;        // ISO 8601 (was created_at)
+    seen: string | null;      // ISO 8601 or null
+}
+
+export interface Response {
+    id: number;
+    content: Message;
+    responding_to: Response | null;   // previous in chain (back pointer, up)
+    response: Response | null;        // next in chain (forward pointer, down)
+    replying_to: Response | null;     // parent thread (back pointer, left)
+    reply: Response | null;           // first reply (forward pointer, right)
+    is_continuation: boolean;         // true = paragraph 2+ of same message
+}
+
+export interface ResponseRow {
+    id: number;
+    inum: number;
+    author: string;           // 'user' | 'agent' as stored in SQLite
+    type: string;             // 'analysis' etc as stored in SQLite
+    body: string;
     created_at: string;
+    responding_to_id: number | null;
+    replying_to_id: number | null;
+    is_continuation: number;  // 0 or 1 in SQLite
 }
 
 export interface Dependency {

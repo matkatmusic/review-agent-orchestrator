@@ -7,7 +7,7 @@ import { NewIssue } from './newissue.js';
 import type { NewIssueData } from './newissue.js';
 import { Dashboard } from './dashboard.js';
 import { MOCK_ISSUES, MOCK_UNREAD_INUMS, MOCK_MAX_AGENTS, MOCK_DETAIL_DATA, MOCK_CONTAINERS } from './mock-data.js';
-import { DetailView } from './detail.js';
+import { DetailView, findResponseById, markRepliesSeen } from './detail.js';
 import { AgentStatus } from './agent-status.js';
 import { BlockingMap } from './blocking-map.js';
 import { GroupView, GROUP_MODE_INITIAL } from './group-view.js';
@@ -77,7 +77,22 @@ class App extends React.Component<AppProps> {
 
     //navigate to a new view by pushing it onto the view stack
     navigateToView(view: View) {
+        // Mark replies as seen when entering a thread
+        if (view.type === ViewType.Thread) {
+            const mockData = MOCK_DETAIL_DATA[view.inum];
+            if (mockData) {
+                const threadRoot = findResponseById(mockData.rootResponse, view.rootResponseId);
+                if (threadRoot) markRepliesSeen(threadRoot);
+            }
+        }
         this.viewStack = pushViewOntoStack(this.viewStack, view);
+        this.forceUpdate();
+    }
+
+    //replace the current (top) view without changing stack depth
+    replaceCurrentView(view: View) {
+        this.viewStack[this.viewStack.length - 1] = view;
+        this.viewStack = [...this.viewStack];
         this.forceUpdate();
     }
 
@@ -119,7 +134,7 @@ class App extends React.Component<AppProps> {
                         <DetailView
                             inum={this.currentView.inum}
                             issue={mockData.issue}
-                            responses={mockData.responses}
+                            rootResponse={mockData.rootResponse}
                             blockedBy={mockData.blockedBy}
                             blocks={mockData.blocks}
                             group={mockData.group}
@@ -127,13 +142,43 @@ class App extends React.Component<AppProps> {
                             rows={this.rows}
                             containers={MOCK_CONTAINERS}
                             allIssues={MOCK_ISSUES}
+                            userLastViewedAt={mockData.issue.user_last_viewed_at}
+                            onBack={() => this.goBackToPreviousView()}
+                            onNavigate={(view) => this.navigateToView(view)}
+                            onNavigateIssue={(inum) => this.replaceCurrentView({ type: ViewType.Detail, inum })}
+                            onQuit={() => this.props.onExit?.()}
+                        />
+                    );
+                } else {
+                    content = <Text color="red">Issue I-{this.currentView.inum} not found</Text>;
+                }
+                break;
+            }
+            case ViewType.Thread: {
+                const view = this.currentView;
+                const mockData = MOCK_DETAIL_DATA[view.inum];
+                if (mockData) {
+                    // Find the thread root by id
+                    const threadRoot = findResponseById(mockData.rootResponse, view.rootResponseId);
+                    content = (
+                        <DetailView
+                            inum={view.inum}
+                            issue={mockData.issue}
+                            rootResponse={threadRoot?.reply ?? null}
+                            threadParentResponse={threadRoot ?? undefined}
+                            blockedBy={mockData.blockedBy}
+                            blocks={mockData.blocks}
+                            group={mockData.group}
+                            columns={this.columns}
+                            rows={this.rows}
+                            userLastViewedAt={mockData.issue.user_last_viewed_at}
                             onBack={() => this.goBackToPreviousView()}
                             onNavigate={(view) => this.navigateToView(view)}
                             onQuit={() => this.props.onExit?.()}
                         />
                     );
                 } else {
-                    content = <Text color="red">Issue I-{this.currentView.inum} not found</Text>;
+                    content = <Text color="red">Issue I-{view.inum} not found</Text>;
                 }
                 break;
             }

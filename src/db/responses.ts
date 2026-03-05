@@ -1,5 +1,5 @@
 import type { DB } from './database.js';
-import type { Response } from '../types.js';
+import type { ResponseRow } from '../types.js';
 
 export function create(
     db: DB,
@@ -18,15 +18,15 @@ export function create(
     return Number(result.lastInsertRowid);
 }
 
-export function listByInum(db: DB, inum: number): Response[] {
-    return db.all<Response>(
+export function listByInum(db: DB, inum: number): ResponseRow[] {
+    return db.all<ResponseRow>(
         'SELECT * FROM responses WHERE inum = ? ORDER BY created_at, id',
         inum
     );
 }
 
-export function getLatestByInum(db: DB, inum: number): Response | undefined {
-    return db.get<Response>(
+export function getLatestByInum(db: DB, inum: number): ResponseRow | undefined {
+    return db.get<ResponseRow>(
         'SELECT * FROM responses WHERE inum = ? ORDER BY created_at DESC, id DESC LIMIT 1',
         inum
     );

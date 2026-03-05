@@ -1,0 +1,37 @@
+[TitleComponent]: always shown
+
+ActiveViewComponent: (detailVew,dashboardView,groupView,newIssueView,blockingMapView)
+
+[FooterComponent]: always shown
+---------------------------------
+DetailView:
+[HeaderComponent]      
+[ResponseChainComponent]  
+[InputBoxComponent]         
+
+When entering a thread for a Response instance, 
+- tell DetailView to update the HeaderComponent
+- tell DetailView to update the ResponseChain
+- tell DetailView to update FooterComponent
+
+----------------------------------------
+DashboardView:
+[HeaderComponent]      
+[IssueListPickerComponent]  
+
+----------------------------------------
+GroupView:
+[HeaderComponent]      
+[GroupPickerComponent]  
+
+----------------------------------------
+NewIssueView:
+[HeaderComponent]      
+[NewIssueComponent]  
+
+----------------------------------------
+BlockingMapView:
+[HeaderComponent]      
+[BlockingMapComponent]  
+
+----------------------------------------
