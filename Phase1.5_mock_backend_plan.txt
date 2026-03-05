@@ -29,13 +29,43 @@ DetailView props (never passed by App):
   onBlocksChange  — not wired
 
 
-Step 1: Export makeResponseNode from thread-builders.ts
+Step 1: Wire missing App view render cases
+------------------------------------------
+App.render() switch only handles Home and Detail. These views navigate
+but render nothing:
+  - ViewType.NewIssue
+  - ViewType.AgentStatus
+  - ViewType.BlockingMap
+  - ViewType.GroupView
+
+This must come first: the mock backend's purpose is to make ALL views
+interactive. Wiring callbacks is pointless if the views don't render.
+5 app.test.tsx tests currently fail because of the missing cases.
+
+NewIssue:
+  onCreateIssue = (data: NewIssueData) => {
+    const newInum = Math.max(...MOCK_ISSUES.map(i => i.inum)) + 1;
+    MOCK_ISSUES.push({ inum: newInum, title: data.title, ... });
+    MOCK_DETAIL_DATA[newInum] = { issue: ..., rootResponse: null, ... };
+    this.goBackToPreviousView();
+  }
+
+The other three views (AgentStatus, BlockingMap, GroupView) have existing
+components but no render cases. Adding them is straightforward:
+  case ViewType.AgentStatus:
+    content = <AgentStatus ... onBack={() => this.goBackToPreviousView()} />;
+    break;
+
+Files: app.tsx, possibly newissue.tsx if callback shape needs adjustment
+
+
+Step 2: Export makeResponseNode from thread-builders.ts
 -------------------------------------------------------
 Currently private. Export it so DetailView and App can create Response nodes.
 One-line change. No new files.
 
 
-Step 2: Wire onSend — append user response to chain
+Step 3: Wire onSend — append user response to chain
 ----------------------------------------------------
 Where: detail.tsx handleInputSubmit (line 356)
 
@@ -65,7 +95,7 @@ Edge case: rootResponse is null (empty issue, e.g. I-2).
 Files: detail.tsx, thread-builders.ts (export only)
 
 
-Step 3: Wire Home view status actions (onActivate, onDefer, onResolve)
+Step 4: Wire Home view status actions (onActivate, onDefer, onResolve)
 ----------------------------------------------------------------------
 Where: app.tsx render() Dashboard callbacks (lines 124-126)
 
@@ -98,11 +128,11 @@ from unread set when resolving, since the user just acted on it).
 Files: app.tsx
 
 
-Step 4: Wire onGroupChange
---------------------------
-Where: app.tsx DetailView render (currently not passed as prop)
+Step 5: Wire onGroupChange and onGroupCreate
+---------------------------------------------
+Where: app.tsx DetailView render (currently not passed as props)
 
-Logic:
+onGroupChange logic:
   onGroupChange = (containerId) => {
     const container = MOCK_CONTAINERS.find(c => c.id === containerId);
     if (container) {
@@ -114,14 +144,7 @@ Logic:
 This mutates the detail data's group string. The GroupPicker overlay in
 DetailView already calls this.props.onGroupChange and closes the overlay.
 
-Files: app.tsx
-
-
-Step 5: Wire onGroupCreate
----------------------------
-Where: app.tsx DetailView render (currently not passed as prop)
-
-Logic:
+onGroupCreate logic:
   onGroupCreate = (name) => {
     const newId = Math.max(...MOCK_CONTAINERS.map(c => c.id)) + 1;
     MOCK_CONTAINERS.push({
@@ -160,32 +183,6 @@ view transitions.
 Files: app.tsx
 
 
-Step 7: Wire missing App view cases (stretch)
-----------------------------------------------
-App.render() switch only handles Home and Detail. These views navigate
-but render nothing:
-  - ViewType.AgentStatus
-  - ViewType.BlockingMap
-  - ViewType.GroupView
-  - ViewType.NewIssue
-
-NewIssue is the most useful to wire for mock testing:
-  onCreateIssue = (data: NewIssueData) => {
-    const newInum = Math.max(...MOCK_ISSUES.map(i => i.inum)) + 1;
-    MOCK_ISSUES.push({ inum: newInum, title: data.title, ... });
-    MOCK_DETAIL_DATA[newInum] = { issue: ..., rootResponse: null, ... };
-    this.goBackToPreviousView();
-  }
-
-The other three views (AgentStatus, BlockingMap, GroupView) have existing
-components but no render cases. Adding them is straightforward:
-  case ViewType.AgentStatus:
-    content = <AgentStatus ... onBack={() => this.goBackToPreviousView()} />;
-    break;
-
-Files: app.tsx, possibly newissue.tsx if callback shape needs adjustment
-
-
 Implementation order
 --------------------
   Step 0: JSON mock data store              DONE
@@ -195,17 +192,14 @@ Implementation order
     - src/tui/mock-data.ts (rewritten to load from JSON)
     - --resetMockData CLI flag in run.tsx
     - reloadMockStore() for in-place refresh
-  Step 1: Export makeResponseNode           (~1 min, unblocks Step 2)
-  Step 2: Wire onSend                       (~10 min, highest value)
-  Step 3: Wire status actions               (~5 min)
-  Step 4: Wire onGroupChange                (~3 min)
-  Step 5: Wire onGroupCreate                (~3 min)
-  Step 6: Wire onBlockedByChange/Blocks     (~3 min)
-  Step 7: Wire missing view cases           (~15 min, stretch)
+  Step 1: Wire missing view render cases    (unblocks all views)
+  Step 2: Export makeResponseNode           (~1 min, unblocks Step 3)
+  Step 3: Wire onSend                       (highest-value callback)
+  Step 4: Wire status actions               (Home view interactivity)
+  Step 5: Wire onGroupChange/Create         (Detail + GroupView)
+  Step 6: Wire onBlockedByChange/Blocks     (Detail + BlockingMap)
 
 Verify after each step: npm run build && npx vitest run
-
-Total: ~40 min for Steps 1-6, ~55 min including Step 7.
 
 
 What this does NOT cover (deferred to Phase 2)

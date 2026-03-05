@@ -295,18 +295,21 @@ Source: Phase1.5_mock_backend_plan.txt
   [x] mock-data.ts: rewritten to load from JSON instead of hardcoded TypeScript
   [x] --resetMockData CLI flag: copies default over active before launch
   [x] reloadMockStore(): in-place refresh for mid-session reset (available but no hotkey)
-  [ ] Wire onSend to append Response to chain + saveMockStore()
+  [ ] Step 1: Wire missing App view render cases (NewIssue, AgentStatus, BlockingMap, GroupView)
+      Must come first: views must render before callbacks can be tested.
+      5 app.test.tsx tests currently fail because of missing cases.
+  [ ] Step 2: Export makeResponseNode from thread-builders.ts (unblocks Step 3)
+  [ ] Step 3: Wire onSend to append Response to chain + saveMockStore()
       Confirmed not wired: app.tsx:153 is { /* TODO: wire to backend */ }.
       Messages typed in InputBox are discarded on submit.
-  [ ] Wire Home status actions (onActivate/onDefer/onResolve) + saveMockStore()
-  [ ] Wire onGroupChange/onGroupCreate + saveMockStore()
+  [ ] Step 4: Wire Home status actions (onActivate/onDefer/onResolve) + saveMockStore()
+  [ ] Step 5: Wire onGroupChange/onGroupCreate + saveMockStore()
       Confirmed not wired: App does not pass onGroupChange/onGroupCreate
       to DetailView. The overlay picker UI works but selections have no
       effect (fires into undefined via optional chaining).
-  [ ] Wire onBlockedByChange/onBlocksChange + saveMockStore()
+  [ ] Step 6: Wire onBlockedByChange/onBlocksChange + saveMockStore()
       Confirmed not wired: same as group -- local Set updates in-memory
       during the session but App passes no persistence callback.
-  [ ] Wire missing App view render cases (NewIssue, AgentStatus, BlockingMap, GroupView)
 
   TODO (Phase 3): Remove --resetMockData flag, mock-store.ts, mock-data.ts,
   data/*.json, and Phase1.5_mock_backend_plan.txt when TUI is wired to live DB.
