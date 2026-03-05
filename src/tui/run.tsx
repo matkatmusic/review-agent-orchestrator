@@ -1,10 +1,30 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { render, useStdout, useApp } from 'ink';
-import { App } from './app.js';
-import { ViewType } from './views.js';
+/**
+ * TUI entry point.
+ *
+ * --resetMockData flag must be processed BEFORE mock-data.ts is imported,
+ * so we use dynamic imports for everything that transitively loads mock data.
+ */
 
-//thin functional wrapper that extracts terminal dimensions
-//and passes them as props to the class component
+import { resetMockData } from './mock-store.js';
+
+if (process.argv.includes('--resetMockData')) {
+    resetMockData();
+    console.log('Mock data reset to defaults.');
+}
+
+// Dynamic imports — these load mock-data.ts which reads from the (now reset) JSON
+const [
+    { default: React, useState, useEffect, useCallback },
+    { render, useStdout, useApp },
+    { App },
+    { ViewType },
+] = await Promise.all([
+    import('react'),
+    import('ink'),
+    import('./app.js'),
+    import('./views.js'),
+]);
+
 function AppWrapper() {
     const { stdout } = useStdout();
     const { exit } = useApp();

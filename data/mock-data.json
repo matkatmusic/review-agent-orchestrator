@@ -1,0 +1,489 @@
+{
+  "issues": [
+    {
+      "inum": 1,
+      "title": "migrate_ServerDerivedFields",
+      "description": "Migrate server derived fields to new schema",
+      "status": 0,
+      "created_at": "2026-01-01T00:00:00Z",
+      "resolved_at": null,
+      "issue_revision": 1,
+      "agent_last_read_at": null,
+      "user_last_viewed_at": "2026-01-01T12:00:00Z"
+    },
+    {
+      "inum": 2,
+      "title": "migrate_SessionCredentials",
+      "description": "Migrate session credential handling",
+      "status": 0,
+      "created_at": "2026-01-02T00:00:00Z",
+      "resolved_at": null,
+      "issue_revision": 1,
+      "agent_last_read_at": null,
+      "user_last_viewed_at": null
+    },
+    {
+      "inum": 3,
+      "title": "rate_limiting_design",
+      "description": "Design rate limiting strategy",
+      "status": 1,
+      "created_at": "2026-01-03T00:00:00Z",
+      "resolved_at": null,
+      "issue_revision": 2,
+      "agent_last_read_at": null,
+      "user_last_viewed_at": null
+    },
+    {
+      "inum": 4,
+      "title": "payload_encryption_flow",
+      "description": "Define payload encryption flow",
+      "status": 1,
+      "created_at": "2026-01-04T00:00:00Z",
+      "resolved_at": null,
+      "issue_revision": 1,
+      "agent_last_read_at": null,
+      "user_last_viewed_at": null
+    },
+    {
+      "inum": 5,
+      "title": "docker_healthcheck",
+      "description": "Add Docker healthcheck endpoint",
+      "status": 1,
+      "created_at": "2026-01-05T00:00:00Z",
+      "resolved_at": null,
+      "issue_revision": 1,
+      "agent_last_read_at": null,
+      "user_last_viewed_at": null
+    },
+    {
+      "inum": 6,
+      "title": "stale_session_cleanup",
+      "description": "Auto-cleanup stale sessions",
+      "status": 2,
+      "created_at": "2026-01-06T00:00:00Z",
+      "resolved_at": null,
+      "issue_revision": 1,
+      "agent_last_read_at": null,
+      "user_last_viewed_at": null
+    },
+    {
+      "inum": 7,
+      "title": "legacy_api_removal",
+      "description": "Remove legacy API endpoints",
+      "status": 3,
+      "created_at": "2026-01-07T00:00:00Z",
+      "resolved_at": null,
+      "issue_revision": 1,
+      "agent_last_read_at": null,
+      "user_last_viewed_at": null
+    },
+    {
+      "inum": 8,
+      "title": "initial_setup_task",
+      "description": "Initial project setup",
+      "status": 4,
+      "created_at": "2026-01-08T00:00:00Z",
+      "resolved_at": "2026-01-10T00:00:00Z",
+      "issue_revision": 3,
+      "agent_last_read_at": null,
+      "user_last_viewed_at": null
+    }
+  ],
+  "responses": [
+    {
+      "id": 1,
+      "inum": 1,
+      "author": "agent",
+      "type": "analysis",
+      "body": "I worked on the server-derived field migration and identified all existing field definitions.",
+      "timestamp": "2026-01-01T10:00:00Z",
+      "seen": null,
+      "responding_to_id": null,
+      "replying_to_id": null,
+      "is_continuation": false,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 2,
+      "inum": 1,
+      "author": "agent",
+      "type": "analysis",
+      "body": "I identified three categories of fields that need migration: computed fields, cached aggregates, and denormalized lookups.",
+      "timestamp": "2026-01-01T10:00:00Z",
+      "seen": null,
+      "responding_to_id": 1,
+      "replying_to_id": null,
+      "is_continuation": true,
+      "thread_resolved_at": "2026-01-01T10:25:00Z"
+    },
+    {
+      "id": 9,
+      "inum": 1,
+      "author": "user",
+      "type": "none",
+      "body": "one minor tweak — use camelCase for the category names",
+      "timestamp": "2026-01-01T10:10:00Z",
+      "seen": "2026-01-01T10:10:00Z",
+      "responding_to_id": null,
+      "replying_to_id": 2,
+      "is_continuation": false,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 10,
+      "inum": 1,
+      "author": "agent",
+      "type": "implementation",
+      "body": "Tweak implemented. All category names now use camelCase.",
+      "timestamp": "2026-01-01T10:15:00Z",
+      "seen": "2026-01-01T10:16:00Z",
+      "responding_to_id": 9,
+      "replying_to_id": null,
+      "is_continuation": false,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 11,
+      "inum": 1,
+      "author": "user",
+      "type": "none",
+      "body": "great, add a comment explaining the naming convention",
+      "timestamp": "2026-01-01T10:20:00Z",
+      "seen": "2026-01-01T10:20:00Z",
+      "responding_to_id": 10,
+      "replying_to_id": null,
+      "is_continuation": false,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 3,
+      "inum": 1,
+      "author": "agent",
+      "type": "analysis",
+      "body": "The computed fields can be migrated first since they have no external dependencies.",
+      "timestamp": "2026-01-01T10:00:00Z",
+      "seen": null,
+      "responding_to_id": 2,
+      "replying_to_id": null,
+      "is_continuation": true,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 6,
+      "inum": 1,
+      "author": "user",
+      "type": "none",
+      "body": "great, now work on the dual-write logic so old and new schemas stay in sync",
+      "timestamp": "2026-01-01T10:30:00Z",
+      "seen": null,
+      "responding_to_id": 3,
+      "replying_to_id": null,
+      "is_continuation": false,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 7,
+      "inum": 1,
+      "author": "agent",
+      "type": "implementation",
+      "body": "I completed work on the dual-write logic. Changes:\n- src/schema/migration.ts: Field mapping\n- src/schema/dual-write.ts: Transition logic",
+      "timestamp": "2026-01-01T11:00:00Z",
+      "seen": null,
+      "responding_to_id": 6,
+      "replying_to_id": null,
+      "is_continuation": false,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 8,
+      "inum": 1,
+      "author": "user",
+      "type": "none",
+      "body": "can you change the sync interval from 30s to 60s?",
+      "timestamp": "2026-01-01T11:15:00Z",
+      "seen": null,
+      "responding_to_id": 7,
+      "replying_to_id": null,
+      "is_continuation": false,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 12,
+      "inum": 1,
+      "author": "agent",
+      "type": "implementation",
+      "body": "Updated sync interval to 60s in all config files.",
+      "timestamp": "2026-01-01T11:20:00Z",
+      "seen": "2026-01-01T11:25:00Z",
+      "responding_to_id": null,
+      "replying_to_id": 8,
+      "is_continuation": false,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 13,
+      "inum": 1,
+      "author": "user",
+      "type": "none",
+      "body": "that's fine for now, we can tune it later",
+      "timestamp": "2026-01-01T13:00:00Z",
+      "seen": null,
+      "responding_to_id": 12,
+      "replying_to_id": null,
+      "is_continuation": false,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 4,
+      "inum": 1,
+      "author": "agent",
+      "type": "implementation",
+      "body": "I have implemented the change to the sync interval as requested.",
+      "timestamp": "2026-01-01T11:30:00Z",
+      "seen": null,
+      "responding_to_id": 8,
+      "replying_to_id": null,
+      "is_continuation": false,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 14,
+      "inum": 1,
+      "author": "user",
+      "type": "none",
+      "body": "looks good, but add config.yaml support too",
+      "timestamp": "2026-01-01T14:00:00Z",
+      "seen": null,
+      "responding_to_id": null,
+      "replying_to_id": 4,
+      "is_continuation": false,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 15,
+      "inum": 1,
+      "author": "agent",
+      "type": "implementation",
+      "body": "Added config.yaml support alongside the existing JSON config.",
+      "timestamp": "2026-01-01T14:05:00Z",
+      "seen": null,
+      "responding_to_id": 14,
+      "replying_to_id": null,
+      "is_continuation": false,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 5,
+      "inum": 1,
+      "author": "agent",
+      "type": "implementation",
+      "body": "Here are the files modified:\n- src/config/sync.ts: interval 30000 → 60000\n- src/schema/dual-write.ts: updated retry window",
+      "timestamp": "2026-01-01T11:30:00Z",
+      "seen": null,
+      "responding_to_id": 4,
+      "replying_to_id": null,
+      "is_continuation": true,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 16,
+      "inum": 3,
+      "author": "user",
+      "type": "none",
+      "body": "Blocked until server field migration is done.",
+      "timestamp": "2026-01-03T08:05:00Z",
+      "seen": null,
+      "responding_to_id": null,
+      "replying_to_id": null,
+      "is_continuation": false,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 17,
+      "inum": 5,
+      "author": "user",
+      "type": "none",
+      "body": "Waiting on session credential migration.",
+      "timestamp": "2026-01-05T10:05:00Z",
+      "seen": null,
+      "responding_to_id": null,
+      "replying_to_id": null,
+      "is_continuation": false,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 18,
+      "inum": 5,
+      "author": "agent",
+      "type": "analysis",
+      "body": "Reviewing healthcheck patterns and Docker best practices.",
+      "timestamp": "2026-01-05T10:30:00Z",
+      "seen": null,
+      "responding_to_id": 17,
+      "replying_to_id": null,
+      "is_continuation": false,
+      "thread_resolved_at": null
+    },
+    {
+      "id": 19,
+      "inum": 8,
+      "author": "agent",
+      "type": "implementation",
+      "body": "Project scaffolding complete.",
+      "timestamp": "2026-01-09T10:00:00Z",
+      "seen": null,
+      "responding_to_id": null,
+      "replying_to_id": null,
+      "is_continuation": false,
+      "thread_resolved_at": null
+    }
+  ],
+  "details": {
+    "1": {
+      "blockedBy": [],
+      "blocks": [
+        3,
+        4
+      ],
+      "group": "Inbox"
+    },
+    "2": {
+      "blockedBy": [],
+      "blocks": [
+        5
+      ],
+      "group": "Backend Sprint 1"
+    },
+    "3": {
+      "blockedBy": [
+        1
+      ],
+      "blocks": [
+        6
+      ],
+      "group": "Inbox"
+    },
+    "4": {
+      "blockedBy": [
+        1
+      ],
+      "blocks": [],
+      "group": "Frontend"
+    },
+    "5": {
+      "blockedBy": [
+        2
+      ],
+      "blocks": [
+        6
+      ],
+      "group": "Backlog"
+    },
+    "6": {
+      "blockedBy": [
+        3,
+        5
+      ],
+      "blocks": [],
+      "group": "Backend Sprint 1"
+    },
+    "7": {
+      "blockedBy": [],
+      "blocks": [],
+      "group": "Backend Sprint 1"
+    },
+    "8": {
+      "blockedBy": [],
+      "blocks": [],
+      "group": "Inbox"
+    }
+  },
+  "dependencies": [
+    {
+      "blocker_inum": 1,
+      "blocked_inum": 3
+    },
+    {
+      "blocker_inum": 1,
+      "blocked_inum": 4
+    },
+    {
+      "blocker_inum": 2,
+      "blocked_inum": 5
+    },
+    {
+      "blocker_inum": 3,
+      "blocked_inum": 6
+    },
+    {
+      "blocker_inum": 5,
+      "blocked_inum": 6
+    }
+  ],
+  "containers": [
+    {
+      "id": 1,
+      "name": "Inbox",
+      "type": "group",
+      "parent_id": null,
+      "description": "",
+      "status": "Open",
+      "created_at": "",
+      "closed_at": null
+    },
+    {
+      "id": 2,
+      "name": "Backend Sprint 1",
+      "type": "sprint",
+      "parent_id": null,
+      "description": "Core backend work",
+      "status": "Open",
+      "created_at": "",
+      "closed_at": null
+    },
+    {
+      "id": 3,
+      "name": "Frontend",
+      "type": "group",
+      "parent_id": null,
+      "description": "",
+      "status": "Open",
+      "created_at": "",
+      "closed_at": null
+    },
+    {
+      "id": 4,
+      "name": "Backlog",
+      "type": "group",
+      "parent_id": null,
+      "description": "",
+      "status": "Open",
+      "created_at": "",
+      "closed_at": null
+    }
+  ],
+  "containerIssues": {
+    "1": [
+      1,
+      3,
+      8
+    ],
+    "2": [
+      2,
+      6,
+      7
+    ],
+    "3": [
+      4
+    ],
+    "4": [
+      5
+    ]
+  },
+  "unreadInums": [
+    3,
+    6
+  ],
+  "maxAgents": 6,
+  "nextResponseId": 20
+}

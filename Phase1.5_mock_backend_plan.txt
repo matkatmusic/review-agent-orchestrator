@@ -1,0 +1,218 @@
+Phase 1.5: In-Memory Mock Backend
+==================================
+
+Bridge between Phase 1 (TUI build/testing) and Phase 2 (TUI <-> DB).
+
+Goal: Make every TUI action mutate the in-memory mock data so the UI is
+fully interactive without a database. All mutations happen on the existing
+module-level MOCK_* objects. No persistence — data resets on process restart.
+
+This lets us:
+- Manually test send, resolve, status changes, dependency edits end-to-end
+- Write integration tests that verify UI state after multi-step workflows
+- Validate the callback contracts that Phase 2 will implement with real DB calls
+
+
+Inventory of dead callbacks (current state)
+-------------------------------------------
+
+App.tsx:
+  onSend          — discards message          (Detail view)
+  onActivate      — no-op                     (Home view)
+  onDefer         — no-op                     (Home view)
+  onResolve       — no-op                     (Home view)
+
+DetailView props (never passed by App):
+  onGroupChange   — not wired
+  onGroupCreate   — not wired
+  onBlockedByChange — not wired
+  onBlocksChange  — not wired
+
+
+Step 1: Export makeResponseNode from thread-builders.ts
+-------------------------------------------------------
+Currently private. Export it so DetailView and App can create Response nodes.
+One-line change. No new files.
+
+
+Step 2: Wire onSend — append user response to chain
+----------------------------------------------------
+Where: detail.tsx handleInputSubmit (line 356)
+
+Logic:
+  1. Create Message via createMessage(AuthorType.User, ResponseType.None,
+     value.trim(), new Date().toISOString())
+  2. Create Response via makeResponseNode(message)
+  3. Determine which chain to append to:
+     - If threadStack.length > 0: append to the thread reply chain
+       (walk threadStack[top].parent.reply chain to end)
+       Set newNode.replying_to = threadStack[top].parent
+     - Else: append to props.rootResponse chain (walk .response to end)
+  4. Link: lastNode.response = newNode; newNode.responding_to = lastNode
+  5. Update selectedMessage to new last index
+  6. Clear inputValue
+  7. Still call props.onSend(value) for future backend hook
+  8. forceUpdate()
+
+Edge case: rootResponse is null (empty issue, e.g. I-2).
+  - Cannot append without a root. Two options:
+    a) Create a root Response and store it. Requires App to pass a setter
+       or DetailView to mutate a parent-owned reference.
+    b) Simpler: skip for now. onSend on an empty issue is a no-op.
+       Phase 2 handles this properly since the DB creates the row.
+  Recommendation: option (b) for Phase 1.5. Log a warning.
+
+Files: detail.tsx, thread-builders.ts (export only)
+
+
+Step 3: Wire Home view status actions (onActivate, onDefer, onResolve)
+----------------------------------------------------------------------
+Where: app.tsx render() Dashboard callbacks (lines 124-126)
+
+Logic: find the issue in MOCK_ISSUES by inum, mutate its status field.
+
+  onActivate = (inum) => {
+    const issue = MOCK_ISSUES.find(i => i.inum === inum);
+    if (issue) { issue.status = IssueStatus.Active; issue.resolved_at = null; }
+    this.forceUpdate();
+  }
+
+  onDefer = (inum) => {
+    const issue = MOCK_ISSUES.find(i => i.inum === inum);
+    if (issue) { issue.status = IssueStatus.Deferred; issue.resolved_at = null; }
+    this.forceUpdate();
+  }
+
+  onResolve = (inum) => {
+    const issue = MOCK_ISSUES.find(i => i.inum === inum);
+    if (issue) {
+      issue.status = IssueStatus.Resolved;
+      issue.resolved_at = new Date().toISOString();
+    }
+    this.forceUpdate();
+  }
+
+Stretch: also update MOCK_UNREAD_INUMS when status changes (remove inum
+from unread set when resolving, since the user just acted on it).
+
+Files: app.tsx
+
+
+Step 4: Wire onGroupChange
+--------------------------
+Where: app.tsx DetailView render (currently not passed as prop)
+
+Logic:
+  onGroupChange = (containerId) => {
+    const container = MOCK_CONTAINERS.find(c => c.id === containerId);
+    if (container) {
+      MOCK_DETAIL_DATA[inum].group = container.name;
+    }
+    this.forceUpdate();
+  }
+
+This mutates the detail data's group string. The GroupPicker overlay in
+DetailView already calls this.props.onGroupChange and closes the overlay.
+
+Files: app.tsx
+
+
+Step 5: Wire onGroupCreate
+---------------------------
+Where: app.tsx DetailView render (currently not passed as prop)
+
+Logic:
+  onGroupCreate = (name) => {
+    const newId = Math.max(...MOCK_CONTAINERS.map(c => c.id)) + 1;
+    MOCK_CONTAINERS.push({
+      id: newId, name, type: 'group', parent_id: null,
+      description: '', status: 'Open', created_at: new Date().toISOString(),
+      closed_at: null,
+    });
+    MOCK_DETAIL_DATA[inum].group = name;
+    this.forceUpdate();
+  }
+
+Files: app.tsx
+
+
+Step 6: Wire onBlockedByChange and onBlocksChange
+--------------------------------------------------
+Where: app.tsx DetailView render (currently not passed as props)
+
+Logic:
+  onBlockedByChange = (blockerInums) => {
+    MOCK_DETAIL_DATA[inum].blockedBy = blockerInums;
+    // Optional: update MOCK_DEPS array for consistency with BlockingMap view
+    this.forceUpdate();
+  }
+
+  onBlocksChange = (blockedInums) => {
+    MOCK_DETAIL_DATA[inum].blocks = blockedInums;
+    this.forceUpdate();
+  }
+
+Note: The IssueListPicker overlay in DetailView already manages the
+local blockedBySet/blocksSet and calls these callbacks. The callbacks
+just need to persist the change back to MOCK_DETAIL_DATA so it survives
+view transitions.
+
+Files: app.tsx
+
+
+Step 7: Wire missing App view cases (stretch)
+----------------------------------------------
+App.render() switch only handles Home and Detail. These views navigate
+but render nothing:
+  - ViewType.AgentStatus
+  - ViewType.BlockingMap
+  - ViewType.GroupView
+  - ViewType.NewIssue
+
+NewIssue is the most useful to wire for mock testing:
+  onCreateIssue = (data: NewIssueData) => {
+    const newInum = Math.max(...MOCK_ISSUES.map(i => i.inum)) + 1;
+    MOCK_ISSUES.push({ inum: newInum, title: data.title, ... });
+    MOCK_DETAIL_DATA[newInum] = { issue: ..., rootResponse: null, ... };
+    this.goBackToPreviousView();
+  }
+
+The other three views (AgentStatus, BlockingMap, GroupView) have existing
+components but no render cases. Adding them is straightforward:
+  case ViewType.AgentStatus:
+    content = <AgentStatus ... onBack={() => this.goBackToPreviousView()} />;
+    break;
+
+Files: app.tsx, possibly newissue.tsx if callback shape needs adjustment
+
+
+Implementation order
+--------------------
+  Step 0: JSON mock data store              DONE
+    - data/mock-data.default.json (committed, reset source)
+    - data/mock-data.json (committed, active working copy)
+    - src/tui/mock-store.ts (load/save/reset/hydrate/flatten)
+    - src/tui/mock-data.ts (rewritten to load from JSON)
+    - --resetMockData CLI flag in run.tsx
+    - reloadMockStore() for in-place refresh
+  Step 1: Export makeResponseNode           (~1 min, unblocks Step 2)
+  Step 2: Wire onSend                       (~10 min, highest value)
+  Step 3: Wire status actions               (~5 min)
+  Step 4: Wire onGroupChange                (~3 min)
+  Step 5: Wire onGroupCreate                (~3 min)
+  Step 6: Wire onBlockedByChange/Blocks     (~3 min)
+  Step 7: Wire missing view cases           (~15 min, stretch)
+
+Verify after each step: npm run build && npx vitest run
+
+Total: ~40 min for Steps 1-6, ~55 min including Step 7.
+
+
+What this does NOT cover (deferred to Phase 2)
+----------------------------------------------
+- Persistence (SQLite reads/writes)
+- Agent responses (only user can send; agent replies require the orchestrator)
+- Issue creation with rootResponse (empty issues stay empty until Phase 1.5)
+- Paragraph splitting of user messages (user messages are never split per spec)
+- Sync between MOCK_DEPS and MOCK_DETAIL_DATA blocked-by/blocks arrays
+- Real timestamps from server (uses client-side new Date())

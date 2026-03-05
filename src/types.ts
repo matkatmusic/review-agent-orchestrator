@@ -77,6 +77,7 @@ export interface Response {
     replying_to: Response | null;     // parent thread (back pointer, left)
     reply: Response | null;           // first reply (forward pointer, right)
     is_continuation: boolean;         // true = paragraph 2+ of same message
+    thread_resolved_at: string | null; // ISO 8601 when thread was resolved, null if unresolved
 }
 
 export interface ResponseRow {
@@ -89,6 +90,7 @@ export interface ResponseRow {
     responding_to_id: number | null;
     replying_to_id: number | null;
     is_continuation: number;  // 0 or 1 in SQLite
+    thread_resolved_at: string | null;
 }
 
 export interface Dependency {

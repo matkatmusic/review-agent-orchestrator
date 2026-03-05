@@ -30,6 +30,7 @@ function makeResponseNode(message: Message, isContinuation = false): Response {
         replying_to: null,
         reply: null,
         is_continuation: isContinuation,
+        thread_resolved_at: null,
     };
 }
 

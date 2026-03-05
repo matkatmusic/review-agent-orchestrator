@@ -190,6 +190,7 @@ export class ResponseChain extends React.Component<ResponseChainProps> {
                                 columns={columns}
                                 selected={globalIndex === selectedIndex}
                                 hasNewReplies={hasNewReplies}
+                                threadResolved={!!response.thread_resolved_at}
                             />
                         </React.Fragment>
                     );

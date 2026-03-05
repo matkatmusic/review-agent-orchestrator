@@ -1,19 +1,40 @@
 import type { DB } from './database.js';
 import type { ResponseRow } from '../types.js';
 
+export interface CreateResponseOpts {
+    type?: string;
+    respondingToId?: number;
+    replyingToId?: number;
+    isContinuation?: boolean;
+}
+
 export function create(
     db: DB,
     inum: number,
     author: 'user' | 'agent',
     body: string,
-    type: string = 'none'
+    opts?: string | CreateResponseOpts
 ): number {
+    // Backward compat: opts can be a plain string (type) for existing callers
+    const resolved: CreateResponseOpts = typeof opts === 'string'
+        ? { type: opts }
+        : opts ?? {};
+
+    const type = resolved.type ?? 'none';
+    const respondingToId = resolved.respondingToId ?? null;
+    const replyingToId = resolved.replyingToId ?? null;
+    const isContinuation = resolved.isContinuation ? 1 : 0;
+
     const result = db.run(
-        'INSERT INTO responses (inum, author, type, body) VALUES (?, ?, ?, ?)',
+        `INSERT INTO responses (inum, author, type, body, responding_to_id, replying_to_id, is_continuation)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         inum,
         author,
         type,
-        body
+        body,
+        respondingToId,
+        replyingToId,
+        isContinuation
     );
     return Number(result.lastInsertRowid);
 }

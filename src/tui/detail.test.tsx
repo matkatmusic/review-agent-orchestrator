@@ -294,6 +294,7 @@ describe('DetailView', () => {
             replying_to: nodes[0],
             reply: null,
             is_continuation: false,
+            thread_resolved_at: null,
         };
         nodes[0].reply = replyNode;
 
@@ -328,6 +329,7 @@ describe('DetailView', () => {
             replying_to: nodes[0],
             reply: null,
             is_continuation: false,
+            thread_resolved_at: null,
         };
         nodes[0].reply = replyNode;
 
@@ -363,6 +365,101 @@ describe('DetailView', () => {
 
         ref.current!.exitThread();
         expect(onBack).toHaveBeenCalledOnce();
+    });
+
+    // ---- Thread resolution ----
+
+    it('resolveThread toggles thread_resolved_at on selected message from main chain', () => {
+        const { root: chainRoot, nodes } = buildResponseChain(TEST_MESSAGES);
+        const replyNode: Response = {
+            id: 100,
+            content: createMessage(AuthorType.Agent, ResponseType.None, 'Reply', '2025-01-15T12:00:00Z'),
+            responding_to: null,
+            response: null,
+            replying_to: nodes[0],
+            reply: null,
+            is_continuation: false,
+            thread_resolved_at: null,
+        };
+        nodes[0].reply = replyNode;
+
+        const ref = React.createRef<DetailView>();
+        render(
+            <DetailView {...defaultProps} rootResponse={chainRoot} ref={ref} />
+        );
+
+        ref.current!.selectedMessage = 0;
+        ref.current!.resolveThread();
+
+        expect(nodes[0].thread_resolved_at).not.toBeNull();
+
+        // Toggle back
+        ref.current!.resolveThread();
+        expect(nodes[0].thread_resolved_at).toBeNull();
+    });
+
+    it('resolveThread does nothing when selected message has no replies', () => {
+        const ref = React.createRef<DetailView>();
+        render(
+            <DetailView {...defaultProps} ref={ref} />
+        );
+
+        // Last message (default selection) has no replies
+        ref.current!.resolveThread();
+        // Should not throw, no state change
+        const messages = ref.current!.currentMessages();
+        const selected = messages[ref.current!.selectedMessage];
+        expect(selected.thread_resolved_at).toBeNull();
+    });
+
+    it('resolveThread resolves current thread when inside a thread', () => {
+        const { root: chainRoot, nodes } = buildResponseChain(TEST_MESSAGES);
+        const replyNode: Response = {
+            id: 100,
+            content: createMessage(AuthorType.Agent, ResponseType.None, 'Reply', '2025-01-15T12:00:00Z'),
+            responding_to: null,
+            response: null,
+            replying_to: nodes[0],
+            reply: null,
+            is_continuation: false,
+            thread_resolved_at: null,
+        };
+        nodes[0].reply = replyNode;
+
+        const ref = React.createRef<DetailView>();
+        render(
+            <DetailView {...defaultProps} rootResponse={chainRoot} ref={ref} />
+        );
+
+        // Enter thread
+        ref.current!.selectedMessage = 0;
+        ref.current!.enterThread();
+
+        // Resolve from inside the thread
+        ref.current!.resolveThread();
+        expect(nodes[0].thread_resolved_at).not.toBeNull();
+    });
+
+    it('shows resolved checkmark in reply badge', () => {
+        const { root: chainRoot, nodes } = buildResponseChain(TEST_MESSAGES);
+        const replyNode: Response = {
+            id: 100,
+            content: createMessage(AuthorType.Agent, ResponseType.None, 'Reply', '2025-01-15T12:00:00Z'),
+            responding_to: null,
+            response: null,
+            replying_to: nodes[0],
+            reply: null,
+            is_continuation: false,
+            thread_resolved_at: null,
+        };
+        nodes[0].reply = replyNode;
+        nodes[0].thread_resolved_at = '2025-01-15T12:00:00Z';
+
+        const { lastFrame } = render(
+            <DetailView {...defaultProps} rootResponse={chainRoot} rows={30} />
+        );
+
+        expect(lastFrame()).toContain('\u2713');
     });
 
     it('shows input label in issue view', () => {
@@ -414,6 +511,7 @@ describe('ResponseContainer', () => {
                 replying_to: null,
                 reply: null,
                 is_continuation: false,
+                thread_resolved_at: null,
             };
         };
 
@@ -515,9 +613,9 @@ describe('ResponseContainer', () => {
         it('shows view replies when selected with replies', () => {
             const resp = makeResponse();
             // Build a reply chain of 3
-            const r1: Response = { id: 90, content: { ...resp.content }, responding_to: null, response: null, replying_to: resp, reply: null, is_continuation: false };
-            const r2: Response = { id: 91, content: { ...resp.content }, responding_to: r1, response: null, replying_to: null, reply: null, is_continuation: false };
-            const r3: Response = { id: 92, content: { ...resp.content }, responding_to: r2, response: null, replying_to: null, reply: null, is_continuation: false };
+            const r1: Response = { id: 90, content: { ...resp.content }, responding_to: null, response: null, replying_to: resp, reply: null, is_continuation: false, thread_resolved_at: null };
+            const r2: Response = { id: 91, content: { ...resp.content }, responding_to: r1, response: null, replying_to: null, reply: null, is_continuation: false, thread_resolved_at: null };
+            const r3: Response = { id: 92, content: { ...resp.content }, responding_to: r2, response: null, replying_to: null, reply: null, is_continuation: false, thread_resolved_at: null };
             r1.response = r2;
             r2.response = r3;
             resp.reply = r1;
@@ -532,8 +630,8 @@ describe('ResponseContainer', () => {
             const resp = makeResponse();
             resp.is_continuation = true;
             // Build a reply chain of 2
-            const r1: Response = { id: 93, content: { ...resp.content }, responding_to: null, response: null, replying_to: resp, reply: null, is_continuation: false };
-            const r2: Response = { id: 94, content: { ...resp.content }, responding_to: r1, response: null, replying_to: null, reply: null, is_continuation: false };
+            const r1: Response = { id: 93, content: { ...resp.content }, responding_to: null, response: null, replying_to: resp, reply: null, is_continuation: false, thread_resolved_at: null };
+            const r2: Response = { id: 94, content: { ...resp.content }, responding_to: r1, response: null, replying_to: null, reply: null, is_continuation: false, thread_resolved_at: null };
             r1.response = r2;
             resp.reply = r1;
 

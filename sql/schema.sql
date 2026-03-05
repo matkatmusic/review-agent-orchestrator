@@ -1,7 +1,7 @@
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
 PRAGMA busy_timeout=5000;
-PRAGMA user_version=1;
+PRAGMA user_version=2;
 
 CREATE TABLE IF NOT EXISTS metadata (
     key   TEXT PRIMARY KEY,
@@ -22,13 +22,17 @@ CREATE TABLE IF NOT EXISTS issues (
 );
 
 CREATE TABLE IF NOT EXISTS responses (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    inum       INTEGER NOT NULL REFERENCES issues(inum),
-    author     TEXT NOT NULL CHECK (author IN ('user', 'agent')),
-    type       TEXT NOT NULL DEFAULT 'none'
-               CHECK (type IN ('question', 'implementation', 'clarification', 'analysis', 'fix', 'other', 'none')),
-    body       TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    inum                INTEGER NOT NULL REFERENCES issues(inum),
+    author              TEXT NOT NULL CHECK (author IN ('user', 'agent')),
+    type                TEXT NOT NULL DEFAULT 'none'
+                        CHECK (type IN ('question', 'implementation', 'clarification', 'analysis', 'fix', 'other', 'none')),
+    body                TEXT NOT NULL,
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    responding_to_id    INTEGER REFERENCES responses(id),
+    replying_to_id      INTEGER REFERENCES responses(id),
+    is_continuation     INTEGER NOT NULL DEFAULT 0,
+    thread_resolved_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_responses_inum ON responses(inum);
 

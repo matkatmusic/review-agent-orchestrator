@@ -61,8 +61,8 @@ enum OverlayType {
 
 const THREAD_SEPARATOR_LINES = 2; // separator replaces ResponseContainer's blank + adds blank below
 
-function threadSeparator(columns: number): string {
-    const label = '[ Replies ]';
+function threadSeparator(columns: number, resolved: boolean): string {
+    const label = resolved ? '[ Replies \u2014 Resolved ]' : '[ Replies ]';
     const totalDashes = Math.max(0, columns - label.length);
     const left = Math.floor(totalDashes / 2);
     const right = totalDashes - left;
@@ -210,6 +210,30 @@ export class DetailView extends React.Component<DetailViewProps> {
         this.forceUpdate();
     }
 
+    // ---- Thread resolution ----
+
+    resolveThread() {
+        // When in a thread, resolve/unresolve the current thread's parent
+        if (this.threadStack.length > 0) {
+            const parent = this.threadStack[this.threadStack.length - 1].parent;
+            parent.thread_resolved_at = parent.thread_resolved_at
+                ? null
+                : new Date().toISOString();
+            this.forceUpdate();
+            return;
+        }
+
+        // When on the main chain, resolve/unresolve the selected message's thread
+        const messages = this.currentMessages();
+        const selected = messages[this.selectedMessage];
+        if (!selected || !selected.reply) return;
+
+        selected.thread_resolved_at = selected.thread_resolved_at
+            ? null
+            : new Date().toISOString();
+        this.forceUpdate();
+    }
+
     // ---- Field cycling & overlays ----
 
     cycleField(direction: 1 | -1) {
@@ -280,6 +304,12 @@ export class DetailView extends React.Component<DetailViewProps> {
         }
         if (key.ctrl && key.shift && key.leftArrow) {
             this.exitThread();
+            return;
+        }
+
+        // Ctrl+R: resolve/unresolve thread
+        if (key.ctrl && _input === 'r') {
+            this.resolveThread();
             return;
         }
 
@@ -448,9 +478,10 @@ export class DetailView extends React.Component<DetailViewProps> {
                                 columns={columns}
                                 selected={false}
                                 hasNewReplies={false}
+                                threadResolved={!!threadParent!.thread_resolved_at}
                             />
                         </Box>
-                        <Text color="red" dimColor>{threadSeparator(columns)}</Text>
+                        <Text color={threadParent!.thread_resolved_at ? undefined : 'red'} dimColor>{threadSeparator(columns, !!threadParent!.thread_resolved_at)}</Text>
                         <Text>{' '}</Text>
                     </>
                 ) : (

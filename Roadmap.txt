@@ -41,7 +41,9 @@ src/db/issues.ts
   - Auto-increment via metadata table, Inbox auto-assignment
 
 src/db/responses.ts
-  - create(db, inum, author, body, type?) -- FLAT ONLY, no thread params
+  - create(db, inum, author, body, opts?) — accepts string (type) or
+    CreateResponseOpts { type?, respondingToId?, replyingToId?,
+    isContinuation? }. Inserts thread columns into responses table.
   - listByInum, getLatestByInum, hasUnread, getUnreadInums
 
 src/db/dependencies.ts
@@ -283,6 +285,25 @@ PLANNED (extracted from design documents and debate syntheses)
 Items are ordered by dependency. Each item lists its source document.
 
 
+--- Phase 1.5: In-Memory Mock Backend (JSON-backed) ---
+
+Source: Phase1.5_mock_backend_plan.txt
+
+  [x] JSON mock data store: data/mock-data.json (active) + data/mock-data.default.json (reset source)
+  [x] mock-store.ts: load/save/reset/hydrate/flatten between JSON and linked-list Response trees
+  [x] mock-data.ts: rewritten to load from JSON instead of hardcoded TypeScript
+  [x] --resetMockData CLI flag: copies default over active before launch
+  [x] reloadMockStore(): in-place refresh for mid-session reset (available but no hotkey)
+  [ ] Wire onSend to append Response to chain + saveMockStore()
+  [ ] Wire Home status actions (onActivate/onDefer/onResolve) + saveMockStore()
+  [ ] Wire onGroupChange/onGroupCreate + saveMockStore()
+  [ ] Wire onBlockedByChange/onBlocksChange + saveMockStore()
+  [ ] Wire missing App view render cases (NewIssue, AgentStatus, BlockingMap, GroupView)
+
+  TODO (Phase 3): Remove --resetMockData flag, mock-store.ts, mock-data.ts,
+  data/*.json, and Phase1.5_mock_backend_plan.txt when TUI is wired to live DB.
+
+
 --- Phase 0: Fix Test Suite ---
 
 Source: threaded_issue_md_gap_analysis.txt, v2.1.threaded_issue_md_todo.txt
@@ -320,13 +341,15 @@ Source: v2.1.threaded_issue_md_todo.txt,
 Step 0: Fix enum mismatch (see Phase 0)
 
 Step 1: Add thread columns to responses schema
-  [ ] Add responding_to_id, replying_to_id, is_continuation to schema
-  [ ] Add migration logic for existing DBs (PRAGMA user_version)
+  [x] Add responding_to_id, replying_to_id, is_continuation,
+      thread_resolved_at to schema (sql/schema.sql, user_version=2)
+  [x] Add migration logic for existing DBs (database.ts applyMigrations)
   Files: sql/schema.sql, src/db/database.ts
 
 Step 2: Extend responses.create() with thread params
-  [ ] Accept opts: { respondingToId?, replyingToId?, isContinuation? }
-  [ ] FK validation (same inum)
+  [x] Accept opts: CreateResponseOpts { type?, respondingToId?,
+      replyingToId?, isContinuation? } with backward-compat string arg
+  [ ] FK validation (same inum) — not yet implemented
   Files: src/db/responses.ts
 
 Step 3: Build ResponseRow[] -> Response tree hydrator
@@ -490,7 +513,7 @@ DEPENDENCY GRAPH (critical path)
   Phase 0 (enum fix)
     |
     v
-  Phase 1 (keypress wiring)     Phase 2 Steps 1-3 (schema + hydrator)
+  Phase 1 (keypress wiring)     Phase 2 Step 3 (hydrator) [Steps 1-2 DONE]
     |                               |
     v                               v
   Phase 3 (TUI <-> DB)          Phase 2 Steps 4-8 (serializer + aidi)
