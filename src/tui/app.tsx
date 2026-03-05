@@ -45,7 +45,7 @@ interface AppProps {
 class App extends React.Component<AppProps> {
     viewStack: View[];
     groupMode: GroupMode;
-    threadInfo: { inThread: boolean };
+    threadInfo: { inThread: boolean; threadResolved?: boolean };
     savedSelectedMessage: Map<number, number>;
 
     constructor(props: AppProps) {
@@ -176,7 +176,7 @@ class App extends React.Component<AppProps> {
                     threadInfo={this.threadInfo}
                 />
                 {content}
-                <Footer viewType={this.currentView.type} inThread={this.threadInfo.inThread} />
+                <Footer viewType={this.currentView.type} inThread={this.threadInfo.inThread} threadResolved={this.threadInfo.threadResolved} />
             </Box>
         );
     }

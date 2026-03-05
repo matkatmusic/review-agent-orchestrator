@@ -29,7 +29,7 @@ Make a currently missing view load by default. Interact with it, identify missin
   - [ ] broken feature: [r] resolve issue: issue not resolved when cursor is in text input. Change to Ctrl r
   - [x] broken feature: adding a response in a thread doesn't create a new response in the thread view, and doesn't update the mock data json.
   - [x] broken feature: adding a response in an issue doesn't create a new response in the issue view, and doesn't update the mock data json.
-  - [ ] UX change: Thread resolution hotkey functionality: hot key toggles thread resolution state (resolved/unresolved).  Footer text updates accordingly. 
+  - [x] UX change: Thread resolution hotkey functionality: hot key toggles thread resolution state (resolved/unresolved).  Footer text updates accordingly.
   - [O:E3] UX change: Response Type tag text should not be bold. 
   - [O:E3] UX Change: 'view replies (# √)' should not be bold. 
   - [O:E3] UX Change: Resolved thread parent messages shouldn't be dimmed when unselected.

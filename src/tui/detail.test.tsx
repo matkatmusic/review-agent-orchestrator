@@ -342,7 +342,7 @@ describe('DetailView', () => {
         expect(ref.current!.threadStack).toHaveLength(1);
         expect(ref.current!.threadStack[0].parent).toBe(nodes[0]);
         expect(ref.current!.threadStack[0].savedSelectedIndex).toBe(0);
-        expect(onThreadStateChange).toHaveBeenCalledWith({ inThread: true });
+        expect(onThreadStateChange).toHaveBeenCalledWith({ inThread: true, threadResolved: false });
     });
 
     it('exitThread pops stack and restores cursor', () => {

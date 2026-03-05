@@ -102,7 +102,7 @@ export interface DetailViewProps {
     onBlockedByChange?: (blockerInums: number[]) => void;
     onBlocksChange?: (blockedInums: number[]) => void;
     onNavigateIssue?: (inum: number) => void;
-    onThreadStateChange: (info: { inThread: boolean }) => void;
+    onThreadStateChange: (info: { inThread: boolean; threadResolved?: boolean }) => void;
     initialSelectedMessage?: number;
 }
 
@@ -185,7 +185,7 @@ export class DetailView extends React.Component<DetailViewProps> {
         this.selectedMessage = Math.max(0, threadMessages.length - 1);
 
         // Notify App of thread state change
-        this.props.onThreadStateChange({ inThread: true });
+        this.props.onThreadStateChange({ inThread: true, threadResolved: !!selected.thread_resolved_at });
 
         this.forceUpdate();
     }
@@ -208,7 +208,10 @@ export class DetailView extends React.Component<DetailViewProps> {
 
         // Notify App of thread state change
         const stillInThread = this.threadStack.length > 0;
-        this.props.onThreadStateChange({ inThread: stillInThread });
+        const parentResolved = stillInThread
+            ? !!this.threadStack[this.threadStack.length - 1].parent.thread_resolved_at
+            : undefined;
+        this.props.onThreadStateChange({ inThread: stillInThread, threadResolved: parentResolved });
 
         this.forceUpdate();
     }
@@ -222,6 +225,7 @@ export class DetailView extends React.Component<DetailViewProps> {
             parent.thread_resolved_at = parent.thread_resolved_at
                 ? null
                 : new Date().toISOString();
+            this.props.onThreadStateChange({ inThread: true, threadResolved: !!parent.thread_resolved_at });
             this.forceUpdate();
             return;
         }
