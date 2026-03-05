@@ -21,8 +21,7 @@ User TODO:
 Make a currently missing view load by default. Interact with it, identify missing features or broken features, make revisions until missing features or broken features are functional. Then mark the missing view as complete, and advanced to next missing view until all views are complete.
 - [ ] Detail View
   - [x] load by default
-  - [ ] missing feature: no title bar in header ( ---- Review Agent Orchestrator - Issue Detail ---- )
-  - [ ] missing feature: 
+  - [x] missing feature: no title bar in header ( ---- Review Agent Orchestrator - Issue Detail ---- )
   - [ ] broken feature: footer hotkey components should wrap so that the hot key display and the associated text are not split between lines. 
   - [ ] broken feature: [^R] Resolve: should say "Resolve Thread", change hotkey to Ctrl Shift r
   - [ ] broken feature: [r] resolve issue: issue not resolved when cursor is in text input. Change to Ctrl r

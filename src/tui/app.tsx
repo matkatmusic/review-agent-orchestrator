@@ -167,7 +167,7 @@ class App extends React.Component<AppProps> {
         }
 
         return (
-            <Box flexDirection="column">
+            <Box flexDirection="column" height={this.rows}>
                 <Header
                     currentView={this.currentView}
                     columns={this.columns}
