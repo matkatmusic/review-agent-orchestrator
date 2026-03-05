@@ -22,19 +22,19 @@ Make a currently missing view load by default. Interact with it, identify missin
 - [ ] Detail View
   - [x] load by default
   - [x] missing feature: no title bar in header ( ---- Review Agent Orchestrator - Issue Detail ---- )
-  - [ ] broken feature: footer hotkey components should wrap so that the hot key display and the associated text are not split between lines. 
-  - [ ] UX change: make each footer item into a component that can be tabbed to (possible Fix for above broken feature).  when selected, invert 
-  - [ ] broken feature: pressing tab in text input in a Thread View moves the cursor somewhere outside of the text input, causing it to disappear.  pressing tab again moves the cursor back to the text input.
+  - [O:E1] broken feature: footer hotkey components should wrap so that the hot key display and the associated text are not split between lines. 
+  - [O:E1] UX change: make each footer item into a component that can be tabbed to (possible Fix for above broken feature).  when selected, invert 
+  - [O:E1] broken feature: pressing tab in text input in a Thread View moves the cursor somewhere outside of the text input, causing it to disappear.  pressing tab again moves the cursor back to the text input.
   - [ ] broken feature: [^R] Resolve: should say "Resolve Thread", change hotkey to Ctrl Shift r
   - [ ] broken feature: [r] resolve issue: issue not resolved when cursor is in text input. Change to Ctrl r
-  - [ ] broken feature: adding a response in a thread doesn't create a new response in the thread view, and doesn't update the mock data json.
-  - [ ] broken feature: adding a response in an issue doesn't create a new response in the issue view, and doesn't update the mock data json. 
-  - [ ] UX change: Thread resolution hotkey functionality: hot key toggles thread resolution state (resolved/unresolved).  Footer text updates accordingly. 
-  - [ ] UX change: Response Type tag text should not be bold. 
-  - [ ] UX Change: 'view replies (# √)' should not be bold. 
-  - [ ] UX Change: Resolved thread parent messages shouldn't be dimmed when unselected.
-  - [ ] UX change: --- [ Replies ] --- is too dark. 
-  - [ ] UX change: Thread View: Thread Parent Response color should be different from thread replies color.  Need color scheme for Agent colors (as response, as thread parent) and User colors (as response, as thread parent)
+  - [x] broken feature: adding a response in a thread doesn't create a new response in the thread view, and doesn't update the mock data json.
+  - [x] broken feature: adding a response in an issue doesn't create a new response in the issue view, and doesn't update the mock data json.
+  - [x] UX change: Thread resolution hotkey functionality: hot key toggles thread resolution state (resolved/unresolved).  Footer text updates accordingly.
+  - [O:E3] UX change: Response Type tag text should not be bold. 
+  - [O:E3] UX Change: 'view replies (# √)' should not be bold. 
+  - [O:E3] UX Change: Resolved thread parent messages shouldn't be dimmed when unselected.
+  - [O:E3] UX change: --- [ Replies ] --- is too dark. 
+  - [O:E3] UX change: Thread View: Thread Parent Response color should be different from thread replies color.  Need color scheme for Agent colors (as response, as thread parent) and User colors (as response, as thread parent)
   - [ ] UX Change: 'Blocked By' picker should visually indicate if an issue has new replies.
   - [ ] broken feature: Footer doesn't attach to the bottom of the view, there's a gap. 
   - [ ] broken feature: vertical resizing (getting bigger) doesn't update the number of displayed responses when the view allows for showing more responses. 

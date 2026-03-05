@@ -1,0 +1,110 @@
+No listed skill applies here (`skill-creator`/`skill-installer` are unrelated), so this is a direct architecture recommendation.
+
+**Recommended approach**
+1. Keep `DetailView` as the source of thread context, but make `onSend` carry context, not just text.
+2. Put mutation logic in a small service module (`response-submit.ts`) used by `App`.
+3. `App` callback should call service, persist via `saveMockStore()`, then trigger repaint.
+4. Default user-submitted `Message.type` to `ResponseType.None` for now; add a selector later only if product requirements demand typed user prompts.
+
+**Code sketch**
+```ts
+// detail.tsx
+type SendPayload = {
+  body: string;
+  threadParent: Response | null; // from threadStack top
+};
+
+onSend: (payload: SendPayload) => void;
+
+handleInputSubmit = (value: string) => {
+  const body = value.trim();
+  if (!body) return;
+
+  const threadParent =
+    this.threadStack.length > 0
+      ? this.threadStack[this.threadStack.length - 1].parent
+      : null;
+
+  this.props.onSend({ body, threadParent });
+
+  // keep UX at newest message
+  this.selectedMessage = Math.max(0, this.currentMessages().length - 1);
+  this.inputValue = '';
+  this.forceUpdate();
+};
+```
+
+```ts
+// response-submit.ts (new)
+function appendToTail(root: Response | null, node: Response): Response {
+  if (!root) return node;
+  let cur = root;
+  while (cur.response) cur = cur.response;
+  cur.response = node;
+  node.responding_to = cur;
+  return root;
+}
+
+export function submitMockResponse(args: {
+  inum: number;
+  body: string;
+  threadParent: Response | null;
+}): Response {
+  const store = getMockStore();
+  const detail = MOCK_DETAIL_DATA[args.inum];
+  if (!detail) throw new Error(`Issue ${args.inum} not found`);
+
+  const now = new Date().toISOString();
+  const newNode: Response = {
+    id: getNextResponseId(store),
+    content: {
+      author: AuthorType.User,
+      type: ResponseType.None,
+      body: args.body,
+      timestamp: now,
+      seen: now,
+    },
+    responding_to: null,
+    response: null,
+    replying_to: null,
+    reply: null,
+    is_continuation: false,
+    thread_resolved_at: null,
+  };
+
+  if (args.threadParent) {
+    if (!args.threadParent.reply) {
+      args.threadParent.reply = newNode;
+      newNode.replying_to = args.threadParent;
+    } else {
+      appendToTail(args.threadParent.reply, newNode);
+    }
+    args.threadParent.thread_resolved_at = null; // auto-unresolve
+  } else {
+    detail.rootResponse = appendToTail(detail.rootResponse, newNode);
+  }
+
+  saveMockStore();
+  return newNode;
+}
+```
+
+```ts
+// app.tsx
+onSend={({ body, threadParent }) => {
+  submitMockResponse({ inum, body, threadParent });
+  this.forceUpdate();
+}}
+```
+
+**Edge cases / pitfalls**
+1. `rootResponse` can be `null`; main-chain append must create root.
+2. First reply in a thread must set `newNode.replying_to = parent`; later replies should not overwrite that convention.
+3. If posting into a resolved thread, decide policy; recommend auto-unresolve on new reply.
+4. Repaint can look stale if selected index stays old; set selection to last message after send.
+5. Save failures (disk errors) should be caught and surfaced.
+
+**Where logic should live**
+1. `DetailView`: only determine send context (`threadParent`) and call `onSend`.
+2. `App`: orchestration/wiring for current issue (`inum`) and repaint.
+3. Separate service: all linked-list mutation + node creation + persistence.

@@ -45,7 +45,7 @@ interface AppProps {
 class App extends React.Component<AppProps> {
     viewStack: View[];
     groupMode: GroupMode;
-    threadInfo: { inThread: boolean };
+    threadInfo: { inThread: boolean; threadResolved?: boolean };
     savedSelectedMessage: Map<number, number>;
 
     constructor(props: AppProps) {
@@ -150,7 +150,7 @@ class App extends React.Component<AppProps> {
                             initialSelectedMessage={this.savedSelectedMessage.get(inum)}
                             onBack={(sel) => this.saveSelectedAndGoBack(inum, sel)}
                             onHome={(sel) => this.saveSelectedAndGoHome(inum, sel)}
-                            onSend={(msg) => { /* TODO: wire to backend */ }}
+                            onSend={() => {}}
                             onNavigateIssue={(inumTo) => this.replaceCurrentView({ type: ViewType.Detail, inum: inumTo })}
                             onQuit={() => this.props.onExit?.()}
                             onThreadStateChange={(info) => {
@@ -176,7 +176,7 @@ class App extends React.Component<AppProps> {
                     threadInfo={this.threadInfo}
                 />
                 {content}
-                <Footer viewType={this.currentView.type} inThread={this.threadInfo.inThread} />
+                <Footer viewType={this.currentView.type} inThread={this.threadInfo.inThread} threadResolved={this.threadInfo.threadResolved} />
             </Box>
         );
     }

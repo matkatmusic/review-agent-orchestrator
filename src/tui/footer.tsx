@@ -13,6 +13,7 @@ export interface Shortcut {
 export interface FooterProps {
     readonly viewType: ViewType;
     readonly inThread?: boolean;
+    readonly threadResolved?: boolean;
 }
 
 export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
@@ -72,10 +73,18 @@ const THREAD_SHORTCUTS: readonly Shortcut[] = [
     { key: '⌥h', label: 'Home' },
 ];
 
-const FooterComponent: React.FC<FooterProps> = ({ viewType, inThread }) => {
-    const shortcuts = (viewType === ViewType.Detail && inThread)
+const FooterComponent: React.FC<FooterProps> = ({ viewType, inThread, threadResolved }) => {
+    let shortcuts = (viewType === ViewType.Detail && inThread)
         ? THREAD_SHORTCUTS
         : VIEW_SHORTCUTS[viewType];
+
+    // Toggle resolve label based on thread state
+    if (viewType === ViewType.Detail && inThread && threadResolved !== undefined) {
+        const resolveLabel = threadResolved ? 'Unresolve' : 'Resolve';
+        shortcuts = shortcuts.map(s =>
+            s.key === '^R' ? { ...s, label: resolveLabel } : s
+        );
+    }
 
     return (
         <Box>

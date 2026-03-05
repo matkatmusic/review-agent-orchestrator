@@ -1,0 +1,112 @@
+I will start by investigating the current implementation of `app.tsx`, `detail.tsx`, `mock-store.ts`, `mock-data.ts`, and `types.ts` to understand how the components are currently structured and how data flows between them. This will help me propose the best approach for wiring up the response submission.
+Here is my recommended approach for wiring up response submissions in your React/Ink TUI app.
+
+### 1. Recommended Approach (with Rationale)
+
+**Pattern: "Contextual Delegate with Service Mutation"**
+
+- **Data Mutation (Service):** Create an `addMockResponse` helper in `mock-data.ts`. Since Phase 1.5 uses mutable global state, this function should instantiate the new node, link it into the tree, generate the ID, and call `saveMockStore()`. This keeps linked-list manipulation out of your React components.
+- **Context Extraction (detail.tsx):** `DetailView` is the only component that natively understands the difference between the main chain and a thread. When the user hits Enter, `DetailView` should grab the last message in the current view (`respondingTo`) and the thread parent (`replyingTo`) and pass them to the `onSend` callback.
+- **Wiring (app.tsx):** `App` simply wires the `DetailView`'s `onSend` event to the `addMockResponse` service.
+- **Scrolling:** Because `DetailView` tracks its cursor via `selectedMessage`, it must advance the index immediately after submission so the newly added message is selected.
+
+### 2. Implementation Sketch
+
+**A. In `src/tui/mock-data.ts` (The Mutation Logic)**
+```typescript
+import { AuthorType, ResponseType } from '../types.js';
+
+export function addMockResponse(
+    inum: number,
+    body: string,
+    replyingTo: Response | null,
+    respondingTo: Response | null
+): Response {
+    const store = getMockStore();
+    const newId = getNextResponseId(store);
+
+    const newResponse: Response = {
+        id: newId,
+        content: {
+            author: AuthorType.User,
+            type: ResponseType.None,
+            body: body,
+            timestamp: new Date().toISOString(),
+            seen: new Date().toISOString()
+        },
+        responding_to: respondingTo,
+        response: null,
+        replying_to: replyingTo,
+        reply: null,
+        is_continuation: false,
+        thread_resolved_at: null,
+    };
+
+    if (respondingTo) {
+        respondingTo.response = newResponse;
+    } else if (replyingTo) {
+        replyingTo.reply = newResponse;
+    } else {
+        const mockData = MOCK_DETAIL_DATA[inum];
+        if (mockData) {
+            mockData.rootResponse = newResponse;
+        }
+    }
+
+    saveMockStore();
+    return newResponse;
+}
+```
+
+**B. Update `src/tui/detail.tsx` (Context Extraction & Scrolling)**
+```typescript
+export interface DetailViewProps {
+    onSend: (message: string, replyingTo: Response | null, respondingTo: Response | null) => void;
+}
+
+handleInputSubmit = (value: string) => {
+    if (this.focusedField !== null) {
+        this.openOverlayForField();
+        return;
+    }
+
+    const body = value.trim();
+    if (body) {
+        const messages = this.currentMessages();
+        const respondingTo = messages.length > 0 ? messages[messages.length - 1] : null;
+        const isInThread = this.threadStack.length > 0;
+        const replyingTo = isInThread ? this.threadStack[this.threadStack.length - 1].parent : null;
+
+        this.props.onSend(body, replyingTo, respondingTo);
+        this.selectedMessage = messages.length;
+    }
+
+    this.inputValue = '';
+    this.forceUpdate();
+};
+```
+
+**C. Update `src/tui/app.tsx` (The Wiring)**
+```typescript
+import { addMockResponse } from './mock-data.js';
+
+<DetailView
+    onSend={(msg, replyingTo, respondingTo) => {
+        addMockResponse(inum, msg, replyingTo, respondingTo);
+    }}
+/>
+```
+
+### 3. Edge Cases & Pitfalls
+
+1. **Empty Issues:** If rootResponse is null, both respondingTo and replyingTo will be null. Must assign to mockData.rootResponse.
+2. **First Reply in a New Thread:** respondingTo is null but replyingTo is populated. Links to replyingTo.reply.
+3. **Cursor Sync:** Must increment selectedMessage at submission time.
+4. **Is_Continuation:** Default to false for now.
+
+### 4. Where to put the Mutation Logic?
+
+- **mock-data.ts (Service):** Linked-list mutation and ID generation
+- **detail.tsx (Component):** Context extraction and cursor management
+- **app.tsx:** Thin orchestrator routing the action
+- **Response Type:** Default to ResponseType.None for user input
