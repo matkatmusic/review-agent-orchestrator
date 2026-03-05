@@ -1,6 +1,6 @@
 REVIEW AGENT ORCHESTRATOR v2.1 — ROADMAP
 =========================================
-Last updated: 2026-03-05
+Last updated: 2026-03-05 10:44 AM (revised)
 Branch: DetailViewRewrite
 
 
@@ -98,6 +98,7 @@ Views implemented:
       - Overlay pickers for Group, Blocked By, Blocks
       - Thread visual separators, New Replies separator
       - Ctrl+Shift+Right/Left for thread enter/exit
+      - Ctrl+R thread resolution toggle (thread_resolved_at)
       - Adjacent issue nav (Shift+Left/Right)
       - Selected message saved/restored per issue
   [x] New Issue — src/tui/newissue.tsx
@@ -295,9 +296,16 @@ Source: Phase1.5_mock_backend_plan.txt
   [x] --resetMockData CLI flag: copies default over active before launch
   [x] reloadMockStore(): in-place refresh for mid-session reset (available but no hotkey)
   [ ] Wire onSend to append Response to chain + saveMockStore()
+      Confirmed not wired: app.tsx:153 is { /* TODO: wire to backend */ }.
+      Messages typed in InputBox are discarded on submit.
   [ ] Wire Home status actions (onActivate/onDefer/onResolve) + saveMockStore()
   [ ] Wire onGroupChange/onGroupCreate + saveMockStore()
+      Confirmed not wired: App does not pass onGroupChange/onGroupCreate
+      to DetailView. The overlay picker UI works but selections have no
+      effect (fires into undefined via optional chaining).
   [ ] Wire onBlockedByChange/onBlocksChange + saveMockStore()
+      Confirmed not wired: same as group -- local Set updates in-memory
+      during the session but App passes no persistence callback.
   [ ] Wire missing App view render cases (NewIssue, AgentStatus, BlockingMap, GroupView)
 
   TODO (Phase 3): Remove --resetMockData flag, mock-store.ts, mock-data.ts,
@@ -482,9 +490,15 @@ Source: v2.1.md (Install & Setup section)
 
 Source: DetailViewRewrite.md (Remaining TODOs), v2.1.md (TODO/Deferred)
 
-  [ ] Thread resolution (thread_resolved_at field, [r] keybind in thread)
+  [x] Thread resolution (thread_resolved_at field, Ctrl+R toggle in Detail)
+      Implemented in detail.tsx: resolveThread() toggles thread_resolved_at
+      on thread parent. Visual indicators: [N replies checkmark] badge on
+      main chain, [ Replies -- Resolved ] separator in thread view.
   [ ] Wire disabled Detail shortcuts: [d] Defer, [r] Resolve, [b] Block,
       [w] Rebase, [s] Show pane
+      These appear dimmed in the footer but have no handlers in handleKey.
+      Single-char keys are consumed by TextInput. Requires focus regions
+      (Phase 8) to distinguish shortcut mode from text entry mode.
   [ ] ResponseContainer self-compute hasNewReplies (pass userLastViewedAt)
   [ ] State management migration: forceUpdate -> setState or useReducer
   [ ] Bidirectional unread indicator (agent seen via agent_last_read_at)
@@ -504,6 +518,32 @@ Source: v2.1.md (Deferred section), keypress_handling.txt
   [ ] Resolve strategy acceptance criteria + fallback
   [ ] Multi-issue thread references / ID namespacing
   [ ] aidi read-thread for expanding collapsed resolved threads
+
+
+========================================================================
+BUGS
+========================================================================
+
+Confirmed via live testing against the running TUI (tmux dashboard session).
+
+--- BUG-1: Escape key fails when InputBox contains text ---
+
+Severity: Medium (UX)
+Affects: Detail view
+Reproduce: Open Detail view, type any text into the input box, press Escape.
+Expected: Exit the Detail view (or exit thread if in a thread).
+Actual: Nothing happens. The Escape key is consumed by Ink's TextInput
+        component before DetailInputBridge's useInput handler sees it.
+Workaround: Alt+h (Option+h on macOS) still works to go Home because
+            the macOS dead-key character (U+02D9) bypasses TextInput.
+Root cause: TextInput is always focused when focusedField === null
+            (InputBox receives focused={true}). There is no mechanism
+            to defocus TextInput so that Escape reaches handleKey.
+Fix: Implement focus regions (Phase 8). When the conversation or
+     dependency-links region is focused, TextInput gets focus={false}
+     and Escape flows to handleKey normally. Alternatively, a lighter
+     fix would be to intercept Escape in InputBox's onSubmit or add a
+     raw stdin listener that fires before TextInput.
 
 
 ========================================================================
