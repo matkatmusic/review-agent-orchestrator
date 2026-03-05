@@ -1,0 +1,221 @@
+Phase 1.5 Step 1: Wire Missing App View Render Cases
+=====================================================
+
+Context
+-------
+
+app.tsx's render switch only handles ViewType.Home and ViewType.Detail. The four
+remaining views (NewIssue, AgentStatus, BlockingMap, GroupView) have fully implemented
+components but no render cases, so navigating to them shows nothing. 5 app.test.tsx
+tests fail because of this. This must be fixed before any Phase 1.5 callback wiring
+(onSend, status actions, group/block changes) since those callbacks are untestable on
+views that don't render.
+
+Secondary issue: AgentStatus, BlockingMap, and GroupView do not call handleGlobalKey,
+so even once rendered, cross-view navigation shortcuts (s, b, g, n, q, Esc) won't work
+from those views. The tests explicitly exercise multi-level navigation
+(Home -> AgentStatus -> BlockingMap -> back -> back) which requires global keys.
+
+User TODO: 
+----------
+Make a currently missing view load by default. Interact with it, identify missing features or broken features, make revisions until missing features or broken features are functional. Then mark the missing view as complete, and advanced to next missing view until all views are complete.
+- [ ] Detail View
+  - [x] load by default
+  - [ ] missing feature: no title bar in header ( ---- Review Agent Orchestrator - Issue Detail ---- )
+  - [ ] missing feature: 
+  - [ ] broken feature: footer hotkey components should wrap so that the hot key display and the associated text are not split between lines. 
+  - [ ] broken feature: [^R] Resolve: should say "Resolve Thread", change hotkey to Ctrl Shift r
+  - [ ] broken feature: [r] resolve issue: issue not resolved when cursor is in text input. Change to Ctrl r
+  - [ ] broken feature: adding a response in a thread doesn't create a new response in the thread view, and doesn't update the mock data json.
+  - [ ] broken feature: adding a response in an issue doesn't create a new response in the issue view, and doesn't update the mock data json. 
+  - [ ] UX change: Thread resolution hotkey functionality: hot key toggles thread resolution state (resolved/unresolved).  Footer text updates accordingly. 
+  - [ ] UX change: Response Type tag text should not be bold. 
+  - [ ] UX Change: 'view replies (# √)' should not be bold. 
+  - [ ] UX Change: Resolved thread parent messages shouldn't be dimmed when unselected.
+  - [ ] UX change: --- [ Replies ] --- is too dark. 
+  - [ ] UX change: Thread View: Thread Parent Response color should be different from thread replies color.  Need color scheme for Agent colors (as response, as thread parent) and User colors (as response, as thread parent)
+  - [ ] UX Change: 'Blocked By' picker should visually indicate if an issue has new replies.
+  - [ ] broken feature: Footer doesn't attach to the bottom of the view, there's a gap. 
+  - [ ] broken feature: vertical resizing (getting bigger) doesn't update the number of displayed responses when the view allows for showing more responses. 
+  - [ ] missing feature:
+  - [ ] broken feature: 
+- [ ] New Issue View
+  - [ ] load by default
+  - [ ] missing feature:
+  - [ ] broken feature: 
+  - [ ] missing feature:
+  - [ ] broken feature: 
+- [ ] Group View
+  - [ ] load by default
+  - [ ] missing feature:
+  - [ ] broken feature: 
+  - [ ] missing feature:
+  - [ ] broken feature: 
+- [ ] Blocking Map View
+  - [ ] load by default
+  - [ ] missing feature:
+  - [ ] broken feature: 
+  - [ ] missing feature:
+  - [ ] broken feature: 
+- [ ] AgentStatus View
+  - [ ] load by default
+  - [ ] missing feature:
+  - [ ] broken feature: 
+  - [ ] missing feature:
+  - [ ] broken feature: 
+- [ ] restore default app view: Home screen 
+
+
+Part A: Add 4 render cases to app.tsx
+-------------------------------------
+
+File: src/tui/app.tsx
+
+Add cases to the switch in render() after the ViewType.Detail case. All four follow
+the same pattern as the existing Home and Detail cases — instantiate the component
+with navigation callbacks.
+
+
+ViewType.NewIssue:
+
+  case ViewType.NewIssue:
+      content = (
+          <NewIssue
+              onCreated={(data) => {
+                  // Step 1: just navigate back.
+                  // Actual issue creation is Phase 1.5 Step 4.
+                  this.goBackToPreviousView();
+              }}
+              onCancel={() => this.goBackToPreviousView()}
+              onNavigate={(view) => this.navigateToView(view)}
+              onBack={() => this.goBackToPreviousView()}
+              onQuit={() => this.props.onExit?.()}
+          />
+      );
+      break;
+
+NewIssue handles Escape internally (calls onCancel). It's a text-entry view so no
+global key wiring needed (same reasoning as Detail view).
+
+
+ViewType.AgentStatus:
+
+  case ViewType.AgentStatus:
+      content = (
+          <AgentStatus
+              onNavigate={(view) => this.navigateToView(view)}
+              onBack={() => this.goBackToPreviousView()}
+              onQuit={() => this.props.onExit?.()}
+          />
+      );
+      break;
+
+
+ViewType.BlockingMap:
+
+  case ViewType.BlockingMap:
+      content = (
+          <BlockingMap
+              onNavigate={(view) => this.navigateToView(view)}
+              onBack={() => this.goBackToPreviousView()}
+              onQuit={() => this.props.onExit?.()}
+          />
+      );
+      break;
+
+
+ViewType.GroupView:
+
+  case ViewType.GroupView:
+      content = (
+          <GroupView
+              onBack={() => this.goBackToPreviousView()}
+              onSelectIssue={(inum) => this.navigateToView({ type: ViewType.Detail, inum })}
+              onNavigate={(view) => this.navigateToView(view)}
+              onQuit={() => this.props.onExit?.()}
+              groupMode={this.groupMode}
+              onGroupModeChange={(mode) => this.setGroupMode(mode)}
+          />
+      );
+      break;
+
+
+Part B: Add handleGlobalKey to three view components
+-----------------------------------------------------
+
+The tests exercise cross-view navigation (e.g., 's' from Home -> AgentStatus, then
+'b' from AgentStatus -> BlockingMap, then Esc -> back, Esc -> back). This requires
+each non-text-entry view to call handleGlobalKey as a fallback in its useInput.
+
+
+AgentStatus (src/tui/agent-status.tsx):
+
+  - Import handleGlobalKey from ./global-keys.js and ViewType from ./views.js
+  - At the end of useInput, after the existing j/k/Enter handlers, add:
+
+      handleGlobalKey(input, key, ViewType.AgentStatus,
+          { onBack, onQuit, onNavigate });
+
+
+BlockingMap (src/tui/blocking-map.tsx):
+
+  - Import handleGlobalKey from ./global-keys.js (ViewType already imported)
+  - At the end of useInput, after the existing j/k/Enter handlers, add:
+
+      handleGlobalKey(input, key, ViewType.BlockingMap,
+          { onBack, onQuit, onNavigate });
+
+  - Remove the existing manual key.escape -> onBack?.() handling since
+    handleGlobalKey covers it.
+
+
+GroupView (src/tui/group-view.tsx):
+
+  - Import handleGlobalKey from ./global-keys.js and ViewType from ./views.js
+  - In useInput, for list mode: replace the existing manual
+    key.escape -> onBack?.() with a fallback to:
+
+      handleGlobalKey(input, key, ViewType.GroupView,
+          { onBack, onQuit, onNavigate });
+
+  - In issues mode: keep key.escape going back to list mode (this is internal
+    state, not view-level back). Add handleGlobalKey as fallback for other keys
+    like q.
+
+
+NewIssue: No changes. Text-entry view — single-char globals would interfere
+with typing. Same reasoning as Detail view.
+
+
+Files Modified
+--------------
+
+  src/tui/app.tsx              Add 4 switch cases
+  src/tui/agent-status.tsx     Add handleGlobalKey import + call
+  src/tui/blocking-map.tsx     Add handleGlobalKey import + call, remove manual Esc
+  src/tui/group-view.tsx       Add handleGlobalKey import + call in list mode
+
+
+What This Does NOT Do
+---------------------
+
+  - Wire onCreated to create mock issues (Phase 1.5 Step 4)
+  - Wire onFocusPane on AgentStatus (no tmux pane interaction yet)
+  - Wire onSend, onGroupChange, etc. (Phase 1.5 Steps 3-6)
+  - Redesign any view's UX (that comes from hands-on testing after they render)
+
+
+Verification
+------------
+
+  1. npm run build — confirms TypeScript compiles
+
+  2. npx vitest run — all 5 previously-failing app.test.tsx tests should pass:
+       "can navigate to NewIssue view"
+       "can navigate to AgentStatus view"
+       "can navigate to BlockingMap view"
+       "can navigate to GroupView"
+       "multi-level deep navigation with Esc unwind"
+
+  3. Manual: node dist/tui/run.js in tmux — press s/b/g/n from Home, verify
+     each view renders, Esc returns to previous view, q exits
