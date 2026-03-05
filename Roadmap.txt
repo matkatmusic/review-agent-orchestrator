@@ -1,0 +1,550 @@
+REVIEW AGENT ORCHESTRATOR v2.1 — ROADMAP
+=========================================
+Last updated: 2026-03-05
+Branch: DetailViewRewrite
+
+
+========================================================================
+CURRENT STATE
+========================================================================
+
+What exists today, verified against the codebase on the DetailViewRewrite
+branch. All items below are implemented and functional unless noted.
+
+
+--- Types & Configuration ---
+
+src/types.ts
+  - Enums: IssueStatus (5), ResponseType (6), AuthorType (2),
+    ContainerType, ContainerStatus
+  - Interfaces: Issue, Message, Response, ResponseRow, Dependency,
+    Container, IssueContainer, AgentSession, Config
+  - ResponseRow declares responding_to_id, replying_to_id,
+    is_continuation, thread_resolved_at — all matched by schema
+
+src/config/config.ts
+  - loadConfig() merges config.json + config.local.json with defaults
+  - Validates maxAgents, scanInterval, teardownTimeout, tmuxSession,
+    terminalApp
+
+
+--- Database Layer ---
+
+src/db/database.ts
+  - DB class: open, close, migrate, seed, run, get, all, transaction
+  - WAL mode, foreign keys, busy_timeout=5000
+  - exportDump / importDump for git portability
+
+src/db/issues.ts
+  - createIssue, getByInum, list, updateStatus, updateDescription,
+    incrementRevision, markViewed, getActiveCount, getStatusCounts
+  - Auto-increment via metadata table, Inbox auto-assignment
+
+src/db/responses.ts
+  - create(db, inum, author, body, type?) -- FLAT ONLY, no thread params
+  - listByInum, getLatestByInum, hasUnread, getUnreadInums
+
+src/db/dependencies.ts
+  - addBlock (with cycle detection via recursive CTE), removeBlock,
+    getBlockersFor, getBlockedBy, isBlocked
+
+src/db/containers.ts
+  - createContainer, listContainers, getContainer,
+    addIssueToContainer, removeIssueFromContainer,
+    getIssuesInContainer, updateSortOrder, updateContainerStatus
+
+src/db/agent-sessions.ts
+  - create, getByInum, remove, listActive
+
+Known issue: IssueStatus is a numeric enum but SQL uses string CHECK
+constraints. 8 test failures in issues.test.ts (7) and
+containers.test.ts (1). Must fix before any DB work.
+
+
+--- CLI (aidi) ---
+
+src/cli/aidi.ts — Agent Issue Database Interface
+  - Commands: respond, read, block, create, status, ack
+  - All commands use transactionImmediate where needed
+  - Missing: --reply-to flag on respond (needed for threading)
+
+
+--- Tmux Orchestration ---
+
+src/tmux/exec.ts    — ShellExecutor, defaultExec, esc()
+src/tmux/tmux.ts    — createSession, splitWindow, listPanes, killSession,
+                      hasSession, isInsideTmux, isTmuxAvailable
+src/tmux/bootstrap.ts — ensureTmuxSession (2-pane layout), re-exec guard
+src/tmux/terminal.ts  — openTerminalWindow (macOS osascript)
+
+Missing: sendKeys, cancelAndSend, getPaneOutput, isPaneIdle,
+         showPane, hidePane
+
+
+--- TUI (Terminal User Interface) ---
+
+Framework: Ink (React for terminals)
+Entry point: src/tui/run.tsx -> src/tui/app.tsx
+
+Views implemented:
+  [x] Home (Dashboard) — src/tui/dashboard.tsx
+      - Tab-filtered issue list, cursor nav, unread markers
+      - Enter/a/d/r/n key handling
+  [x] Detail — src/tui/detail.tsx (REWRITTEN on this branch)
+      - Thread stack with enter/exit/nested threads
+      - Virtual-scrolled response chain with viewport anchoring
+      - Overlay pickers for Group, Blocked By, Blocks
+      - Thread visual separators, New Replies separator
+      - Ctrl+Shift+Right/Left for thread enter/exit
+      - Adjacent issue nav (Shift+Left/Right)
+      - Selected message saved/restored per issue
+  [x] New Issue — src/tui/newissue.tsx
+      - Multi-field form with validation
+  [x] Agent Status — src/tui/agent-status.tsx
+      - Renders mock agent list (not wired to backend)
+  [x] Blocking Map — src/tui/blocking-map.tsx
+      - ASCII tree of dependency graph
+  [x] Group View — src/tui/group-view.tsx
+      - Dual-mode: container list + drilled-in issue list
+
+Supporting components:
+  [x] header.tsx — 3-line header with view name, agents, unread
+  [x] footer.tsx — Per-view keyboard shortcuts, thread mode swap
+  [x] response-chain.tsx — Virtual scrolling, viewport derivation
+  [x] response-container.tsx — Message box renderer with badges
+  [x] input-box.tsx — Text input (3 lines)
+  [x] issue-header.tsx — 5-line metadata block
+  [x] global-keys.tsx — handleGlobalKey shared helper
+  [x] group-picker.tsx — Modal container selector
+  [x] issue-list-picker.tsx — Modal multi-select issue picker
+  [x] paragraph-utils.ts — splitIntoParagraphs (blank-line, code-fence safe)
+  [x] thread-builders.ts — Response chain/reply factories for mock data
+  [x] mock-data.ts — 8 issues, deps, containers, rich threaded detail data
+  [x] status-color.ts — Status-to-color mapping
+  [x] views.ts — ViewType enum (6 views), View discriminated union
+
+TUI state: ALL views render from mock data. No DB queries.
+App.tsx onSend is a no-op stub. No backend wiring.
+
+
+--- Tests ---
+
+Test framework: Vitest
+TUI tests: ink-testing-library
+
+Passing: Most TUI tests, all tmux tests, config tests, dependency tests
+Failing: 8 DB tests (enum mismatch), 5 app.test.tsx tests (missing
+         view render cases for AgentStatus, BlockingMap, GroupView, NewIssue)
+
+
+--- Design Documents ---
+
+These documents describe the current state and were used during
+implementation:
+
+  v2.1.md — Master design doc (schema, architecture, statuses,
+            transitions, agent comms, TUI wireframes)
+  keypress_handling.txt — isActive-gated input plan (Phase A done
+            partially; global-keys.tsx created, VIEW_OWNED_KEYS deleted)
+  keypress_handling_impl.txt — Per-view checklist (partially done)
+  src/tui/DetailViewRewrite.md — Rewrite plan with completion status
+  src/tui/detail_analysis.txt — Code review of old detail.tsx
+  src/tui/DetailViewRefactor.txt — Component decomposition sketch
+  Debates/detailview_rewrite_* — Three-way debate + implementation plan
+  Debates/message_threads_* — Three-way debate on threading model
+  Debates/threaded_issue_md_* — Three-way debate on issue.md serialization
+  Questions/Debates/ — Earlier architecture debates (merge redesign, Q1, Q2)
+
+
+========================================================================
+MISSING (features v1 has that v2 does not yet have)
+========================================================================
+
+Compared against v1/src/ inventory. Items are grouped by subsystem.
+
+--- Agent Lifecycle ---
+
+v1 has:
+  - spawnAgent() — creates worktree, writes lockfile, spawns claude CLI
+  - repromptAgent() — sends "NEW USER RESPONSE" via tmux send-keys
+  - isAgentRunning() — checks lockfile + pane alive
+  - cleanupStaleLocks() — removes lockfiles for dead panes
+  - buildInitialPrompt() — constructs first message to agent
+  - buildClaudeCommand() — builds shell cmd with --worktree, --add-dir
+  - Lockfile tracking: {paneId, qnum, headCommit}
+
+v2 has: agent_sessions DB table (schema + CRUD), but NO agent spawn,
+        reprompt, teardown, or lifecycle code.
+
+
+--- Daemon / Scan Cycle ---
+
+v1 has:
+  - scanCycle() — full orchestration loop:
+    1. Process pending queue
+    2. Run pipeline (enforce blocked -> auto-unblock -> promote)
+    3. Kill agents for enforced/orphaned questions
+    4. Spawn/re-prompt agents for Active questions
+    5. Detect new commits, send rebase signals
+    6. Cleanup stale lockfiles
+    7. Export dump if dirty
+  - detectNewCommits() — compares HEAD against lockfiles
+  - ensureAutocompact() — sets autoCompactEnabled in ~/.claude.json
+  - Main loop with configurable interval
+
+v2 has: NOTHING. No scan cycle, no pipeline, no polling loop.
+
+
+--- Status Pipeline ---
+
+v1 has:
+  - enforceBlocked() — moves Awaiting/Active with unresolved blockers
+  - autoUnblock() — moves Deferred->Awaiting when all blockers resolve
+  - promoteAwaiting() — moves Awaiting->Active up to maxAgents
+  - runPipeline() — orchestrates all three in sequence
+
+v2 has: NOTHING. Status transitions are manual only.
+
+
+--- Pending Action Queue ---
+
+v1 has:
+  - writePending() — writes JSON action to .pending/ (atomic rename)
+  - processPendingQueue() — reads all .json, applies to DB, deletes
+  - applyAction() — dispatcher for 5 action types
+
+v2 does NOT need this: agents write directly to DB via aidi (WAL mode).
+This is a deliberate architectural change, not a gap.
+
+
+--- Tmux Pane Interaction ---
+
+v1 has: sendKeys(), capturePaneTail(), isPaneAlive(), killPane()
+v2 has: createSession, splitWindow, listPanes, killSession
+v2 missing: sendKeys, capturePaneTail/getPaneOutput, killPane,
+            isPaneAlive (individual pane check)
+
+
+--- Worktree Management ---
+
+v1 has: Claude CLI's --worktree flag handles creation; lockfiles track state
+v2 has: NOTHING. No worktree create/remove/apply code.
+
+
+--- TUI <-> DB Wiring ---
+
+v1 has: TUI queries DB directly (questions, responses, dependencies)
+        Auto-refresh via 3s polling
+v2 has: ALL mock data. Zero DB queries from TUI.
+        onSend, onGroupChange, etc. are stubs.
+
+
+--- Agent Prompt Template ---
+
+v1 has: prompts/review-agent.md — step-by-step agent instructions
+        (RESOLVE | IMPLEMENT | DEFER | RESPOND classification)
+v2 has: NOTHING. config.json references agentPrompt but file missing.
+
+
+--- Setup & Reset ---
+
+v1 has: setup.ts — creates folder structure, copies templates, merges
+        VS Code tasks.json, initializes DB, imports dump
+        reset.ts — kills tmux, removes worktrees, clears lockfiles
+v2 has: NOTHING. No install.sh, no setup, no reset.
+
+
+--- SQL Dump Portability ---
+
+v1 has: exportDump() called after every dirty mutation
+        importDump() on setup if dump exists
+v2 has: exportDump/importDump in database.ts, but never called.
+        No debounced export, no git tracking of dump.
+
+
+--- Rebase Handling ---
+
+v1 has: detectNewCommits() — compares HEAD against agent headCommit,
+        sends "git rebase <commit>" via tmux send-keys
+v2 has: Planned "rebase-worktree" TUI command, but NOT implemented.
+
+
+--- Session Recovery ---
+
+v1 has: Daemon detects stale lockfiles and cleans up on startup
+v2 design: Planned reconciliation of agent_sessions against live tmux
+           panes on startup. NOT implemented.
+
+
+========================================================================
+PLANNED (extracted from design documents and debate syntheses)
+========================================================================
+
+Items are ordered by dependency. Each item lists its source document.
+
+
+--- Phase 0: Fix Test Suite ---
+
+Source: threaded_issue_md_gap_analysis.txt, v2.1.threaded_issue_md_todo.txt
+
+  [ ] Fix IssueStatus enum mismatch (numeric vs string)
+      Change to string enum or add mapping layer.
+      Files: src/types.ts, src/db/issues.ts, tests
+      Unblocks: all DB work, test confidence
+
+
+--- Phase 1: Keypress Handling (Phase A completion) ---
+
+Source: keypress_handling.txt, keypress_handling_impl.txt
+
+  [x] Remove useInput from app.tsx, delete VIEW_OWNED_KEYS
+  [x] Create global-keys.tsx with handleGlobalKey()
+  [ ] Wire per-view key handlers with global shortcuts:
+      [ ] dashboard.tsx — add s/b/g/q/Esc
+      [ ] detail.tsx — no single-char globals (text entry)
+      [ ] newissue.tsx — no single-char globals (text entry)
+      [ ] agent-status.tsx — add Esc/s/b/g/n/q
+      [ ] blocking-map.tsx — add Esc/s/g/n/q
+      [ ] group-view.tsx — add s/b/q (n context-dependent)
+  [ ] Pass onNavigate/onBack/onQuit callbacks to all views
+  [ ] Update footer shortcuts per view
+  [ ] Render all 6 views in app.tsx switch (5 currently missing)
+
+
+--- Phase 2: Threaded issue.md Serialization ---
+
+Source: v2.1.threaded_issue_md_todo.txt,
+        Debates/threaded_issue_md_debate_synthesis.txt,
+        Debates/threaded_issue_md_gap_analysis.txt
+
+Step 0: Fix enum mismatch (see Phase 0)
+
+Step 1: Add thread columns to responses schema
+  [ ] Add responding_to_id, replying_to_id, is_continuation to schema
+  [ ] Add migration logic for existing DBs (PRAGMA user_version)
+  Files: sql/schema.sql, src/db/database.ts
+
+Step 2: Extend responses.create() with thread params
+  [ ] Accept opts: { respondingToId?, replyingToId?, isContinuation? }
+  [ ] FK validation (same inum)
+  Files: src/db/responses.ts
+
+Step 3: Build ResponseRow[] -> Response tree hydrator
+  [ ] hydrateResponseTree(rows) -> Response | null
+  [ ] getResponseTree(db, inum) convenience function
+  Files: src/db/response-tree.ts (new)
+
+Step 4: Build issue.md serializer (CORE DELIVERABLE)
+  [ ] serializeIssueMd(opts) -> string
+  [ ] Header section (inum, status, revision, deps)
+  [ ] Continuation merging (is_continuation -> parent body)
+  [ ] "What's New" summary section ([NEW] markers)
+  [ ] Main conversation section
+  [ ] Thread sections (expand active, collapse resolved)
+  [ ] Scalability windowing (maxMainChainMessages=30, maxThreadMessages=10)
+  Files: src/serializer/issue-md.ts (new)
+
+Step 5: Atomic file writer
+  [ ] atomicWriteReadOnly(path, content) — temp + fsync + rename + chmod 444
+  Files: src/serializer/atomic-write.ts (new)
+
+Step 6: Add --reply-to to aidi respond (parallel with Step 4)
+  [ ] --reply-to <responseId> flag
+  [ ] Validate response exists and belongs to inum
+  Files: src/cli/aidi.ts
+
+Step 7: Add sendKeys tmux wrapper (parallel with Step 4)
+  [ ] sendKeys(session, paneId, text)
+  Files: src/tmux/tmux.ts
+
+Step 8: Integration tests
+  [ ] Full round trip: create -> threaded responses -> serialize -> verify
+  Files: src/serializer/integration.test.ts (new)
+
+
+--- Phase 3: TUI <-> DB Wiring ---
+
+Source: v2.1.md (build phases), threaded_issue_md_gap_analysis.txt
+
+  [ ] Replace MOCK_ISSUES with issues.list() query
+  [ ] Replace MOCK_DETAIL_DATA with getResponseTree()
+  [ ] Replace MOCK_CONTAINERS with containers.listContainers()
+  [ ] Wire onSend to responses.create() + incrementRevision()
+  [ ] Wire onGroupChange/onGroupCreate to containers API
+  [ ] Wire onBlockedByChange/onBlocksChange to dependencies API
+  [ ] Add polling interval for auto-refresh (1-2s)
+  [ ] Wire unread counts from getUnreadInums()
+
+
+--- Phase 4: Worktree Management ---
+
+Source: v2.1.md (Worktree Lifecycle section)
+
+  [ ] createWorktree(inum) — git worktree add, branch worktree-I<N>
+  [ ] removeWorktree(inum) — git worktree remove
+  [ ] applyWorktree(inum) — rebase check, apply changes unstaged
+  [ ] isWorktreeClean(inum) — git status --porcelain in worktree
+  [ ] Write CLAUDE.md into each worktree (behavioral instructions)
+  [ ] Write issue.md into each worktree (via serializer from Phase 2)
+  [ ] Write .claude/settings.json into each worktree (permissions)
+
+
+--- Phase 5: Agent Lifecycle ---
+
+Source: v2.1.md (Agent Prompt & Context, Agent Permissions sections)
+
+  [ ] spawnAgent(inum) — create worktree, write files, spawn claude CLI
+      in tmux pane, record agent_session
+  [ ] teardownAgent(inum) — cancelAndSend, poll clean tree, remove
+      worktree, kill pane, remove agent_session
+  [ ] repromptAgent(inum) — rewrite issue.md, sendKeys signal
+  [ ] cancelAndSend(paneId) — C-c + poll until idle + send text
+  [ ] isAgentIdle(paneId) — capture pane output, detect idle state
+  [ ] Create agent prompt template (prompts/review-agent.md)
+
+
+--- Phase 6: Scan Cycle / Orchestrator ---
+
+Source: v2.1.md (Architecture section, single process)
+
+  [ ] scanCycle() — main loop body:
+      1. Enforce blocked invariant (auto-block Active/Awaiting with deps)
+      2. Auto-unblock (Blocked->Awaiting when all blockers resolved)
+      3. Kill agents for enforced/orphaned issues
+      4. Spawn agents for newly Active issues
+      5. Reprompt agents with undelivered user responses
+      6. Detect new commits, send rebase signals
+      7. Cleanup stale agent_sessions (dead panes)
+      8. Export dump if dirty (debounced 5s)
+  [ ] Integrate scanCycle into App's useEffect timer (1-2s)
+  [ ] Single-flight guard (skip if previous cycle still running)
+
+
+--- Phase 7: Session Recovery ---
+
+Source: v2.1.md (Session recovery on startup)
+
+  [ ] On launch: detect existing tmux session with agent panes
+  [ ] Reconcile agent_sessions against live panes
+  [ ] Re-adopt alive panes, clean up dead entries
+  [ ] Signal each adopted agent to commit, wait for clean trees
+  [ ] Kill stale tmux session, start fresh, relaunch Active agents
+
+
+--- Phase 8: Keypress Handling Phase B (Focus Regions) ---
+
+Source: keypress_handling.txt (Phase B section)
+
+  [ ] Detail view focus regions: text-input, conversation, dependency-links
+  [ ] Tab cycling between regions
+  [ ] TextInput focus={false} when not in text-input region
+  [ ] Visual focus indicators (cyan bar + dimmed unfocused)
+  [ ] Dependency link sub-focus with left/right navigation
+  [ ] Enter on dep navigates to that issue's Detail view
+
+
+--- Phase 9: Setup & Distribution ---
+
+Source: v2.1.md (Install & Setup section)
+
+  [ ] install.sh — checks Node 18+, npm, tmux, Claude CLI, git
+  [ ] npm install + npm run build
+  [ ] Initialize DB from schema + seed
+  [ ] Write config template
+  [ ] Git submodule integration guide
+  [ ] VS Code tasks.json auto-start (from v1 template)
+
+
+--- Phase 10: Polish & Remaining TODOs ---
+
+Source: DetailViewRewrite.md (Remaining TODOs), v2.1.md (TODO/Deferred)
+
+  [ ] Thread resolution (thread_resolved_at field, [r] keybind in thread)
+  [ ] Wire disabled Detail shortcuts: [d] Defer, [r] Resolve, [b] Block,
+      [w] Rebase, [s] Show pane
+  [ ] ResponseContainer self-compute hasNewReplies (pass userLastViewedAt)
+  [ ] State management migration: forceUpdate -> setState or useReducer
+  [ ] Bidirectional unread indicator (agent seen via agent_last_read_at)
+  [ ] Auto-delete worktree branches on merge detection
+  [ ] Manual "delete merged branch" TUI command
+  [ ] Import v1 Questions into Issues DB (migration script)
+
+
+--- Deferred (no timeline) ---
+
+Source: v2.1.md (Deferred section), keypress_handling.txt
+
+  [ ] Cross-platform support (Linux/Windows terminal launching)
+  [ ] Barrel index.ts for tmux module
+  [ ] SplitWindowOptions.vertical -> direction enum
+  [ ] View worktree changes from TUI (use git GUI instead)
+  [ ] Resolve strategy acceptance criteria + fallback
+  [ ] Multi-issue thread references / ID namespacing
+  [ ] aidi read-thread for expanding collapsed resolved threads
+
+
+========================================================================
+DEPENDENCY GRAPH (critical path)
+========================================================================
+
+  Phase 0 (enum fix)
+    |
+    v
+  Phase 1 (keypress wiring)     Phase 2 Steps 1-3 (schema + hydrator)
+    |                               |
+    v                               v
+  Phase 3 (TUI <-> DB)          Phase 2 Steps 4-8 (serializer + aidi)
+    |                               |
+    +--------->-----<---------------+
+               |
+               v
+           Phase 4 (worktrees)
+               |
+               v
+           Phase 5 (agent lifecycle)
+               |
+               v
+           Phase 6 (scan cycle)
+               |
+               v
+           Phase 7 (session recovery)
+
+  Phase 8 (focus regions) — independent, can happen anytime after Phase 1
+  Phase 9 (setup) — independent, can happen anytime
+  Phase 10 (polish) — after Phase 6
+
+
+========================================================================
+SOURCE DOCUMENTS INDEX
+========================================================================
+
+Root:
+  v2.1.md                           Master design document
+  keypress_handling.txt              Keypress plan (replaces P1-5)
+  keypress_handling_impl.txt         Per-view implementation checklist
+  message_threads.txt                Original threading spec (superseded)
+  Message_threads_excalidraw.txt     Excalidraw diagram text analysis
+  Message_threads_plan_v2.txt        Full threading requirements
+  v2.1.threaded_issue_md_todo.txt    issue.md serializer TODO list
+
+src/tui/:
+  DetailViewRewrite.md               Rewrite plan + completion status
+  DetailViewRefactor.md              Thread internalization refactor plan
+  DetailViewRefactor.txt             Component decomposition sketch
+  detail_analysis.txt                Code review of old detail.tsx
+
+Debates/:
+  message_threads_debate_*           Threading data model debate
+  detailview_rewrite_debate_*        DetailView architecture debate
+  threaded_issue_md_debate_*         issue.md serialization debate
+  threaded_issue_md_gap_analysis.txt Codebase gap analysis for serializer
+
+Questions/Debates/:
+  merge_redesign_debate_prompt.txt   Single-process merge review
+  Q1_debate_prompt.txt               Architecture review round 1
+  Q2_debate_prompt.txt               Architecture review round 2
+
+.claude/debate/P1-5-key-event-system/:
+  round2_*                           JUCE-inspired key system debate (rejected)
+  discover_prompt.txt                Ink source code research
+  deliver_prompt.txt                 Delivery plan
