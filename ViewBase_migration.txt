@@ -1,0 +1,472 @@
+ViewBase Migration Plan
+=======================
+
+Goal: Introduce a ViewBase abstract class so each view owns its own
+metadata (subtitle hint, shortcuts, view label, global key handling)
+instead of scattering that knowledge across header.tsx, footer.tsx,
+and global-keys.tsx as external switch/map registries.
+
+Inspired by the JUCE/C++ pattern:
+
+    void ViewOrchestrator::changeView(ViewType newView) {
+        auto newContent = getContentForView(newView);
+        header.changeForContent(newContent.get());
+        footer.changeForContent(newContent.get());
+        setContent(std::move(newContent));
+    }
+
+
+========================================================================
+CURRENT PROBLEMS THIS SOLVES
+========================================================================
+
+1. External registries must stay in sync with views:
+   - header.tsx getSubtitle() switch — must add case for every new view
+   - header.tsx getViewLabel() switch — same
+   - footer.tsx VIEW_SHORTCUTS record — must add entry for every new view
+   - footer.tsx THREAD_SHORTCUTS — special case for DetailView's thread mode
+   - views.ts ViewTypeStringsMap — must add entry for every new view
+
+2. Shared callback boilerplate in app.tsx:
+   Every view case in app.tsx's render switch manually wires:
+     onBack={() => this.goBackToPreviousView()}
+     onQuit={() => this.props.onExit?.()}
+     onNavigate={(view) => this.navigateToView(view)}
+   This is copy-pasted 6 times and will grow.
+
+3. Global key handling is inconsistent:
+   handleGlobalKey() in global-keys.tsx exists but each view must
+   opt in. Currently only HomeView calls it. AgentStatus, BlockingMap,
+   GroupView do not (they're missing s/b/g/q shortcuts). DetailView
+   has custom escape handling and never calls handleGlobalKey at all.
+
+4. View-specific state leaks up to App:
+   DetailView's threadInfo leaks to App so Header/Footer can react.
+   GroupView's groupMode leaks to App for persistence across navigations.
+   With ViewBase, the view owns this state and Header/Footer query
+   the active view directly via its methods.
+
+
+========================================================================
+THE VIEWBASE CONTRACT
+========================================================================
+
+File: src/tui/view-base.tsx (new)
+
+    import React from 'react';
+    import type { Key } from 'ink';
+    import type { View } from './views.js';
+    import type { Shortcut } from './footer.js';
+    import { handleGlobalKey } from './global-keys.js';
+
+    export interface ViewBaseProps {
+        columns: number;
+        rows: number;
+        onBack: () => void;
+        onQuit: () => void;
+        onNavigate: (view: View) => void;
+    }
+
+    export abstract class ViewBase<
+        P = {},
+        S = {}
+    > extends React.Component<P & ViewBaseProps, S> {
+
+        // ---- Required overrides ----
+
+        /** Subtitle hint shown on Header line 3. */
+        abstract getSubtitleHint(): string;
+
+        /** Shortcuts shown in Footer. */
+        abstract getShortcuts(): readonly Shortcut[];
+
+        /** The ViewType this component represents. */
+        abstract getViewType(): ViewType;
+
+        /** Display label for the Header title bar. */
+        abstract getViewLabel(): string;
+
+        // ---- Default implementations ----
+
+        /**
+         * Global key handler. Default delegates to handleGlobalKey().
+         * Views with text input (Detail, NewIssue) override this to
+         * skip single-char globals and handle Escape specially.
+         * Return true if key was consumed.
+         */
+        handleGlobalKey(input: string, key: Key): boolean {
+            return handleGlobalKey(input, key, this.getViewType(), {
+                onBack: this.props.onBack,
+                onQuit: this.props.onQuit,
+                onNavigate: this.props.onNavigate,
+            });
+        }
+    }
+
+
+========================================================================
+VIEW CONVERSIONS (per-view details)
+========================================================================
+
+Each view extends ViewBase and moves its metadata out of header.tsx,
+footer.tsx, and views.ts into the view class itself.
+
+
+--- HomeView (src/tui/home-view.tsx) ---
+
+Already a class component. Conversion is straightforward.
+
+    class HomeView extends ViewBase<HomeViewOwnProps> {
+        getSubtitleHint() { return 'All issues and orchestration state'; }
+        getViewLabel()    { return 'Home'; }
+        getViewType()     { return ViewType.Home; }
+        getShortcuts()    { return HOME_SHORTCUTS; }
+        // handleGlobalKey: use default (already calls handleGlobalKey)
+    }
+
+HOME_SHORTCUTS moves from footer.tsx VIEW_SHORTCUTS[ViewType.Home]
+into home-view.tsx as a module-level constant.
+
+Remove: onBack, onQuit, onNavigate from HomeViewOwnProps (inherited).
+
+
+--- DetailView (src/tui/detail.tsx) ---
+
+Already a class component. Most complex conversion.
+
+    class DetailView extends ViewBase<DetailViewOwnProps> {
+        getSubtitleHint() {
+            return this.threadStack.length > 0
+                ? '(add a response, ^R to resolve)'
+                : '(Enter on a response to view thread)';
+        }
+        getViewLabel() {
+            const inum = this.props.inum;
+            return this.threadStack.length > 0
+                ? `I-${inum}`
+                : `I-${inum} Detail`;
+        }
+        getViewType()  { return ViewType.Detail; }
+        getShortcuts() {
+            return this.threadStack.length > 0
+                ? THREAD_SHORTCUTS
+                : DETAIL_SHORTCUTS;
+        }
+
+        // Override: Escape exits thread before exiting view
+        handleGlobalKey(input: string, key: Key): boolean {
+            if (key.escape) { this.exitThread(); return true; }
+            if ((key.meta && input === 'h') || input === '\u02D9') {
+                this.props.onHome(this.selectedMessage);
+                return true;
+            }
+            // No single-char globals (text entry view)
+            return false;
+        }
+    }
+
+DETAIL_SHORTCUTS and THREAD_SHORTCUTS move from footer.tsx into
+detail.tsx as module-level constants.
+
+Removes: onThreadStateChange prop. App no longer needs threadInfo
+as a separate field — it calls this.activeView.getSubtitleHint()
+and this.activeView.getShortcuts() directly.
+
+Remove: onQuit from DetailViewOwnProps (inherited).
+
+
+--- NewIssue (src/tui/newissue.tsx) ---
+
+Currently a functional component. Convert to class.
+
+    class NewIssue extends ViewBase<NewIssueOwnProps> {
+        getSubtitleHint() { return '(fill fields, Enter to create)'; }
+        getViewLabel()    { return 'New Issue'; }
+        getViewType()     { return ViewType.NewIssue; }
+        getShortcuts()    { return NEWISSUE_SHORTCUTS; }
+
+        // Override: no single-char globals (text entry view)
+        handleGlobalKey(input: string, key: Key): boolean {
+            if (key.escape) { this.props.onCancel(); return true; }
+            return false;
+        }
+    }
+
+Size: ~130 lines. Functional-to-class conversion is mechanical.
+
+
+--- AgentStatus (src/tui/agent-status.tsx) ---
+
+Currently a functional component. Convert to class.
+
+    class AgentStatus extends ViewBase<AgentStatusOwnProps> {
+        getSubtitleHint() { return 'Active agent sessions and pane status'; }
+        getViewLabel()    { return 'Agent Status'; }
+        getViewType()     { return ViewType.AgentStatus; }
+        getShortcuts()    { return AGENT_STATUS_SHORTCUTS; }
+        // handleGlobalKey: use default (fixes missing s/b/g/q)
+    }
+
+Size: ~118 lines. Straightforward conversion.
+
+
+--- BlockingMap (src/tui/blocking-map.tsx) ---
+
+Currently a functional component. Convert to class.
+
+    class BlockingMap extends ViewBase<BlockingMapOwnProps> {
+        getSubtitleHint() { return 'Dependency and blocking relationships'; }
+        getViewLabel()    { return 'Blocking Map'; }
+        getViewType()     { return ViewType.BlockingMap; }
+        getShortcuts()    { return BLOCKING_MAP_SHORTCUTS; }
+        // handleGlobalKey: use default (fixes missing s/b/g/q)
+    }
+
+Size: ~165 lines. Straightforward conversion.
+
+
+--- GroupView (src/tui/group-view.tsx) ---
+
+Currently a functional component. Convert to class.
+
+    class GroupView extends ViewBase<GroupViewOwnProps> {
+        getSubtitleHint() {
+            return this.state.mode === 'list'
+                ? 'Issues grouped by container'
+                : '(Enter to view issue, Esc to go back)';
+        }
+        getViewLabel()  { return 'Group View'; }
+        getViewType()   { return ViewType.GroupView; }
+        getShortcuts()  { return GROUP_VIEW_SHORTCUTS; }
+
+        // Override: Escape in issues mode goes back to list mode
+        handleGlobalKey(input: string, key: Key): boolean {
+            if (key.escape && this.state.mode === 'issues') {
+                this.setState({ mode: 'list' });
+                return true;
+            }
+            return super.handleGlobalKey(input, key);
+        }
+    }
+
+Size: ~224 lines. GroupMode state moves from App into GroupView
+as component state, since ViewBase lets the view own its own state.
+App no longer needs groupMode or setGroupMode().
+
+NOTE: If GroupMode must persist across navigations (user expects
+to return to the same group after visiting Detail), App can
+optionally store/restore it via a generic savedViewState map,
+similar to savedSelectedMessage. But the view still owns the
+type definition and the state logic.
+
+
+========================================================================
+APP.TSX TRANSFORMATION
+========================================================================
+
+App becomes the ViewOrchestrator. The render switch shrinks from
+per-view prop wiring to a simple factory:
+
+    // Current: 50+ lines of switch cases with manual prop wiring
+    // After: ~20 lines
+
+    private activeViewRef = React.createRef<ViewBase>();
+
+    private createContentForView(view: View): React.ReactNode {
+        const baseProps: ViewBaseProps = {
+            columns: this.columns,
+            rows: this.rows,
+            onBack: () => this.goBackToPreviousView(),
+            onQuit: () => this.props.onExit?.(),
+            onNavigate: (v) => this.navigateToView(v),
+        };
+
+        switch (view.type) {
+            case ViewType.Home:
+                return <HomeView ref={this.activeViewRef} {...baseProps}
+                    issues={MOCK_ISSUES} /* ...view-specific props */ />;
+            case ViewType.Detail:
+                return <DetailView ref={this.activeViewRef} {...baseProps}
+                    inum={view.inum} /* ...view-specific props */ />;
+            // ... each case only passes view-specific props
+        }
+    }
+
+    render() {
+        const activeView = this.activeViewRef.current;
+        return (
+            <Box flexDirection="column" height={this.rows}>
+                <Header
+                    title={activeView?.getViewLabel() ?? ''}
+                    subtitle={activeView?.getSubtitleHint() ?? ''}
+                    columns={this.columns}
+                    activeAgents={...}
+                    unreadCount={...}
+                />
+                {this.createContentForView(this.currentView)}
+                <Footer
+                    shortcuts={activeView?.getShortcuts() ?? []}
+                />
+            </Box>
+        );
+    }
+
+Key changes:
+  - Header no longer needs currentView or threadInfo props.
+    It receives title and subtitle strings directly.
+  - Footer no longer needs viewType or inThread props.
+    It receives shortcuts array directly.
+  - App no longer stores threadInfo or groupMode.
+  - The onBack/onQuit/onNavigate trio is wired once in baseProps.
+
+Ref timing note: On the very first render, activeViewRef.current
+is null (ref attaches after mount). Use a componentDidMount or
+useEffect to trigger an initial forceUpdate after the ref attaches.
+Alternatively, compute fallback values from the View type directly
+for the first frame.
+
+
+========================================================================
+HEADER.TSX SIMPLIFICATION
+========================================================================
+
+Before (current):
+  - Receives View union, threadInfo, parses via getViewLabel() switch
+    and getSubtitle() switch
+  - 84 lines, 2 switch statements, assertNever guard
+
+After:
+  - Receives title: string, subtitle: string
+  - ~40 lines, no switches, no view type knowledge
+  - centeredRule() stays, everything else simplifies
+
+    interface HeaderProps {
+        title: string;
+        subtitle: string;
+        columns: number;
+        activeAgents?: number;
+        unreadCount?: number;
+    }
+
+
+========================================================================
+FOOTER.TSX SIMPLIFICATION
+========================================================================
+
+Before (current):
+  - Owns VIEW_SHORTCUTS record (6 entries) + THREAD_SHORTCUTS
+  - Receives viewType + inThread, does conditional lookup
+  - 100 lines
+
+After:
+  - Receives shortcuts: readonly Shortcut[]
+  - Renders them. That's it.
+  - ~40 lines
+  - Shortcut interface and rendering logic stay, everything else leaves
+
+    interface FooterProps {
+        shortcuts: readonly Shortcut[];
+    }
+
+The Shortcut[] arrays move into their respective view files.
+
+
+========================================================================
+FILES DELETED / GUTTED
+========================================================================
+
+  header.tsx getSubtitle() — deleted (views own their hints)
+  header.tsx getViewLabel() — deleted (views own their labels)
+  footer.tsx VIEW_SHORTCUTS — deleted (views own their shortcuts)
+  footer.tsx THREAD_SHORTCUTS — moves to detail.tsx
+  views.ts ViewTypeStringsMap — deleted (views own their labels)
+
+  global-keys.tsx — stays, but views call it via super.handleGlobalKey()
+                    instead of manually importing and calling it
+
+
+========================================================================
+EXECUTION ORDER
+========================================================================
+
+This can be done incrementally. Each step compiles and tests pass.
+
+Step 1: Create view-base.tsx with ViewBase abstract class
+  - No other files change. Just the new file.
+  - Verify: npm run build
+
+Step 2: Convert HomeView to extend ViewBase
+  - Move HOME_SHORTCUTS from footer.tsx into home-view.tsx
+  - Add getSubtitleHint/getShortcuts/getViewType/getViewLabel
+  - Remove onBack/onQuit/onNavigate from HomeViewOwnProps
+  - Update app.tsx HomeView case to pass baseProps
+  - Update app.tsx to read from activeViewRef for Home case
+  - Verify: npm run build && npx vitest run src/tui/home-view.test.tsx
+
+Step 3: Convert DetailView to extend ViewBase
+  - Move DETAIL_SHORTCUTS + THREAD_SHORTCUTS into detail.tsx
+  - Override handleGlobalKey for custom escape + Alt+h
+  - Remove onThreadStateChange — App reads ref directly
+  - Remove threadInfo from App state
+  - Update app.tsx render to query activeViewRef
+  - Verify: npm run build && npx vitest run src/tui/detail.test.tsx
+
+Step 4: Convert remaining 4 views (AgentStatus, BlockingMap,
+        GroupView, NewIssue) from functional to class + ViewBase
+  - These are the smallest views, convert all 4 together
+  - Move their shortcut arrays from footer.tsx into each file
+  - Verify: npm run build && npx vitest run
+
+Step 5: Simplify Header and Footer
+  - Header: replace View/threadInfo props with title/subtitle strings
+  - Footer: replace viewType/inThread props with shortcuts array
+  - Delete getSubtitle(), getViewLabel(), VIEW_SHORTCUTS,
+    ViewTypeStringsMap
+  - Verify: npm run build && npx vitest run
+
+Step 6: Clean up
+  - Remove unused imports
+  - Delete dead code in views.ts (ViewTypeStringsMap)
+  - Update header.test.tsx and footer.test.tsx for new interfaces
+  - Verify: full test suite passes
+
+
+========================================================================
+WHAT THIS DOES NOT CHANGE
+========================================================================
+
+  - View stack navigation (pushViewOntoStack, popViewFromStack) — same
+  - View discriminated union in views.ts — same (still needed for
+    type-safe inum on Detail)
+  - ViewType enum — same (still useful as an identifier)
+  - Mock data sourcing — same (still from mock-data.ts until Phase 3)
+  - Response rendering — same (ResponseContainer, ResponseChain)
+  - Thread stack management — same (stays inside DetailView)
+  - Test structure — same (ink-testing-library)
+
+
+========================================================================
+RISKS AND MITIGATIONS
+========================================================================
+
+Risk: Functional-to-class conversion breaks hooks (useState, useInput,
+      useMemo) used in AgentStatus, BlockingMap, GroupView, NewIssue.
+Mitigation: Replace useState with class state, useInput with a
+      bridge component (DetailInputBridge pattern already exists),
+      useMemo with manual memoization or getter methods.
+
+Risk: React ref timing — activeViewRef.current is null on first render.
+Mitigation: componentDidMount + forceUpdate, or compute fallback
+      title/subtitle/shortcuts from the View type for the first frame.
+      This is a one-frame flash, not user-visible.
+
+Risk: Test changes — header.test.tsx and footer.test.tsx test against
+      current ViewType-based interfaces.
+Mitigation: Step 5 explicitly updates these tests. The view tests
+      themselves don't change because they test rendering, not metadata.
+
+Risk: GroupView state persistence — if groupMode moves into the
+      component, it resets when navigating away and back.
+Mitigation: App maintains a generic Map<ViewType, unknown> for
+      restorable view state, or GroupView re-derives its state from
+      props on mount. Document the chosen approach before Step 4.

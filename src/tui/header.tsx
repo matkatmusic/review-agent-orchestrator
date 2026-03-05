@@ -18,7 +18,7 @@ const assertNever = (x: never): never => {
 
 function getViewLabel(view: View, threadInfo?: { inThread: boolean }): string {
     if (view.type === ViewType.Detail) {
-        if (threadInfo?.inThread) return `I-${view.inum} Thread`;
+        if (threadInfo?.inThread) return `I-${view.inum}`;
         return `I-${view.inum} Detail`;
     }
     return ViewTypeStringsMap.get(view.type) ?? String(view.type);
@@ -29,7 +29,8 @@ function getSubtitle(view: View, threadInfo?: { inThread: boolean }): string {
         case ViewType.Home:
             return 'All issues and orchestration state';
         case ViewType.Detail:
-            if (threadInfo?.inThread) return `Thread on I-${view.inum}`;
+            // if (threadInfo?.inThread) return `Thread on I-${view.inum}`;
+            if (threadInfo?.inThread) return '(add a response, ^R to resolve)';
             return '';
         case ViewType.NewIssue:
             return 'Create a new issue';
@@ -59,7 +60,8 @@ const HeaderComponent: React.FC<HeaderProps> = ({
     unreadCount,
     threadInfo,
 }) => {
-    const title = `Review Agent Orchestrator \u00b7 ${getViewLabel(currentView, threadInfo)}`;
+    // const title = `Review Agent Orchestrator \u00b7 ${getViewLabel(currentView, threadInfo)}`;
+    const title = `Review Agent Orchestrator - ${getViewLabel(currentView, threadInfo)}`;
     const line1 = centeredRule(title, columns);
 
     const statusParts: string[] = [];

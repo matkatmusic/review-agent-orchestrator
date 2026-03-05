@@ -1,10 +1,7 @@
 import React from 'react';
 import { Box, Text, useInput, type Key } from 'ink';
 import type { Issue, Response, Container } from '../types.js';
-import { AuthorType, ResponseType } from '../types.js';
 import { HEADER_LINES } from './header.js';
-import { getMockStore, saveMockStore, MOCK_DETAIL_DATA } from './mock-data.js';
-import { getNextResponseId } from './mock-store.js';
 import { GroupPicker } from './group-picker.js';
 import { IssueListPicker } from './issue-list-picker.js';
 import { ResponseContainer } from './response-container.js';
@@ -95,14 +92,14 @@ export interface DetailViewProps {
     userLastViewedAt?: string | null;
     onBack: (selectedMessage: number) => void;
     onHome: (selectedMessage: number) => void;
-    onSend?: (message: string) => void;
+    onSend: (message: string) => void;
     onQuit: () => void;
     onGroupChange?: (containerId: number) => void;
     onGroupCreate?: (name: string) => void;
     onBlockedByChange?: (blockerInums: number[]) => void;
     onBlocksChange?: (blockedInums: number[]) => void;
     onNavigateIssue?: (inum: number) => void;
-    onThreadStateChange: (info: { inThread: boolean; threadResolved?: boolean }) => void;
+    onThreadStateChange: (info: { inThread: boolean }) => void;
     initialSelectedMessage?: number;
 }
 
@@ -185,7 +182,7 @@ export class DetailView extends React.Component<DetailViewProps> {
         this.selectedMessage = Math.max(0, threadMessages.length - 1);
 
         // Notify App of thread state change
-        this.props.onThreadStateChange({ inThread: true, threadResolved: !!selected.thread_resolved_at });
+        this.props.onThreadStateChange({ inThread: true });
 
         this.forceUpdate();
     }
@@ -208,10 +205,7 @@ export class DetailView extends React.Component<DetailViewProps> {
 
         // Notify App of thread state change
         const stillInThread = this.threadStack.length > 0;
-        const parentResolved = stillInThread
-            ? !!this.threadStack[this.threadStack.length - 1].parent.thread_resolved_at
-            : undefined;
-        this.props.onThreadStateChange({ inThread: stillInThread, threadResolved: parentResolved });
+        this.props.onThreadStateChange({ inThread: stillInThread });
 
         this.forceUpdate();
     }
@@ -225,7 +219,6 @@ export class DetailView extends React.Component<DetailViewProps> {
             parent.thread_resolved_at = parent.thread_resolved_at
                 ? null
                 : new Date().toISOString();
-            this.props.onThreadStateChange({ inThread: true, threadResolved: !!parent.thread_resolved_at });
             this.forceUpdate();
             return;
         }
@@ -353,79 +346,6 @@ export class DetailView extends React.Component<DetailViewProps> {
         }
     };
 
-    // ---- Response submission ----
-
-    submitResponse(body: string) {
-        const store = getMockStore();
-        const id = getNextResponseId(store);
-        const now = new Date().toISOString();
-
-        const newResponse: Response = {
-            id,
-            content: {
-                author: AuthorType.User,
-                type: ResponseType.None,
-                body,
-                timestamp: now,
-                seen: now,
-            },
-            responding_to: null,
-            response: null,
-            replying_to: null,
-            reply: null,
-            is_continuation: false,
-            thread_resolved_at: null,
-        };
-
-        const isInThread = this.threadStack.length > 0;
-
-        if (isInThread) {
-            const threadParent = this.threadStack[this.threadStack.length - 1].parent;
-
-            // Auto-unresolve thread on new reply
-            threadParent.thread_resolved_at = null;
-
-            let last = threadParent.reply;
-            if (!last) {
-                // First reply in this thread
-                threadParent.reply = newResponse;
-                newResponse.replying_to = threadParent;
-            } else {
-                // Walk to end of reply chain
-                while (last.response) {
-                    last = last.response;
-                }
-                last.response = newResponse;
-                newResponse.responding_to = last;
-                // All reply chain nodes reference the thread parent
-                newResponse.replying_to = threadParent;
-            }
-        } else {
-            if (!this.props.rootResponse) {
-                // Empty issue: set as root
-                const detail = MOCK_DETAIL_DATA[this.props.inum];
-                if (detail) {
-                    detail.rootResponse = newResponse;
-                }
-            } else {
-                // Walk to end of main chain
-                let last: Response = this.props.rootResponse;
-                while (last.response) {
-                    last = last.response;
-                }
-                last.response = newResponse;
-                newResponse.responding_to = last;
-            }
-        }
-
-        saveMockStore();
-
-        // Move cursor to the newly added message
-        const messages = this.currentMessages();
-        this.selectedMessage = messages.length - 1;
-        this.forceUpdate();
-    }
-
     // ---- Input handling ----
 
     handleInputChange = (value: string) => {
@@ -439,7 +359,7 @@ export class DetailView extends React.Component<DetailViewProps> {
             return;
         }
         if (value.trim()) {
-            this.submitResponse(value.trim());
+            this.props.onSend(value.trim());
         }
         this.inputValue = '';
         this.forceUpdate();
@@ -552,6 +472,7 @@ export class DetailView extends React.Component<DetailViewProps> {
                 {/* Header area: thread parent or issue metadata */}
                 {isInThread ? (
                     <>
+                        <Text color="gray">{(() => { const label = '[ Thread ]'; const dashes = Math.max(0, columns - label.length); const left = Math.floor(dashes / 2); const right = dashes - left; return '─'.repeat(left) + label + '─'.repeat(right); })()}</Text>
                         <Box flexDirection="column" height={ResponseContainer.computeLineCount(threadParent!.content.body, columns) - 1} overflow="hidden">
                             <ResponseContainer
                                 response={threadParent!}
@@ -559,10 +480,10 @@ export class DetailView extends React.Component<DetailViewProps> {
                                 selected={false}
                                 hasNewReplies={false}
                                 threadResolved={!!threadParent!.thread_resolved_at}
+                                isThreadParent={true}
                             />
                         </Box>
-                        <Text color={threadParent!.thread_resolved_at ? undefined : 'red'} dimColor>{threadSeparator(columns, !!threadParent!.thread_resolved_at)}</Text>
-                        <Text>{' '}</Text>
+                        <Text color={threadParent!.thread_resolved_at ? undefined : 'red'}>{threadSeparator(columns, !!threadParent!.thread_resolved_at)}</Text>
                     </>
                 ) : (
                     <IssueHeader

@@ -30,11 +30,11 @@ Make a currently missing view load by default. Interact with it, identify missin
   - [x] broken feature: adding a response in a thread doesn't create a new response in the thread view, and doesn't update the mock data json.
   - [x] broken feature: adding a response in an issue doesn't create a new response in the issue view, and doesn't update the mock data json.
   - [x] UX change: Thread resolution hotkey functionality: hot key toggles thread resolution state (resolved/unresolved).  Footer text updates accordingly.
-  - [O:E3] UX change: Response Type tag text should not be bold. 
-  - [O:E3] UX Change: 'view replies (# √)' should not be bold. 
-  - [O:E3] UX Change: Resolved thread parent messages shouldn't be dimmed when unselected.
-  - [O:E3] UX change: --- [ Replies ] --- is too dark. 
-  - [O:E3] UX change: Thread View: Thread Parent Response color should be different from thread replies color.  Need color scheme for Agent colors (as response, as thread parent) and User colors (as response, as thread parent)
+  - [x] UX change: Response Type tag text should not be bold.
+  - [x] UX Change: 'view replies (# √)' should not be bold.
+  - [x] UX Change: Resolved thread parent messages shouldn't be dimmed when unselected.
+  - [x] UX change: --- [ Replies ] --- is too dark.
+  - [x] UX change: Thread View: Thread Parent Response color should be different from thread replies color.  Need color scheme for Agent colors (as response, as thread parent) and User colors (as response, as thread parent)
   - [ ] UX Change: 'Blocked By' picker should visually indicate if an issue has new replies.
   - [ ] broken feature: Footer doesn't attach to the bottom of the view, there's a gap. 
   - [ ] broken feature: vertical resizing (getting bigger) doesn't update the number of displayed responses when the view allows for showing more responses. 
