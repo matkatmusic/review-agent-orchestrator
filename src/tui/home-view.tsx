@@ -35,7 +35,7 @@ function getNextStatus(currentStatus: IssueStatus, direction: 1 | -1): IssueStat
     return newIndex % count;
 }
 
-export interface DashboardProps {
+export interface HomeViewProps {
     issues: Issue[];
     unreadInums: Set<number>;
     maxAgents: number;
@@ -50,17 +50,17 @@ export interface DashboardProps {
 }
 
 // Functional bridge — registers useInput and forwards keypresses to the class component.
-function DashboardInputBridge({ onKey }: { onKey: (input: string, key: Key) => void }) {
+function HomeViewInputBridge({ onKey }: { onKey: (input: string, key: Key) => void }) {
     useInput(onKey);
     return null;
 }
 
-export class Dashboard extends React.Component<DashboardProps> {
+export class HomeView extends React.Component<HomeViewProps> {
     useStatusFilter: boolean;
     statusFilter: IssueStatus;
     cursor: number;
 
-    constructor(props: DashboardProps) {
+    constructor(props: HomeViewProps) {
         super(props);
         this.useStatusFilter = false;
         this.statusFilter = IssueStatus.Active;
@@ -157,7 +157,7 @@ export class Dashboard extends React.Component<DashboardProps> {
 
         return (
             <Box flexDirection="column">
-                <DashboardInputBridge onKey={this.handleKey} />
+                <HomeViewInputBridge onKey={this.handleKey} />
                 {/* Status tabs */}
                 <Box gap={2} marginBottom={1}>
                     <Text key="All" bold={!this.useStatusFilter} inverse={!this.useStatusFilter}>

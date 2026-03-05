@@ -5,7 +5,7 @@ import { Header, HEADER_LINES } from './header.js';
 import { Footer } from './footer.js';
 import { NewIssue } from './newissue.js';
 import type { NewIssueData } from './newissue.js';
-import { Dashboard } from './dashboard.js';
+import { HomeView } from './home-view.js';
 import { MOCK_ISSUES, MOCK_UNREAD_INUMS, MOCK_MAX_AGENTS, MOCK_DETAIL_DATA, MOCK_CONTAINERS } from './mock-data.js';
 import { DetailView } from './detail.js';
 import { AgentStatus } from './agent-status.js';
@@ -115,7 +115,7 @@ class App extends React.Component<AppProps> {
         switch (this.currentView.type) {
             case ViewType.Home:
                 content = (
-                    <Dashboard
+                    <HomeView
                         issues={MOCK_ISSUES}
                         unreadInums={MOCK_UNREAD_INUMS}
                         maxAgents={MOCK_MAX_AGENTS}

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import React from 'react';
 import { render } from 'ink-testing-library';
-import { Dashboard } from './dashboard.js';
+import { HomeView } from './home-view.js';
 import type { Issue } from '../types.js';
 import { IssueStatus } from "../types.js";
 
@@ -44,29 +44,29 @@ const defaultProps = {
     onResolve: vi.fn(),
 };
 
-describe('Dashboard', () => {
+describe('HomeView', () => {
     // ---- Rendering ----
 
     it('renders without crash', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame } = render(<HomeView {...defaultProps} />);
         expect(lastFrame()).toBeDefined();
     });
 
     it('renders issue titles in the list', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame } = render(<HomeView {...defaultProps} />);
         const frame = lastFrame()!;
         expect(frame).toContain('migrate_ServerDerivedFields');
     });
 
     it('renders inum identifiers', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame } = render(<HomeView {...defaultProps} />);
         const frame = lastFrame()!;
         expect(frame).toContain('I-1');
     });
 
     it('renders empty state when no issues', () => {
         const { lastFrame } = render(
-            <Dashboard {...defaultProps} issues={[]} unreadInums={new Set()} />
+            <HomeView {...defaultProps} issues={[]} unreadInums={new Set()} />
         );
         expect(lastFrame()!.toLowerCase()).toMatch(/no issues/);
     });
@@ -74,7 +74,7 @@ describe('Dashboard', () => {
     // ---- Status tabs with counts ----
 
     it('shows all status tabs', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame } = render(<HomeView {...defaultProps} />);
         const frame = lastFrame()!;
         expect(frame).toContain('Active');
         expect(frame).toContain('Awaiting');
@@ -84,36 +84,36 @@ describe('Dashboard', () => {
     });
 
     it('shows correct count for Active tab', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame } = render(<HomeView {...defaultProps} />);
         // 2 active issues
         expect(lastFrame()!).toMatch(/Active\s*\(?2\)?/);
     });
 
     it('shows correct count for Awaiting tab', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame } = render(<HomeView {...defaultProps} />);
         // 3 awaiting issues
         expect(lastFrame()!).toMatch(/Awaiting\s*\(?3\)?/);
     });
 
     it('shows correct count for Blocked tab', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame } = render(<HomeView {...defaultProps} />);
         expect(lastFrame()!).toMatch(/Blocked\s*\(?1\)?/);
     });
 
     it('shows correct count for Deferred tab', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame } = render(<HomeView {...defaultProps} />);
         expect(lastFrame()!).toMatch(/Deferred\s*\(?1\)?/);
     });
 
     it('shows correct count for Resolved tab', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame } = render(<HomeView {...defaultProps} />);
         expect(lastFrame()!).toMatch(/Resolved\s*\(?1\)?/);
     });
 
     // ---- "All" tab shows all issues by default ----
 
     it('default tab shows all issues', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame } = render(<HomeView {...defaultProps} />);
         const frame = lastFrame()!;
         // All 8 issues should be visible
         expect(frame).toContain('migrate_ServerDerivedFields');
@@ -124,7 +124,7 @@ describe('Dashboard', () => {
     // ---- Tab switching filters the issue list ----
 
     it('Tab key switches to next status filter', async () => {
-        const { lastFrame, stdin } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame, stdin } = render(<HomeView {...defaultProps} />);
         await tick();
         // Press Tab to move from All → Active
         stdin.write('\t');
@@ -138,7 +138,7 @@ describe('Dashboard', () => {
     });
 
     it('Shift+Tab switches to previous status filter', async () => {
-        const { lastFrame, stdin } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame, stdin } = render(<HomeView {...defaultProps} />);
         await tick();
         // Move to Active first
         stdin.write('\t');
@@ -154,7 +154,7 @@ describe('Dashboard', () => {
     });
 
     it('tab wraps around from last to first filter', async () => {
-        const { lastFrame, stdin } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame, stdin } = render(<HomeView {...defaultProps} />);
         await tick();
         // Tab through all: All → Active → Awaiting → Blocked → Deferred → Resolved → All
         for (let i = 0; i < 6; i++) {
@@ -168,7 +168,7 @@ describe('Dashboard', () => {
     });
 
     it('filtering to Blocked shows only blocked issues', async () => {
-        const { lastFrame, stdin } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame, stdin } = render(<HomeView {...defaultProps} />);
         await tick();
         // Tab: All → Active → Awaiting → Blocked
         stdin.write('\t');
@@ -185,14 +185,14 @@ describe('Dashboard', () => {
     // ---- Cursor navigation ----
 
     it('cursor starts at first item', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame } = render(<HomeView {...defaultProps} />);
         const frame = lastFrame()!;
         // First item should have cursor indicator
         expect(frame).toContain('\u25B8');
     });
 
     it('down arrow moves cursor down', async () => {
-        const { lastFrame, stdin } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame, stdin } = render(<HomeView {...defaultProps} />);
         await tick();
         stdin.write('\x1b[B'); // Down arrow
         await tick();
@@ -204,7 +204,7 @@ describe('Dashboard', () => {
     });
 
     it('up arrow moves cursor up', async () => {
-        const { lastFrame, stdin } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame, stdin } = render(<HomeView {...defaultProps} />);
         await tick();
         // Move down first
         stdin.write('\x1b[B');
@@ -219,7 +219,7 @@ describe('Dashboard', () => {
     });
 
     it('j key moves cursor down (vim-style)', async () => {
-        const { lastFrame, stdin } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame, stdin } = render(<HomeView {...defaultProps} />);
         await tick();
         stdin.write('j');
         await tick();
@@ -230,7 +230,7 @@ describe('Dashboard', () => {
     });
 
     it('k key moves cursor up (vim-style)', async () => {
-        const { lastFrame, stdin } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame, stdin } = render(<HomeView {...defaultProps} />);
         await tick();
         stdin.write('j');
         await tick();
@@ -243,7 +243,7 @@ describe('Dashboard', () => {
     });
 
     it('cursor does not go above first item', async () => {
-        const { lastFrame, stdin } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame, stdin } = render(<HomeView {...defaultProps} />);
         await tick();
         stdin.write('\x1b[A'); // Up arrow at top
         await tick();
@@ -254,7 +254,7 @@ describe('Dashboard', () => {
     });
 
     it('cursor does not go below last item', async () => {
-        const { lastFrame, stdin } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame, stdin } = render(<HomeView {...defaultProps} />);
         await tick();
         // Move down past end
         for (let i = 0; i < 20; i++) {
@@ -269,7 +269,7 @@ describe('Dashboard', () => {
     });
 
     it('cursor resets to 0 when switching tabs', async () => {
-        const { lastFrame, stdin } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame, stdin } = render(<HomeView {...defaultProps} />);
         await tick();
         // Move cursor down a few
         stdin.write('\x1b[B');
@@ -289,7 +289,7 @@ describe('Dashboard', () => {
     // ---- Unread markers ----
 
     it('shows unread marker for issues with unread responses', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame } = render(<HomeView {...defaultProps} />);
         const frame = lastFrame()!;
         const lines = frame.split('\n');
         // I-3 is in unreadInums
@@ -298,7 +298,7 @@ describe('Dashboard', () => {
     });
 
     it('does not show unread marker for issues without unread responses', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame } = render(<HomeView {...defaultProps} />);
         const frame = lastFrame()!;
         const lines = frame.split('\n');
         // I-1 is NOT in unreadInums
@@ -316,7 +316,7 @@ describe('Dashboard', () => {
     it('Enter calls onSelect with current issue inum', async () => {
         const onSelect = vi.fn();
         const { stdin } = render(
-            <Dashboard {...defaultProps} onSelect={onSelect} />
+            <HomeView {...defaultProps} onSelect={onSelect} />
         );
         await tick();
         stdin.write('\r'); // Enter
@@ -327,7 +327,7 @@ describe('Dashboard', () => {
     it('Enter on second item calls onSelect with that inum', async () => {
         const onSelect = vi.fn();
         const { stdin } = render(
-            <Dashboard {...defaultProps} onSelect={onSelect} />
+            <HomeView {...defaultProps} onSelect={onSelect} />
         );
         await tick();
         stdin.write('\x1b[B'); // Down to I-2
@@ -340,7 +340,7 @@ describe('Dashboard', () => {
     it('n calls onNewIssue', async () => {
         const onNewIssue = vi.fn();
         const { stdin } = render(
-            <Dashboard {...defaultProps} onNewIssue={onNewIssue} />
+            <HomeView {...defaultProps} onNewIssue={onNewIssue} />
         );
         await tick();
         stdin.write('n');
@@ -351,7 +351,7 @@ describe('Dashboard', () => {
     it('a calls onActivate with current issue inum', async () => {
         const onActivate = vi.fn();
         const { stdin } = render(
-            <Dashboard {...defaultProps} onActivate={onActivate} />
+            <HomeView {...defaultProps} onActivate={onActivate} />
         );
         await tick();
         stdin.write('a');
@@ -362,7 +362,7 @@ describe('Dashboard', () => {
     it('d calls onDefer with current issue inum', async () => {
         const onDefer = vi.fn();
         const { stdin } = render(
-            <Dashboard {...defaultProps} onDefer={onDefer} />
+            <HomeView {...defaultProps} onDefer={onDefer} />
         );
         await tick();
         stdin.write('d');
@@ -373,7 +373,7 @@ describe('Dashboard', () => {
     it('r calls onResolve with current issue inum', async () => {
         const onResolve = vi.fn();
         const { stdin } = render(
-            <Dashboard {...defaultProps} onResolve={onResolve} />
+            <HomeView {...defaultProps} onResolve={onResolve} />
         );
         await tick();
         stdin.write('r');
@@ -384,7 +384,7 @@ describe('Dashboard', () => {
     it('Enter does nothing when list is empty', async () => {
         const onSelect = vi.fn();
         const { stdin } = render(
-            <Dashboard {...defaultProps} issues={[]} unreadInums={new Set()} onSelect={onSelect} />
+            <HomeView {...defaultProps} issues={[]} unreadInums={new Set()} onSelect={onSelect} />
         );
         await tick();
         stdin.write('\r');
@@ -397,7 +397,7 @@ describe('Dashboard', () => {
     it('shows activate disabled indicator when active count >= maxAgents', () => {
         // 2 active issues, maxAgents set to 2
         const { lastFrame } = render(
-            <Dashboard {...defaultProps} maxAgents={2} />
+            <HomeView {...defaultProps} maxAgents={2} />
         );
         const frame = lastFrame()!;
         // Should indicate activate is disabled/at capacity
@@ -407,7 +407,7 @@ describe('Dashboard', () => {
     it('does not show disabled indicator when active count < maxAgents', () => {
         // 2 active issues, maxAgents set to 6 (plenty of room)
         const { lastFrame } = render(
-            <Dashboard {...defaultProps} maxAgents={6} />
+            <HomeView {...defaultProps} maxAgents={6} />
         );
         const frame = lastFrame()!;
         // "full" should not appear
@@ -417,7 +417,7 @@ describe('Dashboard', () => {
     // ---- Status display on each row ----
 
     it('each row shows the status text', () => {
-        const { lastFrame } = render(<Dashboard {...defaultProps} />);
+        const { lastFrame } = render(<HomeView {...defaultProps} />);
         const frame = lastFrame()!;
         const lines = frame.split('\n');
         const i1Line = lines.find(l => l.includes('I-1'));
