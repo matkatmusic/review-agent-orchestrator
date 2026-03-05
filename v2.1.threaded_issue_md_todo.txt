@@ -1,0 +1,463 @@
+TODO: Threaded issue.md Serialization — Critical Path
+=====================================================
+
+Derived from: threaded_issue_md_debate_synthesis.txt,
+              threaded_issue_md_gap_analysis.txt
+Date: 2026-03-05
+
+
+STATUS LEGEND
+  [ ] not started
+  [-] in progress
+  [x] done
+  [!] blocked
+
+
+========================================================================
+STEP 0: Fix test suite (unblocks confidence for all subsequent work)
+========================================================================
+
+Problem: IssueStatus is a numeric enum (Active=0, Awaiting=1, etc) but
+the SQL schema uses string CHECK constraints ('Active', 'Awaiting').
+Tests that pass numeric enums to DB functions fail. 8 test failures in
+issues.test.ts (7) and containers.test.ts (1).
+
+[ ] 0.1  Decide approach: either change IssueStatus to string enum
+         (export enum IssueStatus { Active = 'Active', ... }) or add a
+         mapping layer in the DB functions. String enum is simpler and
+         avoids a mapping layer.
+
+[ ] 0.2  Update IssueStatus enum in src/types.ts to use string values.
+         Update IssueStatusStringsMap if needed (may become unnecessary).
+
+[ ] 0.3  Verify all tests pass: `npx vitest run`
+
+Files: src/types.ts, src/db/issues.ts, src/db/issues.test.ts,
+       src/db/containers.test.ts
+
+
+========================================================================
+STEP 1: Add thread columns to responses schema
+========================================================================
+
+Current schema (sql/schema.sql lines 24-32):
+  CREATE TABLE responses (
+      id, inum, author, type, body, created_at
+  )
+
+Missing columns needed for threading:
+  responding_to_id  — links to previous message in vertical chain
+  replying_to_id    — links to parent message that started this thread
+  is_continuation   — marks paragraph 2+ of a split message
+
+[ ] 1.1  Add columns to sql/schema.sql:
+           responding_to_id INTEGER REFERENCES responses(id)
+           replying_to_id   INTEGER REFERENCES responses(id)
+           is_continuation  INTEGER NOT NULL DEFAULT 0
+
+         Note: schema uses CREATE TABLE IF NOT EXISTS, so adding
+         columns to the CREATE statement only works for new databases.
+         For existing databases, also add ALTER TABLE statements
+         guarded by a version check (PRAGMA user_version).
+
+[ ] 1.2  Bump PRAGMA user_version from 1 to 2 in schema.sql.
+
+[ ] 1.3  Add migration logic in src/db/database.ts: if user_version < 2,
+         run ALTER TABLE responses ADD COLUMN for each missing column,
+         then set user_version=2. This handles existing DBs.
+
+[ ] 1.4  Update src/db/database.test.ts: test that migration adds
+         columns to an existing v1 database.
+
+[ ] 1.5  Verify ResponseRow in src/types.ts already has the fields
+         (it does: responding_to_id, replying_to_id, is_continuation).
+         No change needed.
+
+[ ] 1.6  Run tests: `npx vitest run`
+
+Files: sql/schema.sql, src/db/database.ts, src/db/database.test.ts
+
+
+========================================================================
+STEP 2: Extend responses.create() with thread parameters
+========================================================================
+
+Current signature (src/db/responses.ts line 4):
+  create(db, inum, author, body, type?) -> number
+
+Needed:
+  create(db, inum, author, body, opts?) -> number
+  where opts = { type?, respondingToId?, replyingToId?, isContinuation? }
+
+[ ] 2.1  Change create() signature to accept an options object:
+           interface CreateResponseOpts {
+               type?: string;
+               respondingToId?: number;
+               replyingToId?: number;
+               isContinuation?: boolean;
+           }
+         Keep backward compatibility: type can still be a positional
+         string arg or part of opts.
+
+[ ] 2.2  Update INSERT statement to include the new columns:
+           INSERT INTO responses
+             (inum, author, type, body, responding_to_id, replying_to_id, is_continuation)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+
+[ ] 2.3  Add FK validation: if respondingToId is provided, verify it
+         exists and belongs to the same inum. Same for replyingToId.
+
+[ ] 2.4  Update listByInum() to return the new columns (already does
+         via SELECT *, but verify ResponseRow mapping works).
+
+[ ] 2.5  Write tests in src/db/responses.test.ts:
+         - create() with respondingToId links correctly
+         - create() with replyingToId links correctly
+         - create() with isContinuation=true stores 1
+         - create() rejects respondingToId that doesn't exist
+         - create() rejects respondingToId from a different inum
+         - listByInum() returns the new fields
+
+[ ] 2.6  Run tests: `npx vitest run`
+
+Files: src/db/responses.ts, src/db/responses.test.ts
+
+
+========================================================================
+STEP 3: Build ResponseRow[] -> Response tree hydrator
+========================================================================
+
+The TUI already has thread-builders.ts that links in-memory Message
+objects into a Response linked list. We need a similar function that
+takes flat ResponseRow[] from the DB and produces a Response tree.
+
+[ ] 3.1  Create src/db/response-tree.ts with:
+
+         hydrateResponseTree(rows: ResponseRow[]): Response | null
+
+         Algorithm:
+         a) Build a Map<id, Response> from all rows (create Response
+            nodes with null pointers).
+         b) For each row with responding_to_id, set:
+            node.responding_to = map.get(responding_to_id)
+            parent.response = node
+         c) For each row with replying_to_id, set:
+            node.replying_to = map.get(replying_to_id)
+            parent.reply = node (if parent.reply is null)
+            OR append to end of reply's .response chain
+         d) For continuations (is_continuation=1), set the flag.
+         e) Find the root: the node with responding_to_id=null and
+            replying_to_id=null. Return it.
+
+         Handle edge cases:
+         - Orphaned nodes (parent ID not in the set) -> log warning
+         - Cycles (visited set guard)
+         - Empty input -> return null
+
+[ ] 3.2  Create src/db/response-tree.test.ts with tests:
+         - Empty rows -> null
+         - Single row -> single Response node
+         - Linear chain (3 messages) -> linked via .response
+         - Thread (main chain + reply branch) -> .reply links correct
+         - Nested thread (reply to a reply) -> nested .reply
+         - Continuations flagged correctly
+         - Mixed: main chain + multiple threads + nesting
+         - Orphan handling (missing parent ID)
+
+[ ] 3.3  Add a convenience function:
+         getResponseTree(db: DB, inum: number): Response | null
+         that calls listByInum() then hydrateResponseTree().
+
+[ ] 3.4  Run tests: `npx vitest run`
+
+Files: src/db/response-tree.ts (new), src/db/response-tree.test.ts (new)
+
+
+========================================================================
+STEP 4: Build the issue.md serializer
+========================================================================
+
+This is the core deliverable. Creates the plain-text issue.md content
+from a Response tree, following the debate-consensus format.
+
+[ ] 4.1  Create src/serializer/issue-md.ts with:
+
+         serializeIssueMd(opts: SerializeOpts): string
+
+         interface SerializeOpts {
+             inum: number;
+             title: string;
+             status: string;
+             revision: number;
+             agentLastAckRevision: number | null;
+             blockedBy: number[];
+             blocks: number[];
+             group: string;
+             rootResponse: Response | null;
+             maxMainChainMessages?: number;   // default 30
+             maxThreadMessages?: number;      // default 10
+         }
+
+[ ] 4.2  Implement header section:
+           # I-{inum}: {title}
+           Revision: {revision}
+           Status: {status}
+           Blocked by: {list or (none)}
+           Blocks: {list or (none)}
+
+[ ] 4.3  Implement continuation merging:
+         Walk the response tree. When a node has is_continuation=true,
+         merge its body into the preceding non-continuation node's
+         body (double newline separator). Use the root node's ID,
+         author, type, timestamp for the merged message.
+         If a thread branches off a continuation, resolve the thread
+         header to the root (non-continuation) message ID.
+
+[ ] 4.4  Implement "What's New" summary section:
+         Compare each message's timestamp against agentLastAckRevision.
+         (Or use a simpler approach: mark messages added after the last
+         ack as [NEW]. The revision number is on the issue, not per-
+         message. Need to determine: which messages are "new"?)
+
+         Approach: messages are "new" if they were created after the
+         agent's last ack. Use agent_last_read_at timestamp on the
+         issue to compare against each response's created_at.
+
+         Alternative: track which response IDs existed at each revision.
+         Simpler: pass in a cutoff timestamp, mark messages after it.
+
+         Decision needed: clarify "new" definition. For now, accept an
+         optional newSinceCutoff?: string (ISO timestamp). Messages with
+         created_at > cutoff get [NEW] marker.
+
+[ ] 4.5  Implement main conversation section:
+         Walk rootResponse via .response chain (skip continuations,
+         they were merged in 4.3). For each message:
+           [#{id} {Author} - {Type} - {timestamp}]
+           {body}
+         If message has .reply, add thread reference line:
+           Thread: #{id} has N replies (open/resolved) [NEW if applicable]
+
+         Apply maxMainChainMessages windowing: if chain is longer than
+         the limit, include only the last N and prepend:
+           (... M earlier messages omitted. Earliest shown: #K)
+
+[ ] 4.6  Implement thread sections:
+         After the main chain, for each message that has .reply:
+
+         Active threads (fully expanded):
+           === Thread on #{id} ({Author}: "{body preview}") [N messages, open] ===
+           [#{rid} {Author} - {timestamp} -> reply to #{parentId}] [NEW]
+           {body}
+           ...
+           (sub-threads nested with --- Sub-thread on #{id} --- markers)
+
+         Resolved threads (collapsed):
+           === Thread on #{id} (...) [RESOLVED - N messages] ===
+           (Resolved {timestamp}. Last message: {Author}: "{preview}")
+
+         Apply maxThreadMessages windowing within each thread.
+
+[ ] 4.7  Implement scalability windowing:
+         - Main chain: last maxMainChainMessages (default 30)
+         - Per-thread: last maxThreadMessages (default 10)
+         - [NEW] messages always included regardless of window
+         - Thread root (first reply) always included for context
+         - Issue description (first message) always included
+
+[ ] 4.8  Create src/serializer/issue-md.test.ts with tests:
+         - Empty issue (no responses) -> header only
+         - Linear conversation (no threads) -> flat format
+         - Single thread off one message
+         - Multiple threads off different messages
+         - Nested thread (sub-thread)
+         - Continuations merged into parent
+         - Thread branching off a continuation -> references root ID
+         - [NEW] markers applied correctly
+         - "What's New" summary section generated
+         - Resolved thread collapsed to one line
+         - Windowing: main chain truncated at limit
+         - Windowing: thread truncated at limit
+         - Windowing: [NEW] messages override window
+         - Large conversation (50 main + 20 threads) doesn't crash
+
+[ ] 4.9  Run tests: `npx vitest run`
+
+Files: src/serializer/issue-md.ts (new), src/serializer/issue-md.test.ts (new)
+
+
+========================================================================
+STEP 5: Atomic file writer utility
+========================================================================
+
+issue.md must be written atomically: temp file + fsync + rename +
+chmod 444. This protects against orchestrator crash mid-write.
+
+[ ] 5.1  Create src/serializer/atomic-write.ts with:
+
+         async function atomicWriteReadOnly(
+             filePath: string,
+             content: string
+         ): Promise<void>
+
+         Implementation:
+         a) Write content to filePath + '.tmp'
+         b) Open the file handle, call fsync, close
+         c) Rename filePath.tmp -> filePath (atomic on POSIX)
+         d) chmod 444 (read-only)
+
+[ ] 5.2  Create src/serializer/atomic-write.test.ts:
+         - File created with correct content
+         - File is read-only (mode 0o444)
+         - Partial write doesn't corrupt existing file (simulate crash)
+         - Overwrites existing file atomically
+
+[ ] 5.3  Run tests: `npx vitest run`
+
+Files: src/serializer/atomic-write.ts (new),
+       src/serializer/atomic-write.test.ts (new)
+
+
+========================================================================
+STEP 6: Add --reply-to flag to aidi respond (parallel with Step 4)
+========================================================================
+
+The agent needs to reply to specific thread messages, not just the
+main chain. This extends the aidi CLI and the responses.create() call.
+
+[ ] 6.1  Add --reply-to <responseId> option to the respond command
+         in src/cli/aidi.ts:
+           .option('--reply-to <id>', 'Reply to a specific message', parseInt)
+
+[ ] 6.2  In the respond action handler:
+         - If --reply-to is provided, validate:
+           a) The response ID exists
+           b) The response belongs to the given inum
+         - Pass replyingToId to responses.create()
+         - Compute respondingToId: last message in the thread's
+           .response chain (the orchestrator can handle this, or
+           the CLI can query for the last response in that thread)
+
+         Simpler approach for now: just set replyingToId. Let the
+         orchestrator compute respondingToId when it rebuilds the
+         tree. The hydrator (Step 3) handles chain linkage.
+
+[ ] 6.3  Update aidi.test.ts:
+         - respond with --reply-to sets replying_to_id in DB
+         - respond with --reply-to rejects nonexistent response ID
+         - respond with --reply-to rejects response from different inum
+         - respond without --reply-to still works (backward compatible)
+
+[ ] 6.4  Run tests: `npx vitest run`
+
+Files: src/cli/aidi.ts, src/cli/aidi.test.ts
+
+
+========================================================================
+STEP 7: Add sendKeys tmux wrapper (parallel with Step 4)
+========================================================================
+
+The orchestrator needs to signal agents about new issue.md rewrites
+via tmux send-keys. This is a prerequisite for the scan cycle but
+can be built and tested independently.
+
+[ ] 7.1  Add to src/tmux/tmux.ts:
+
+         async function sendKeys(
+             session: string,
+             paneId: string,
+             text: string,
+             exec?: ShellExecutor
+         ): Promise<void>
+
+         Implementation: tmux send-keys -t {session}:{paneId} "{text}" Enter
+
+[ ] 7.2  Add test in src/tmux/tmux.test.ts:
+         - sendKeys calls tmux with correct arguments
+         - sendKeys escapes special characters in text
+
+[ ] 7.3  Run tests: `npx vitest run`
+
+Files: src/tmux/tmux.ts, src/tmux/tmux.test.ts
+
+
+========================================================================
+STEP 8: Integration test — full round trip
+========================================================================
+
+Verify the complete flow: create issue -> add threaded responses ->
+serialize to issue.md -> verify output format.
+
+[ ] 8.1  Create src/serializer/integration.test.ts:
+
+         Test: "full issue with threads serializes correctly"
+         a) Open in-memory DB, migrate, seed
+         b) Create issue via issues.createIssue()
+         c) Add main-chain responses via responses.create()
+         d) Add thread replies via responses.create() with replyingToId
+         e) Add continuations via responses.create() with isContinuation
+         f) Call getResponseTree() to hydrate
+         g) Call serializeIssueMd() to generate output
+         h) Assert output matches expected format:
+            - Header present with correct metadata
+            - Main chain messages in order
+            - Continuations merged
+            - Thread sections present with correct parent references
+            - [NEW] markers on messages after cutoff
+
+[ ] 8.2  Test: "aidi respond --reply-to round trip"
+         a) Create issue and main-chain response
+         b) Call aidi respond with --reply-to programmatically
+         c) Verify DB row has correct replying_to_id
+         d) Hydrate tree and verify .reply link is correct
+
+[ ] 8.3  Run full test suite: `npx vitest run`
+
+Files: src/serializer/integration.test.ts (new)
+
+
+========================================================================
+DEPENDENCY GRAPH
+========================================================================
+
+  Step 0 (enum fix)
+    |
+    v
+  Step 1 (schema columns)
+    |
+    v
+  Step 2 (responses.create() params)
+    |
+    +--------+--------+
+    |        |        |
+    v        v        v
+  Step 3   Step 6   Step 7
+  (hydrator) (--reply-to) (sendKeys)
+    |        |
+    v        |
+  Step 4 <---+
+  (serializer)
+    |
+    v
+  Step 5 (atomic writer)
+    |
+    v
+  Step 8 (integration tests)
+
+
+Steps 6 and 7 can run in parallel with Steps 3-4.
+Step 5 can be done anytime after Step 4 starts.
+
+
+========================================================================
+NOT IN SCOPE (deferred to later milestones)
+========================================================================
+
+- Orchestrator scan cycle (polls DB, triggers issue.md rewrites)
+- Worktree management (git worktree create/remove)
+- TUI <-> DB wiring (replace mock data with real queries)
+- Agent prompt template (CLAUDE.md in worktrees)
+- Session recovery on restart
+- cancelAndSend pattern (C-c + poll idle + send)
+- Thread resolution status tracking (threads don't have a "resolved"
+  flag in the DB yet — this needs a schema addition when needed)

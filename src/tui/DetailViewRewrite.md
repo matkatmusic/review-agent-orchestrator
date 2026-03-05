@@ -428,3 +428,69 @@ Phase 5 (tests):
   to function component, but this is optional and not part of this plan)
 - threadParentStack hack and render-phase restore logic
 - The 185-line render() method in DetailView
+
+
+## Completion Status (2026-03-05)
+
+Phases A-D from the implementation plan are COMPLETE.
+
+### Done (implementation plan)
+
+- Phase A: DetailView rewrite (thread stack, enterThread, exitThread, currentMessages, handleKey, render)
+- Phase B: IssueHeader cleanup (removed threadParent prop/branch, metadata-only)
+- Phase C: App/Header/Footer cleanup (ViewType.Thread removed, threadInfo wired)
+- Phase D: ResponseChain cleanup (pure functions extracted, dead props removed)
+
+### Done (beyond plan, added during implementation)
+
+- Thread visual separator: [ Replies ] line between thread parent and replies
+- New Replies separator: [ New Replies ] yellow line before first unseen reply
+- Viewport anchoring: prevFirstVisible parameter for stable scrolling
+- Selected message clipping fix: viewport shifts when selected message overflows
+- Ctrl+Shift+Left to exit thread (mirrors Ctrl+Shift+Right to enter)
+- Dashboard renamed to Home (ViewType, header, footer, all tests)
+- Alt+h home hotkey from Detail view (with macOS Option character fallback)
+- Selected message saved/restored per issue (App.savedSelectedMessage map)
+- Screen clear on view transitions (ANSI escape before forceUpdate)
+- Dashboard Enter/a/d/r/n key handling (was completely missing)
+- Mock data updated: A2 thread replies marked as seen, D thread R1 marked as seen
+
+### Remaining TODOs
+
+1. RESOLVE THREAD
+   No concept of thread resolution exists in the codebase. The [r] Resolve shortcut
+   in the Detail footer is disabled and refers to issue-level status, not threads.
+   Implementing thread resolution requires:
+   - New field on Response type (e.g. thread_resolved_at: string | null)
+   - Keybind in Detail view to toggle (probably 'r' when in a thread)
+   - Visual indicator on resolved threads (dimmed, badge, or strikethrough)
+   - Backend persistence support
+
+2. DISABLED DETAIL SHORTCUTS
+   These are listed in the footer but not wired:
+   - [d] Defer — change issue status to Deferred
+   - [r] Resolve — change issue status to Resolved
+   - [b] Block — manage blocking dependencies
+   - [w] Rebase — unclear purpose, needs definition
+   - [s] Show pane — show agent pane/status
+
+3. PHASE E: ResponseContainer self-compute hasNewReplies
+   Listed as "optional, separate" in the debate synthesis. Currently ResponseChain
+   computes hasNewReplies and passes a boolean prop. Phase E would pass
+   userLastViewedAt to ResponseContainer and let it compute internally.
+   Low priority — current approach works fine.
+
+4. STATE MANAGEMENT MIGRATION
+   The debate identified class+forceUpdate as a tech debt. Migration to
+   class+setState (or function+useReducer) is deferred. Current pattern works
+   but forceUpdate bypasses React's optimization path.
+
+5. onSend NOT WIRED TO BACKEND
+   App.tsx has `onSend={(msg) => { /* TODO: wire to backend */ }}`.
+   Messages typed in the input box are discarded.
+
+6. APP VIEW CASES INCOMPLETE
+   App.render() switch only handles Home and Detail. AgentStatus, BlockingMap,
+   GroupView, and NewIssue have no render cases. Navigation to those views
+   (via 's', 'b', 'g', 'n' shortcuts from Home) renders nothing.
+   5 app.test.tsx tests fail because of this (pre-existing).

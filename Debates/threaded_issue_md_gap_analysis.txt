@@ -1,0 +1,400 @@
+GAP ANALYSIS: Blockers for Threaded issue.md Serialization Milestone
+====================================================================
+Three-Agent Codebase Audit (DB layer, CLI/agent infra, test/build)
+Date: 2026-03-05
+
+
+EXECUTIVE SUMMARY
+-----------------
+
+The codebase has a solid foundation: types are correct, the DB wrapper
+works, the TUI renders threaded conversations from mock data, and the
+CLI can read/write to a real database. However, there is a significant
+gap between the TUI (which has rich threaded data) and the DB layer
+(which stores flat responses with no thread linkage). The issue.md
+serializer — the core deliverable — does not exist yet and is blocked
+by several prerequisite gaps.
+
+
+========================================================================
+LAYER 1: DATABASE SCHEMA (blocks everything)
+========================================================================
+
+STATUS: PARTIALLY COMPLETE — 3 missing columns block all thread work
+
+The schema (sql/schema.sql) defines the responses table WITHOUT the
+three columns needed for threading:
+
+  CURRENT:
+    CREATE TABLE responses (
+        id, inum, author, type, body, created_at
+    )
+
+  NEEDED:
+    responding_to_id  INTEGER REFERENCES responses(id)  -- vertical chain
+    replying_to_id    INTEGER REFERENCES responses(id)  -- thread branching
+    is_continuation   INTEGER NOT NULL DEFAULT 0         -- split messages
+
+The types.ts ResponseRow interface ALREADY defines these fields
+(responding_to_id, replying_to_id, is_continuation), but the actual
+SQL schema doesn't create them. This is the foundational mismatch.
+
+WHAT WORKS:
+  - issues table has issue_revision, agent_last_read_at,
+    user_last_viewed_at — all correct for new-message detection
+  - dependencies, containers, agent_sessions tables — complete
+  - metadata table with lastIssueCreated and inboxContainerId — correct
+  - WAL mode, foreign keys, busy_timeout — all configured
+
+BLOCKER: Add 3 columns to schema.sql responses table
+
+
+========================================================================
+LAYER 2: RESPONSE CRUD (blocks serializer + aidi --reply-to)
+========================================================================
+
+STATUS: FLAT ONLY — no thread-aware operations
+
+src/db/responses.ts has 5 functions, none of which use thread columns:
+
+  EXISTS:
+    create(db, inum, author, body, type?)    -- no thread params
+    listByInum(db, inum)                     -- flat list by timestamp
+    getLatestByInum(db, inum)                -- single latest row
+    hasUnread(db, inum)                      -- boolean unread check
+    getUnreadInums(db)                       -- bulk unread set
+
+  MISSING:
+    create() with respondingToId, replyingToId, isContinuation params
+    getResponseTree(db, inum) -- fetch all rows and hydrate into
+      linked-list Response objects (using thread-builders.ts logic)
+    getNewResponsesSince(db, inum, revision) -- for [NEW] markers
+
+The hydration step (ResponseRow[] -> Response tree) is critical. The
+thread-builders.ts in src/tui/ already has the in-memory linking logic
+(buildResponseChain, buildReplyChain) but works from mock Message
+objects, not from ResponseRow[] from the DB. A new function is needed
+to bridge DB rows to the linked-list structure.
+
+BLOCKERS:
+  1. Extend create() signature to accept thread columns
+  2. Build ResponseRow[] -> Response hydrator
+  3. Add new-since-revision query for [NEW] markers
+
+
+========================================================================
+LAYER 3: AIDI CLI (blocks agent thread participation)
+========================================================================
+
+STATUS: 6 COMMANDS EXIST — missing --reply-to flag
+
+src/cli/aidi.ts implements:
+  respond <inum> <body> [--type <type>]  -- main chain only
+  read <inum> [--latest]
+  block <inum> --by <blocker_inum>
+  create "<title>" "<description>"
+  status <inum>
+  ack <inum> <revision>
+
+The respond command calls responses.create() which doesn't accept
+thread-linking params. Even if the schema adds the columns, the CLI
+has no way to pass --reply-to <response_id>.
+
+BLOCKERS:
+  1. Add --reply-to <response_id> flag to respond command
+  2. Update respond to pass replyingToId to create()
+  3. Validate that response_id exists and belongs to the given inum
+
+
+========================================================================
+LAYER 4: ISSUE.MD SERIALIZER (the core deliverable — does not exist)
+========================================================================
+
+STATUS: COMPLETELY MISSING
+
+No file anywhere in the codebase generates issue.md. Searched for:
+  - *serializ*.ts — nothing
+  - *issue.md* writers — nothing
+  - *render* or *export* to markdown — nothing
+
+Database.exportDump() exports SQL, not markdown.
+
+The serializer needs to:
+  1. Accept an inum (and optionally an agent_last_read_at revision)
+  2. Query all responses for that issue
+  3. Hydrate into a Response tree (linked list)
+  4. Merge continuations into parent messages
+  5. Separate main chain from threads
+  6. Generate the format agreed in the debate synthesis:
+     - Structured header (inum, status, revision, deps)
+     - "What's New" summary section
+     - Main conversation section with [NEW] markers
+     - Thread sections with parent references
+     - Resolved thread collapse
+  7. Write to a file atomically (temp + fsync + rename + chmod 444)
+
+BLOCKERS:
+  1. Layer 2 (response CRUD) must be complete first
+  2. Layer 1 (schema) must be complete first
+  3. Need atomic file write utility
+  4. Need continuation merge logic
+
+
+========================================================================
+LAYER 5: TMUX AGENT INTEGRATION (blocks end-to-end testing)
+========================================================================
+
+STATUS: SESSION SETUP WORKS — no pane interaction
+
+src/tmux/ has:
+  EXISTS:
+    tmux.ts — createSession, splitWindow, listPanes, killSession,
+              hasSession, isInsideTmux, isTmuxAvailable
+    bootstrap.ts — ensureTmuxSession (creates 2-pane layout)
+    terminal.ts — openTerminalWindow (macOS osascript)
+    exec.ts — ShellExecutor, defaultExec, esc()
+
+  MISSING:
+    sendKeys(session, paneId, text) — send text/commands to a pane
+    cancelAndSend(session, paneId, text) — C-c + poll idle + send
+    getPaneOutput(session, paneId) — read pane content (for polling)
+    isPaneIdle(session, paneId) — check if agent is idle
+    showPane(session, paneId) — reveal hidden pane
+    hidePane(session, paneId) — hide pane
+
+sendKeys is the fundamental missing primitive. Without it, the
+orchestrator cannot:
+  - Signal agents about new issue.md rewrites
+  - Tell agents to commit their work on teardown
+  - Invoke the agent process in the first place
+
+BLOCKERS:
+  1. Implement sendKeys wrapper
+  2. Implement cancelAndSend pattern (interrupt + poll + send)
+
+
+========================================================================
+LAYER 6: ORCHESTRATOR / SCAN CYCLE (blocks full integration)
+========================================================================
+
+STATUS: COMPLETELY MISSING
+
+No scan cycle, no polling loop, no agent lifecycle management.
+
+The orchestrator would need to:
+  1. Poll DB on 1-2s interval for state changes
+  2. Detect new user responses -> rewrite issue.md -> signal agent
+  3. Detect status transitions -> teardown/spawn agents
+  4. Enforce blocked invariants (auto-unblock, auto-re-block)
+  5. Track active agent count vs maxAgents
+  6. Handle session recovery on restart
+
+This is a large subsystem and is NOT needed for the issue.md
+serializer milestone specifically. The serializer can be built and
+tested independently.
+
+NOT A BLOCKER for the serializer milestone, but blocks end-to-end
+agent workflow.
+
+
+========================================================================
+LAYER 7: WORKTREE MANAGEMENT (blocks agent isolation)
+========================================================================
+
+STATUS: COMPLETELY MISSING
+
+No git worktree create/remove code exists. The agent-sessions table
+tracks pane_id and head_commit but no worktree path.
+
+For the serializer milestone: NOT A BLOCKER. The serializer writes to
+a file path — it doesn't matter whether that path is in a worktree or
+the main repo. Worktree management is a Phase 3-4 concern.
+
+
+========================================================================
+LAYER 8: TUI <-> DB WIRING (blocks real-data testing of TUI)
+========================================================================
+
+STATUS: COMPLETELY DISCONNECTED
+
+src/tui/app.tsx uses MOCK_ISSUES, MOCK_DETAIL_DATA, MOCK_CONTAINERS
+exclusively. No database queries. The onSend callback is a TODO stub.
+
+For the serializer milestone: NOT A DIRECT BLOCKER. The serializer
+operates on DB data, not TUI state. But testing the full user flow
+(user sends message in TUI -> orchestrator rewrites issue.md -> agent
+reads it) requires this wiring.
+
+
+========================================================================
+LAYER 9: TEST INFRASTRUCTURE (partially broken)
+========================================================================
+
+STATUS: 8 TEST FAILURES — fixable enum mismatch
+
+The DB layer uses string enums in SQL ("Active", "Awaiting") but
+TypeScript uses numeric enums (IssueStatus.Active = 0). Tests that
+pass numeric enums to DB functions fail with CHECK constraint errors.
+
+  Failing tests:
+    - issues.test.ts: 7 failures (getByInum, list, updateStatus)
+    - containers.test.ts: 1 failure (getIssuesInContainer sorting)
+
+  Root cause: IssueStatus enum values are numbers (0, 1, 2...) but
+  the SQL CHECK constraint expects strings ('Active', 'Awaiting'...).
+  Tests pass the enum directly; DB rejects it.
+
+BLOCKER for testing confidence. Should be fixed before building the
+serializer to ensure the test suite is green.
+
+
+========================================================================
+LAYER 10: AGENT PROMPT TEMPLATE (blocks agent behavior)
+========================================================================
+
+STATUS: MISSING
+
+config.json references "agentPrompt": "prompts/review-agent.md" but
+the file does not exist. The agent needs documented instructions on:
+  - issue.md format and how to read it
+  - aidi commands and --reply-to usage
+  - Commit behavior and teardown protocol
+  - "Never modify issue.md directly"
+
+NOT A BLOCKER for the serializer itself, but blocks agent testing.
+
+
+========================================================================
+DEPENDENCY GRAPH FOR SERIALIZER MILESTONE
+========================================================================
+
+The serializer milestone has this critical path:
+
+  [Fix test enum mismatch]  (Layer 9)
+          |
+          v
+  [Add 3 columns to schema]  (Layer 1)
+          |
+          v
+  [Extend responses.create() with thread params]  (Layer 2)
+          |
+          v
+  [Build ResponseRow[] -> Response hydrator]  (Layer 2)
+          |
+          v
+  [Build issue.md serializer]  (Layer 4)  <-- CORE DELIVERABLE
+          |
+          +---> [Add --reply-to to aidi]  (Layer 3, parallel)
+          |
+          v
+  [Atomic file write utility]  (Layer 4)
+          |
+          v
+  [Integration tests with real DB]
+
+
+Items that can proceed IN PARALLEL with the critical path:
+
+  - sendKeys tmux wrapper  (Layer 5)
+  - TUI <-> DB wiring  (Layer 8)
+  - Agent prompt template  (Layer 10)
+
+Items that are NOT NEEDED for this milestone:
+
+  - Orchestrator scan cycle  (Layer 6)
+  - Worktree management  (Layer 7)
+
+
+========================================================================
+BLOCKERS SUMMARY — RANKED BY PRIORITY
+========================================================================
+
+MUST FIX (blocks serializer development):
+
+  B1. Schema: Add responding_to_id, replying_to_id, is_continuation
+      to responses table in sql/schema.sql
+      Effort: Small (3 ALTER TABLE statements or schema rewrite)
+      Blocks: Everything in Layer 2-4
+
+  B2. responses.create(): Accept thread-linking parameters
+      Effort: Small (add 3 optional params + update INSERT)
+      Blocks: Layer 3 (aidi --reply-to), Layer 4 (serializer tests)
+
+  B3. ResponseRow -> Response hydrator: Convert flat DB rows to
+      linked-list tree structure
+      Effort: Medium (adapt thread-builders.ts logic for DB rows)
+      Blocks: Layer 4 (serializer)
+
+  B4. Enum mismatch: Fix IssueStatus numeric enum vs SQL string
+      Effort: Small (either change enum to string or add mapping)
+      Blocks: Layer 9 (test suite reliability)
+
+MUST BUILD (the deliverable):
+
+  B5. issue.md serializer: The core feature
+      Effort: Large (format generation + continuation merging +
+      thread grouping + [NEW] markers + scalability windowing)
+
+  B6. Atomic file writer: temp + fsync + rename + chmod 444
+      Effort: Small (utility function, ~20 lines)
+
+SHOULD BUILD (enables agent participation):
+
+  B7. aidi --reply-to flag: Extend respond command
+      Effort: Small (add Commander option + pass to create())
+
+  B8. sendKeys tmux wrapper: Enable agent signaling
+      Effort: Small (one function wrapping tmux send-keys)
+
+DEFER (not needed for this milestone):
+
+  B9. Orchestrator scan cycle
+  B10. Worktree management
+  B11. TUI <-> DB wiring
+  B12. Agent prompt template (CLAUDE.md)
+  B13. Session recovery
+
+
+========================================================================
+RECOMMENDED IMPLEMENTATION ORDER
+========================================================================
+
+Step 1: Fix enum mismatch (B4)
+  - Get test suite green
+  - ~30 min effort
+
+Step 2: Update schema (B1)
+  - Add 3 columns to responses table
+  - Update schema.sql
+  - ~15 min effort
+
+Step 3: Extend responses.create() (B2)
+  - Add optional thread params
+  - Write tests for thread-linked responses
+  - ~1 hour effort
+
+Step 4: Build ResponseRow -> Response hydrator (B3)
+  - Adapt thread-builders.ts logic for DB rows
+  - Write comprehensive tests with thread fixtures
+  - ~2-3 hours effort
+
+Step 5: Build issue.md serializer (B5)
+  - Implement the debate-consensus format
+  - Continuation merging
+  - Thread section generation
+  - [NEW] markers from revision comparison
+  - Resolved thread collapsing
+  - Scalability windowing
+  - ~4-6 hours effort
+
+Step 6: Atomic file writer (B6)
+  - Write-to-temp + fsync + rename + chmod 444
+  - ~30 min effort
+
+Step 7 (parallel): aidi --reply-to (B7)
+  - Add flag to respond command
+  - ~30 min effort
+
+Step 8 (parallel): sendKeys wrapper (B8)
+  - tmux send-keys function
+  - ~30 min effort
