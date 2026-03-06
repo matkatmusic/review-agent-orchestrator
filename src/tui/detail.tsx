@@ -3,7 +3,6 @@ import { Box, Text, useInput, type Key } from 'ink';
 import type { Issue, Response, Container } from '../types.js';
 import { HEADER_LINES } from './header.js';
 import { GroupPicker } from './group-picker.js';
-import { IssueListPicker } from './issue-list-picker.js';
 import { ResponseContainer } from './response-container.js';
 import { IssueHeader, ISSUE_HEADER_LINE_COUNT } from './issue-header.js';
 import { InputBox, INPUT_AREA_LINES } from './input-box.js';
@@ -53,8 +52,6 @@ const FIELD_BLOCKS = 2;
 enum OverlayType {
     None,
     Group,
-    BlockedBy,
-    Blocks,
 }
 
 // ---- Thread separator ----
@@ -99,6 +96,7 @@ export interface DetailViewProps {
     onGroupCreate?: (name: string) => void;
     onBlockedByChange?: (blockerInums: number[]) => void;
     onBlocksChange?: (blockedInums: number[]) => void;
+    onOpenPicker?: (mode: 'blockedBy' | 'blocks') => void;
     onNavigateIssue?: (inum: number) => void;
     onThreadStateChange: (info: { inThread: boolean }) => void;
     initialSelectedMessage?: number;
@@ -256,11 +254,9 @@ export class DetailView extends React.Component<DetailViewProps> {
             this.overlay = OverlayType.Group;
             this.forceUpdate();
         } else if (this.focusedField === FIELD_BLOCKED_BY && this.props.allIssues) {
-            this.overlay = OverlayType.BlockedBy;
-            this.forceUpdate();
+            this.props.onOpenPicker?.('blockedBy');
         } else if (this.focusedField === FIELD_BLOCKS && this.props.allIssues) {
-            this.overlay = OverlayType.Blocks;
-            this.forceUpdate();
+            this.props.onOpenPicker?.('blocks');
         }
     }
 
@@ -395,57 +391,7 @@ export class DetailView extends React.Component<DetailViewProps> {
             );
         }
 
-        // ---- Overlay: Blocked By editor ----
-        if (this.overlay === OverlayType.BlockedBy && this.props.allIssues) {
-            const otherIssues = this.props.allIssues.filter(i => i.inum !== inum);
-            return (
-                <Box flexDirection="column" height={contentHeight} justifyContent="center" alignItems="center">
-                    <DetailInputBridge onKey={this.handleKey} />
-                    <IssueListPicker
-                        title="Blocked by"
-                        issues={otherIssues}
-                        selected={this.blockedBySet}
-                        unreadInums={this.props.unreadInums}
-                        onToggle={(toggledInum) => {
-                            if (this.blockedBySet.has(toggledInum)) {
-                                this.blockedBySet.delete(toggledInum);
-                            } else {
-                                this.blockedBySet.add(toggledInum);
-                            }
-                            this.props.onBlockedByChange?.([...this.blockedBySet]);
-                            this.forceUpdate();
-                        }}
-                        onClose={this.closeOverlay}
-                    />
-                </Box>
-            );
-        }
-
-        // ---- Overlay: Blocks editor ----
-        if (this.overlay === OverlayType.Blocks && this.props.allIssues) {
-            const otherIssues = this.props.allIssues.filter(i => i.inum !== inum);
-            return (
-                <Box flexDirection="column" height={contentHeight} justifyContent="center" alignItems="center">
-                    <DetailInputBridge onKey={this.handleKey} />
-                    <IssueListPicker
-                        title="Blocks"
-                        issues={otherIssues}
-                        selected={this.blocksSet}
-                        unreadInums={this.props.unreadInums}
-                        onToggle={(toggledInum) => {
-                            if (this.blocksSet.has(toggledInum)) {
-                                this.blocksSet.delete(toggledInum);
-                            } else {
-                                this.blocksSet.add(toggledInum);
-                            }
-                            this.props.onBlocksChange?.([...this.blocksSet]);
-                            this.forceUpdate();
-                        }}
-                        onClose={this.closeOverlay}
-                    />
-                </Box>
-            );
-        }
+        // BlockedBy and Blocks pickers are now separate views (ViewType.IssuePicker)
 
         // ---- Normal view ----
 

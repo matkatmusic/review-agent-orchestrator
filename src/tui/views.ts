@@ -5,6 +5,7 @@ export enum ViewType {
     AgentStatus,
     BlockingMap,
     GroupView,
+    IssuePicker,
 }
 
 export const ViewTypeStringsMap = new Map<ViewType, string>([
@@ -14,6 +15,7 @@ export const ViewTypeStringsMap = new Map<ViewType, string>([
     [ViewType.AgentStatus, "Agent Status"],
     [ViewType.BlockingMap, "Blocking Map"],
     [ViewType.GroupView, "Group View"],
+    [ViewType.IssuePicker, "Issue Picker"],
 ]);
 
 export type View =
@@ -22,4 +24,5 @@ export type View =
     | { type: ViewType.NewIssue }
     | { type: ViewType.AgentStatus }
     | { type: ViewType.BlockingMap }
-    | { type: ViewType.GroupView };
+    | { type: ViewType.GroupView }
+    | { type: ViewType.IssuePicker; mode: 'blockedBy' | 'blocks'; inum: number };

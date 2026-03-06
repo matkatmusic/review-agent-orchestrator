@@ -40,6 +40,8 @@ function getSubtitle(view: View, threadInfo?: { inThread: boolean }): string {
             return 'Dependency and blocking relationships';
         case ViewType.GroupView:
             return 'Issues grouped by container';
+        case ViewType.IssuePicker:
+            return view.mode === 'blockedBy' ? 'Select blocking issues' : 'Select blocked issues';
         default:
             return assertNever(view);
     }
