@@ -1,0 +1,827 @@
+Debugger listening on ws://127.0.0.1:51339/e4c18190-6089-4d41-bc40-f789d2428604
+For help, see: https://nodejs.org/en/docs/inspector
+Debugger attached.
+Reading prompt from stdin...
+OpenAI Codex v0.101.0 (research preview)
+--------
+workdir: /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator
+model: gpt-5.3-codex
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: high
+reasoning summaries: auto
+session id: 019cc015-5914-75d2-9d57-61f00cc16151
+--------
+user
+Footer Tabbable Rewrite — Implementation Analysis
+===================================================
+
+You are analyzing a TUI application built with Ink (React for terminals).
+Read the source files listed below and produce an implementation plan for three
+interconnected changes. Focus on architecture, edge cases, and Ink-specific
+concerns.
+
+Context: The app renders a Footer bar at the bottom showing keyboard shortcuts.
+The Detail View has a text input (InputBox) and header fields that Tab cycles
+through. Three bugs/features need to be addressed together.
+
+ISSUE 1 (broken): Footer hotkey wrapping
+  File: src/tui/footer.tsx
+  All shortcuts are rendered inside a single <Text wrap="wrap">.
+  Ink wraps at any space, so [^R] can end up on one line and "Resolve" on the
+  next. The key and its label must stay together on the same line.
+
+ISSUE 2 (feature): Make footer items tabbable components
+  Each footer shortcut should become an individual component (Box) that:
+  - Stays together when the footer wraps (fixes Issue 1)
+  - Can be tabbed to (receives focus via Tab key cycling)
+  - Renders with inverse colors when focused/selected
+  Footer currently receives: viewType, inThread. It would need a new prop
+  for the focused item index.
+
+ISSUE 3 (broken): Tab in thread view moves cursor outside text input
+  File: src/tui/detail.tsx lines 326-329
+  Tab always calls cycleField() which sets focusedField to 0/1/2 (header
+  fields: Group, BlockedBy, Blocks). In thread view, the IssueHeader is NOT
+  rendered — only the thread parent is shown. But focusedField still gets set
+  to non-null, causing InputBox to receive focused={false} (line 585:
+  focused={this.focusedField === null}), making the text cursor disappear.
+  Pressing Tab again cycles back to null, restoring cursor.
+
+FILES TO READ:
+  src/tui/footer.tsx        — Footer component (99 lines)
+  src/tui/detail.tsx        — DetailView component (593 lines)
+  src/tui/input-box.tsx     — InputBox with TextInput (34 lines)
+  src/tui/app.tsx           — App wires Footer and DetailView (185 lines)
+
+QUESTIONS TO ADDRESS:
+1. How should the Tab focus ring work? What's the cycling order in issue view
+   vs thread view? How does Shift+Tab reverse it?
+2. How does Footer receive focus state? It's rendered in app.tsx, not detail.tsx.
+   What callback/prop chain communicates the focused footer index?
+3. Should Enter on a focused footer item activate that shortcut? If so, how
+   does the action dispatch work given shortcuts are defined in footer.tsx but
+   actions are handled in detail.tsx?
+4. What happens to FOOTER_LINES (currently 1) if footer wraps to 2 lines?
+   Does conversationHeight in DetailView need adjustment?
+5. How should flexWrap="wrap" interact with marginRight spacing between items?
+6. What Ink-specific pitfalls exist with <Text inverse> inside <Box flexWrap>?
+7. How do existing footer tests need to change?
+
+OUTPUT: A detailed implementation plan covering all file changes, the focus ring
+architecture, and any edge cases or risks.
+
+mcp startup: no servers
+
+thinking
+**Planning read-only analysis**
+codex
+I’ll inspect the four TUI files to map current focus behavior, footer rendering, and how keyboard actions are routed, then I’ll lay out a concrete cross-file implementation plan for all three issues together.
+exec
+/bin/zsh -lc "sed -n '1,220p' src/tui/detail.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '221,460p' src/tui/detail.tsx && sed -n '461,760p' src/tui/detail.tsx && sed -n '1,120p' src/tui/input-box.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "wc -l src/tui/footer.tsx src/tui/detail.tsx src/tui/input-box.tsx src/tui/app.tsx && sed -n '1,180p' src/tui/footer.tsx && sed -n '1,260p' src/tui/app.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 50ms:
+      99 src/tui/footer.tsx
+     593 src/tui/detail.tsx
+      34 src/tui/input-box.tsx
+     185 src/tui/app.tsx
+     911 total
+import React, { memo } from 'react';
+import { Box, Text } from 'ink';
+import { ViewType } from './views.js';
+
+export const FOOTER_LINES = 1;
+
+export interface Shortcut {
+    readonly key: string;
+    readonly label: string;
+    readonly disabled?: boolean;
+}
+
+export interface FooterProps {
+    readonly viewType: ViewType;
+    readonly inThread?: boolean;
+ succeeded in 52ms:
+import React from 'react';
+import { Box, Text, useInput, type Key } from 'ink';
+import type { Issue, Response, Container } from '../types.js';
+import { AuthorType, ResponseType } from '../types.js';
+import { HEADER_LINES } from './header.js';
+import { getMockStore, saveMockStore, MOCK_DETAIL_DATA } from './mock-data.js';
+import { getNextResponseId } from './mock-store.js';
+import { GroupPicker } from './group-picker.js';
+import { IssueListPicker } from './issue-list-picker.js';
+import { ResponseContainer } from './response-container.js';
+import { IssueHeader, ISSUE_HEADER_LINE_COUNT } from './issue-header.js';
+import { InputBox, INPUT_AREA_LINES } from './input-box.js';
+import { ResponseChain, flattenToArray } from './response-chain.js';
+
+// ---- Helper functions ----
+
+/** Mark all replies on a node as seen. */
+export function markRepliesSeen(node: Response): void {
+    const now = new Date().toISOString();
+    let r = node.reply;
+ succeeded in 51ms:
+            const parent = this.threadStack[this.threadStack.length - 1].parent;
+            parent.thread_resolved_at = parent.thread_resolved_at
+                ? null
+                : new Date().toISOString();
+            this.forceUpdate();
+            return;
+        }
+
+        // When on the main chain, resolve/unresolve the selected message's thread
+        const messages = this.currentMessages();
+        const selected = messages[this.selectedMessage];
+        if (!selected || !selected.reply) return;
+
+        selected.thread_resolved_at = selected.thread_resolved_at
+            ? null
+            : new Date().toISOString();
+        this.forceUpdate();
+    }
+
+    // ---- Field cycling & overlays ----
+
+thinking
+**Reviewing existing footer tests**
+codex
+I’ve confirmed the current behavior: `Tab` always cycles header fields and `InputBox` focus depends on `focusedField === null`, so thread mode can definitely lose cursor focus. Next I’m checking existing tests and any shared keyboard/focus logic before drafting the plan.
+exec
+/bin/zsh -lc "rg --files | rg 'footer|detail|input|app|tui'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "rg --files test __tests__ src | rg 'footer|detail|app|input|issue-header|tui'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "rg -n \"Footer|VIEW_SHORTCUTS|THREAD_SHORTCUTS|focusedField|cycleField|tab|Shift\\+Tab|InputBox|FOOTER_LINES|conversationHeight\" src test __tests__" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+src/tui/group-view.test.tsx
+src/tui/agent-status.tsx
+src/tui/mock-data.ts
+src/tui/global-keys.tsx
+src/tui/newissue.test.tsx
+src/tui/detail.tsx
+src/tui/thread-builders.ts
+src/tui/agent-status.test.tsx
+src/tui/header.tsx
+src/tui/home-view.test.tsx
+src/tui/run.tsx
+src/tui/group-picker.tsx
+src/tui/blocking-map.test.tsx
+src/tui/detail_analysis.txt
+src/tui/group-view.tsx
+src/tui/header.test.tsx
+src/tui/footer.test.tsx
+src/tui/input-box.tsx
+src/tui/footer.tsx
+src/tui/issue-header.tsx
+ succeeded in 52ms:
+rg: test: No such file or directory (os error 2)
+rg: __tests__: No such file or directory (os error 2)
+src/tui/group-view.test.tsx
+src/tui/agent-status.tsx
+src/tui/mock-data.ts
+src/tui/global-keys.tsx
+src/tui/newissue.test.tsx
+src/tui/detail.tsx
+src/tui/thread-builders.ts
+src/tui/agent-status.test.tsx
+src/tui/header.tsx
+src/tui/home-view.test.tsx
+src/tui/run.tsx
+src/tui/group-picker.tsx
+src/tui/blocking-map.test.tsx
+src/tui/detail_analysis.txt
+src/tui/group-view.tsx
+src/tui/header.test.tsx
+src/tui/footer.test.tsx
+src/tui/input-box.tsx
+ exited 2 in 51ms:
+rg: test: No such file or directory (os error 2)
+rg: __tests__: No such file or directory (os error 2)
+src/db/responses.test.ts:2:import { createTestDb } from './database.test.js';
+src/db/responses.test.ts:3:import { DB } from './database.js';
+src/db/issues.ts:1:import type { DB } from './database.js';
+src/db/responses.ts:1:import type { DB } from './database.js';
+src/db/dependencies.test.ts:2:import { createTestDb } from './database.test.js';
+src/db/dependencies.test.ts:3:import { DB } from './database.js';
+src/cli/aidi.test.ts:8:import { DB } from '../db/database.js';
+src/db/containers.ts:1:import type { DB } from './database.js';
+src/db/agent-sessions.test.ts:2:import { createTestDb } from './database.test.js';
+src/db/agent-sessions.test.ts:3:import { DB } from './database.js';
+src/db/database.test.ts:2:import { DB } from './database.js';
+src/db/database.test.ts:44:    it('creates database file', () => {
+src/db/database.test.ts:48:    it('migration creates all tables', () => {
+src/db/database.test.ts:49:        const tables = db.all<{ name: string }>(
+src/db/database.test.ts:50:            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+src/db/database.test.ts:52:        const tableNames = tables.map(t => t.name);
+src/db/database.test.ts:53:        expect(tableNames).toContain('metadata');
+src/db/database.test.ts:54:        expect(tableNames).toContain('issues');
+
+thinking
+**Planning test inspection**
+codex
+I found dedicated `footer.test.tsx`, `detail.test.tsx`, and `app.test.tsx` coverage that will need updates. I’m reading those now to derive exact assertion changes and avoid breaking existing key-handling expectations.
+exec
+/bin/zsh -lc "sed -n '1,340p' src/tui/detail.test.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,260p' src/tui/footer.test.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,320p' src/tui/app.test.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+import { describe, it, expect } from 'vitest';
+import React from 'react';
+import { render } from 'ink-testing-library';
+import { Footer, VIEW_SHORTCUTS, FOOTER_LINES } from './footer.js';
+import { ViewType } from './views.js';
+
+describe('Footer — shortcut data', () => {
+    const allViews: ViewType[] = [
+        ViewType.Home, ViewType.Detail, ViewType.NewIssue, ViewType.AgentStatus, ViewType.BlockingMap, ViewType.GroupView,
+    ];
+
+    it('VIEW_SHORTCUTS has an entry for every ViewType', () => {
+        for (const view of allViews) {
+            expect(VIEW_SHORTCUTS[view]).toBeDefined();
+            expect(VIEW_SHORTCUTS[view].length).toBeGreaterThan(0);
+        }
+    });
+
+    it('every shortcut has non-empty key and label', () => {
+        for (const view of allViews) {
+ succeeded in 52ms:
+import { describe, it, expect, vi } from 'vitest';
+import React from 'react';
+import { render } from 'ink-testing-library';
+import { DetailView } from './detail.js';
+import { ResponseContainer } from './response-container.js';
+import type { Issue, Response, Message } from '../types.js';
+import { IssueStatus, ResponseType, AuthorType } from '../types.js';
+import { createMessage, buildResponseChain, buildMixedChain } from './thread-builders.js';
+
+let mockNextId = 100;
+vi.mock('./mock-data.js', () => ({
+    getMockStore: () => ({ nextResponseId: mockNextId }),
+    saveMockStore: vi.fn(),
+    MOCK_DETAIL_DATA: {} as Record<number, unknown>,
+}));
+vi.mock('./mock-store.js', () => ({
+    getNextResponseId: (store: { nextResponseId: number }) => {
+        const id = store.nextResponseId;
+        store.nextResponseId = id + 1;
+        mockNextId = store.nextResponseId;
+ succeeded in 51ms:
+import { describe, it, expect, vi } from 'vitest';
+import React from 'react';
+import { render } from 'ink-testing-library';
+import { App } from './app.js';
+
+const ESC = '\x1b';
+
+// useInput registers via useEffect — need a microtask tick before stdin.write
+const tick = () => new Promise(r => setTimeout(r, 0));
+
+describe('App — view routing', () => {
+    // ---- Rendering ----
+
+    it('renders without crash', () => {
+        const { lastFrame } = render(<App />);
+        expect(lastFrame()).toBeDefined();
+    });
+
+    it('default view is Home', () => {
+        const { lastFrame } = render(<App />);
+
+thinking
+**Analyzing global key handling**
+codex
+I still need the rest of `detail.test.tsx` plus `issue-header.tsx` and `global-keys.tsx` to verify any hidden input routing conflicts. After that I’ll synthesize the focus-ring architecture and test migration plan.
+exec
+/bin/zsh -lc "sed -n '341,760p' src/tui/detail.test.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,220p' src/tui/issue-header.tsx && sed -n '1,260p' src/tui/global-keys.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,260p' src/tui/home-view.tsx && sed -n '1,220p' src/tui/newissue.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+import React from 'react';
+import { Text } from 'ink';
+import type { Issue } from '../types.js';
+import { IssueStatusStringsMap } from '../types.js';
+
+export const ISSUE_HEADER_LINE_COUNT = 5; // title + status + deps + hint + separator
+
+export interface IssueHeaderProps {
+    inum: number;
+    issue: Issue;
+    group: string;
+    blockedByStr: string;
+    blocksStr: string;
+    columns: number;
+    focusedField: number | null;
+}
+
+// Field indices (must match detail.tsx constants)
+const FIELD_GROUP = 0;
+const FIELD_BLOCKED_BY = 1;
+ succeeded in 52ms:
+import React from 'react';
+import { Box, Text, useInput, type Key } from 'ink';
+import type { Issue } from '../types.js';
+import { IssueStatus } from "../types.js"
+import { IssueStatusStringsMap } from '../types.js';
+import { type View, ViewType } from './views.js';
+import { statusToColor } from './status-color.js';
+import { handleGlobalKey } from './global-keys.js';
+
+type StatusCounts = Record<IssueStatus, number>;
+
+function computeCounts(issues: Issue[]): StatusCounts {
+    //declares an instance of StatusCounts, with all counts initialized to 0
+    const counts = {} as StatusCounts;
+    //enums are not iterable in Typescript.
+    //but a map (of <enum, string>) is iterable.
+    // IssueStatusStringsMap is such a map.
+    // this is how we can get each enum value and iterate over it.
+    for (const key of IssueStatusStringsMap.keys()) {
+        counts[key] = 0;
+ succeeded in 52ms:
+
+        expect(ref.current!.threadStack).toHaveLength(1);
+        expect(ref.current!.threadStack[0].parent).toBe(nodes[0]);
+        expect(ref.current!.threadStack[0].savedSelectedIndex).toBe(0);
+        expect(onThreadStateChange).toHaveBeenCalledWith({ inThread: true });
+    });
+
+    it('exitThread pops stack and restores cursor', () => {
+        const { root: chainRoot, nodes } = buildResponseChain(TEST_MESSAGES);
+        const replyNode: Response = {
+            id: 100,
+            content: createMessage(AuthorType.Agent, ResponseType.None, 'Thread reply', '2025-01-15T12:00:00Z'),
+            responding_to: null,
+            response: null,
+            replying_to: nodes[0],
+            reply: null,
+            is_continuation: false,
+            thread_resolved_at: null,
+        };
+        nodes[0].reply = replyNode;
+
+thinking
+**Checking footer lines usage**
+exec
+/bin/zsh -lc 'rg -n "FOOTER_LINES|footer lines|conversationHeight|rows - HEADER_LINES|INPUT_AREA_LINES|IssueHeader" src/tui/*.tsx src/tui/*.ts' in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 51ms:
+src/tui/input-box.tsx:5:export const INPUT_AREA_LINES = 3; // separator + input prompt + (line from Box)
+src/tui/issue-header.tsx:8:export interface IssueHeaderProps {
+src/tui/issue-header.tsx:23:export class IssueHeader extends React.Component<IssueHeaderProps> {
+src/tui/detail.tsx:11:import { IssueHeader, ISSUE_HEADER_LINE_COUNT } from './issue-header.js';
+src/tui/detail.tsx:12:import { InputBox, INPUT_AREA_LINES } from './input-box.js';
+src/tui/detail.tsx:160:    get conversationHeight(): number {
+src/tui/detail.tsx:163:            this.props.rows - HEADER_LINES - this.headerLineCount - INPUT_AREA_LINES,
+src/tui/detail.tsx:449:        const contentHeight = this.props.rows - HEADER_LINES;
+src/tui/detail.tsx:564:                    <IssueHeader
+src/tui/detail.tsx:578:                    height={this.conversationHeight}
+src/tui/footer.tsx:5:export const FOOTER_LINES = 1;
+src/tui/footer.test.tsx:4:import { Footer, VIEW_SHORTCUTS, FOOTER_LINES } from './footer.js';
+src/tui/footer.test.tsx:28:    it('FOOTER_LINES constant is exported', () => {
+src/tui/footer.test.tsx:29:        expect(FOOTER_LINES).toBeDefined();
+
+thinking
+**Analyzing layout height calculations**
+codex
+I verified `FOOTER_LINES` is currently unused by layout math, so changing footer wrapping has potential viewport side effects. I’m reading `header.tsx` and `run.tsx` next to confirm exact row budgeting behavior before proposing the fix.
+exec
+/bin/zsh -lc "sed -n '1,220p' src/tui/run.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,220p' src/tui/response-chain.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,220p' src/tui/header.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 51ms:
+/**
+ * TUI entry point.
+ *
+ * --resetMockData flag must be processed BEFORE mock-data.ts is imported,
+ * so we use dynamic imports for everything that transitively loads mock data.
+ */
+
+import { resetMockData } from './mock-store.js';
+
+if (process.argv.includes('--resetMockData')) {
+    resetMockData();
+    console.log('Mock data reset to defaults.');
+}
+
+// Dynamic imports — these load mock-data.ts which reads from the (now reset) JSON
+const [
+    { default: React, useState, useEffect, useCallback },
+    { render, useStdout, useApp },
+    { App },
+    { ViewType },
+ succeeded in 51ms:
+import React, { memo } from 'react';
+import { Box, Text } from 'ink';
+import { type View, ViewType, ViewTypeStringsMap } from './views.js';
+
+export const HEADER_LINES = 3;
+
+export interface HeaderProps {
+    currentView: View;
+    columns: number;
+    activeAgents?: number;
+    unreadCount?: number;
+    threadInfo?: { inThread: boolean };
+}
+
+const assertNever = (x: never): never => {
+    throw new Error(`Unhandled view: ${JSON.stringify(x)}`);
+};
+
+function getViewLabel(view: View, threadInfo?: { inThread: boolean }): string {
+    if (view.type === ViewType.Detail) {
+ succeeded in 51ms:
+import React from 'react';
+import { Box, Text } from 'ink';
+import type { Response } from '../types.js';
+import { ResponseContainer } from './response-container.js';
+
+/** Check if any reply has a timestamp after userLastViewedAt and hasn't been seen. */
+function checkNewReplies(node: Response, userLastViewedAt: string): boolean {
+    let r = node.reply;
+    while (r) {
+        if (r.content.seen === null && r.content.timestamp > userLastViewedAt) return true;
+        r = r.response;
+    }
+    return false;
+}
+
+/** Walk a .response chain into a flat array. */
+export function flattenToArray(root: Response | null): Response[] {
+    const arr: Response[] = [];
+    let current = root;
+    while (current) {
+
+thinking
+**Reviewing height handling logic**
+exec
+/bin/zsh -lc "sed -n '220,520p' src/tui/response-chain.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 51ms:
+
+        if (messages.length === 0) {
+            this.lastFirstVisible = undefined;
+            this.lastHeight = undefined;
+            return <Box flexDirection="column" height={height} overflow="hidden" />;
+        }
+
+        const firstVisible = deriveFirstVisible(messages, selectedIndex, columns, height, this.lastFirstVisible, this.lastHeight);
+        this.lastFirstVisible = firstVisible;
+        this.lastHeight = height;
+        const lastVisible = computeLastVisible(messages, firstVisible, columns, height);
+        const visibleMessages = messages.slice(firstVisible, lastVisible + 1);
+
+        const firstNewReply = findFirstNewReplyIndex(messages, userLastViewedAt);
+
+        return (
+            <Box flexDirection="column" height={height} overflow="hidden">
+                {visibleMessages.map((response, i) => {
+                    const globalIndex = firstVisible + i;
+                    const hasNewReplies = userLastViewedAt !== null
+
+thinking
+**Mapping input handling flow**
+codex
+I have enough context for design decisions; I’m pulling exact line numbers for the key sections so the plan can reference concrete edit points and avoid ambiguous handoff.
+exec
+/bin/zsh -lc "nl -ba src/tui/footer.tsx | sed -n '1,180p'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "nl -ba src/tui/app.tsx | sed -n '1,240p' && nl -ba src/tui/footer.test.tsx | sed -n '1,260p'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "nl -ba src/tui/detail.tsx | sed -n '220,380p' && nl -ba src/tui/detail.tsx | sed -n '540,620p'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+     1	import React, { memo } from 'react';
+     2	import { Box, Text } from 'ink';
+     3	import { ViewType } from './views.js';
+     4	
+     5	export const FOOTER_LINES = 1;
+     6	
+     7	export interface Shortcut {
+     8	    readonly key: string;
+     9	    readonly label: string;
+    10	    readonly disabled?: boolean;
+    11	}
+    12	
+    13	export interface FooterProps {
+    14	    readonly viewType: ViewType;
+    15	    readonly inThread?: boolean;
+    16	}
+    17	
+    18	export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
+    19	    [ViewType.Home]: [
+    20	        { key: 'Enter', label: 'View' },
+ succeeded in 51ms:
+     1	import React from 'react';
+     2	import { Box, Text } from 'ink';
+     3	import { type View, ViewType } from './views.js';
+     4	import { Header, HEADER_LINES } from './header.js';
+     5	import { Footer } from './footer.js';
+     6	import { NewIssue } from './newissue.js';
+     7	import type { NewIssueData } from './newissue.js';
+     8	import { HomeView } from './home-view.js';
+     9	import { MOCK_ISSUES, MOCK_UNREAD_INUMS, MOCK_MAX_AGENTS, MOCK_DETAIL_DATA, MOCK_CONTAINERS } from './mock-data.js';
+    10	import { DetailView } from './detail.js';
+    11	import { AgentStatus } from './agent-status.js';
+    12	import { BlockingMap } from './blocking-map.js';
+    13	import { GroupView, GROUP_MODE_INITIAL } from './group-view.js';
+    14	import type { GroupMode } from './group-view.js';
+    15	import { IssueStatus } from '../types.js';
+    16	
+    17	function pushViewOntoStack(viewStack: View[], view: View): View[] {
+    18	    let newStack: View[] = [];
+    19	    for (let i = 0; i < viewStack.length; i++) {
+    20	        newStack.push(viewStack[i]);
+ succeeded in 51ms:
+   220	        if (this.threadStack.length > 0) {
+   221	            const parent = this.threadStack[this.threadStack.length - 1].parent;
+   222	            parent.thread_resolved_at = parent.thread_resolved_at
+   223	                ? null
+   224	                : new Date().toISOString();
+   225	            this.forceUpdate();
+   226	            return;
+   227	        }
+   228	
+   229	        // When on the main chain, resolve/unresolve the selected message's thread
+   230	        const messages = this.currentMessages();
+   231	        const selected = messages[this.selectedMessage];
+   232	        if (!selected || !selected.reply) return;
+   233	
+   234	        selected.thread_resolved_at = selected.thread_resolved_at
+   235	            ? null
+   236	            : new Date().toISOString();
+   237	        this.forceUpdate();
+   238	    }
+   239	
+
+thinking
+**Designing robust keyboard focus management**
+exec
+/bin/zsh -lc 'cat package.json' in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+{
+    "name": "review-agent-orchestrator",
+    "version": "2.1.0",
+    "type": "module",
+    "bin": {
+        "aidi": "./dist/cli/aidi.js",
+        "agent-issue-db-interface": "./dist/cli/aidi.js"
+    },
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsc --watch",
+        "test": "vitest run",
+        "test:watch": "vitest"
+    },
+    "dependencies": {
+        "better-sqlite3": "^11.0.0",
+        "commander": "^12.0.0",
+        "ink": "^5.0.0",
+        "ink-text-input": "^6.0.0",
+        "react": "^18.0.0"
+
+thinking
+**Evaluating string width handling**
+exec
+/bin/zsh -lc "sed -n '1,220p' src/tui/paragraph-utils.ts" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+/**
+ * Split a message body into paragraphs, respecting code fences.
+ * Paragraphs are separated by blank lines, but blank lines inside
+ * code fences (``` blocks) do not cause splits.
+ */
+export function splitIntoParagraphs(body: string): string[] {
+    const lines = body.split('\n');
+    const paragraphs: string[] = [];
+    let current: string[] = [];
+    let inCodeFence = false;
+
+    for (const line of lines) {
+        // Track code fence state
+        if (/^\s*```/.test(line)) {
+            inCodeFence = !inCodeFence;
+        }
+
+        if (!inCodeFence && line.trim() === '') {
+            // Blank line outside code fence — flush current paragraph
+            if (current.length > 0) {
+
+
+thinking
+**Planning footer focus and layout**
+thinking
+**Structuring final implementation plan and Q&A**
+codex
+Skill usage: none. The available skills are for creating/installing skills, not for TUI focus/render architecture analysis.
+
+**Implementation Plan**
+
+1. **Unify footer data + focus metadata in `footer.tsx`**
+- Refactor footer rendering from one `<Text wrap="wrap">` into per-item boxes:
+  - Parent: `<Box flexWrap="wrap">`
+  - Child per shortcut: `<Box marginRight={2} flexShrink={0}>...</Box>`
+  - This guarantees `[key] label` stays together and only wraps between items.
+- Extend shortcut model with action identity for Detail mode:
+  - Example: `action?: 'send' | 'enter-thread' | 'exit-thread' | 'resolve-thread' | 'back' | 'home'`
+  - Keep non-activatable hints (like scroll) with no action.
+- Export a single `getFooterShortcuts(viewType, inThread)` helper so both Footer rendering and Detail focus logic use the same ordered list.
+- Add `focusedIndex?: number | null` prop to Footer; render focused item with inverse style.
+- Keep disabled items non-activatable even if focusable.
+
+Files:
+- [footer.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/footer.tsx)
+
+2. **Introduce a proper Detail focus ring (fixes thread-tab bug + enables footer tabbing)**
+- In `DetailView`, replace “only header-field focus” with multi-zone focus:
+  - `focusedField: number | null` (header fields)
+  - `focusedFooterIndex: number | null` (footer item)
+  - Input is focused iff both are `null`.
+- Implement `cycleFocus(direction)` as a ring over dynamic stops:
+  - Stop 0: input
+  - Stops 1..N: header fields (only when not in thread)
+  - Remaining: footer items
+- In thread mode, header stops are omitted entirely, so Tab cannot move focus to nonexistent IssueHeader fields.
+- Update Enter behavior:
+  - If header focused: open overlay (existing behavior)
+  - Else if footer item focused: dispatch footer action
+  - Else input handles submit (existing TextInput behavior)
+- Normalize focus on thread transitions (`enterThread`/`exitThread`) so stale header focus is cleared.
+
+Files:
+- [detail.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/detail.tsx)
+- [input-box.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/input-box.tsx) (only `focused` condition usage changes at call site)
+
+3. **Wire focus state from DetailView to App to Footer**
+- Add callback prop to `DetailView`:
+  - `onFooterFocusChange?: (focusedIndex: number | null) => void`
+- `App` stores current detail footer focus index and passes it into Footer:
+  - `<Footer ... focusedIndex={this.currentView.type === ViewType.Detail ? this.detailFooterFocusIndex : null} />`
+- `DetailView` calls callback whenever focus ring changes, and on mount/unmount resets to `null`.
+
+Files:
+- [app.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/app.tsx)
+- [detail.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/detail.tsx)
+- [footer.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/footer.tsx)
+
+4. **Handle footer height vs conversation height**
+- `FOOTER_LINES = 1` is no longer reliable once footer wraps.
+- Add footer line estimation helper in `footer.tsx` based on current shortcuts + `columns`.
+- In `App`, compute `footerLines` per render and pass `rowsForDetail = rows - footerLines` to `DetailView`.
+- This prevents footer wrap from stealing rows from `ResponseChain`/input area unexpectedly.
+- Keep clamp to minimum 1 row for detail content budget to avoid negative heights on tiny terminals.
+
+Files:
+- [footer.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/footer.tsx)
+- [app.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/app.tsx)
+- [detail.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/detail.tsx)
+
+---
+
+**Answers to your 7 questions**
+
+1. **Tab focus ring behavior**
+- Issue view order: `Input -> Group -> Blocked By -> Blocks -> Footer item 0..n-1 -> Input` (wrap).
+- Thread view order: `Input -> Footer item 0..n-1 -> Input` (no header fields).
+- `Shift+Tab` walks the same ring in reverse.
+- This directly fixes current thread bug where Tab focuses hidden header fields.
+
+2. **Footer focus state propagation**
+- `DetailView` owns keyboard/focus ring.
+- `DetailView -> App` via `onFooterFocusChange(index)`.
+- `App -> Footer` via `focusedIndex` prop.
+- Footer remains purely presentational.
+
+3. **Enter on focused footer item**
+- Yes, for actionable items.
+- Define actions in footer shortcut data (in `footer.tsx`), but execute in `DetailView` through a switch mapping to existing methods (`exitThread`, `resolveThread`, `onHome`, etc.).
+- Non-action items (scroll hint, disabled shortcuts) are focusable for consistency but Enter is no-op.
+
+4. **`FOOTER_LINES` when wrapping**
+- Static `1` will cause layout drift when footer wraps.
+- Yes, conversation/input viewport budgeting should account for actual footer line count.
+- Best approach: dynamic line estimate from shortcut widths and terminal columns.
+
+5. **`flexWrap="wrap"` with spacing**
+- Use per-item `marginRight` rather than embedding separator spaces in text.
+- This prevents dangling leading spaces on wrapped lines and keeps item boundaries explicit.
+- Set `flexShrink={0}` on item boxes so items don’t compress and split internally.
+
+6. **Ink pitfalls with `<Text inverse>` in wrapped boxes**
+- Nested styled `<Text>` can fight `inverse`; apply focus style at item root text and minimize conflicting child styles.
+- `dimColor + inverse` can become hard to read; define explicit focused-disabled style decision.
+- Snapshot text output usually won’t expose inverse state; style assertions need behavioral/structural proxies.
+- Very narrow terminals may still force awkward truncation for a single long item; handle gracefully.
+
+7. **Footer test updates**
+- `footer.test.tsx`:
+  - Add tests for per-item wrapping integrity on narrow width (key+label contiguous).
+  - Add tests for new exported shortcut helper/action metadata.
+  - Update constructor calls for new Footer props (`focusedIndex` optional).
+- `detail.test.tsx`:
+  - Add regression test: Tab in thread view does not blur input via hidden header focus.
+  - Add focus ring order tests for Tab and Shift+Tab across input/header/footer.
+  - Add Enter-on-footer-item action dispatch tests (e.g., Back/Home/Resolve).
+- `app.test.tsx`:
+  - Add integration assertion that Detail focus changes propagate to Footer focus prop behavior (or at least no regressions on navigation + footer rendering with new props).
+tokens used
+50,205
+Skill usage: none. The available skills are for creating/installing skills, not for TUI focus/render architecture analysis.
+
+**Implementation Plan**
+
+1. **Unify footer data + focus metadata in `footer.tsx`**
+- Refactor footer rendering from one `<Text wrap="wrap">` into per-item boxes:
+  - Parent: `<Box flexWrap="wrap">`
+  - Child per shortcut: `<Box marginRight={2} flexShrink={0}>...</Box>`
+  - This guarantees `[key] label` stays together and only wraps between items.
+- Extend shortcut model with action identity for Detail mode:
+  - Example: `action?: 'send' | 'enter-thread' | 'exit-thread' | 'resolve-thread' | 'back' | 'home'`
+  - Keep non-activatable hints (like scroll) with no action.
+- Export a single `getFooterShortcuts(viewType, inThread)` helper so both Footer rendering and Detail focus logic use the same ordered list.
+- Add `focusedIndex?: number | null` prop to Footer; render focused item with inverse style.
+- Keep disabled items non-activatable even if focusable.
+
+Files:
+- [footer.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/footer.tsx)
+
+2. **Introduce a proper Detail focus ring (fixes thread-tab bug + enables footer tabbing)**
+- In `DetailView`, replace “only header-field focus” with multi-zone focus:
+  - `focusedField: number | null` (header fields)
+  - `focusedFooterIndex: number | null` (footer item)
+  - Input is focused iff both are `null`.
+- Implement `cycleFocus(direction)` as a ring over dynamic stops:
+  - Stop 0: input
+  - Stops 1..N: header fields (only when not in thread)
+  - Remaining: footer items
+- In thread mode, header stops are omitted entirely, so Tab cannot move focus to nonexistent IssueHeader fields.
+- Update Enter behavior:
+  - If header focused: open overlay (existing behavior)
+  - Else if footer item focused: dispatch footer action
+  - Else input handles submit (existing TextInput behavior)
+- Normalize focus on thread transitions (`enterThread`/`exitThread`) so stale header focus is cleared.
+
+Files:
+- [detail.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/detail.tsx)
+- [input-box.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/input-box.tsx) (only `focused` condition usage changes at call site)
+
+3. **Wire focus state from DetailView to App to Footer**
+- Add callback prop to `DetailView`:
+  - `onFooterFocusChange?: (focusedIndex: number | null) => void`
+- `App` stores current detail footer focus index and passes it into Footer:
+  - `<Footer ... focusedIndex={this.currentView.type === ViewType.Detail ? this.detailFooterFocusIndex : null} />`
+- `DetailView` calls callback whenever focus ring changes, and on mount/unmount resets to `null`.
+
+Files:
+- [app.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/app.tsx)
+- [detail.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/detail.tsx)
+- [footer.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/footer.tsx)
+
+4. **Handle footer height vs conversation height**
+- `FOOTER_LINES = 1` is no longer reliable once footer wraps.
+- Add footer line estimation helper in `footer.tsx` based on current shortcuts + `columns`.
+- In `App`, compute `footerLines` per render and pass `rowsForDetail = rows - footerLines` to `DetailView`.
+- This prevents footer wrap from stealing rows from `ResponseChain`/input area unexpectedly.
+- Keep clamp to minimum 1 row for detail content budget to avoid negative heights on tiny terminals.
+
+Files:
+- [footer.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/footer.tsx)
+- [app.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/app.tsx)
+- [detail.tsx](/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/src/tui/detail.tsx)
+
+---
+
+**Answers to your 7 questions**
+
+1. **Tab focus ring behavior**
+- Issue view order: `Input -> Group -> Blocked By -> Blocks -> Footer item 0..n-1 -> Input` (wrap).
+- Thread view order: `Input -> Footer item 0..n-1 -> Input` (no header fields).
+- `Shift+Tab` walks the same ring in reverse.
+- This directly fixes current thread bug where Tab focuses hidden header fields.
+
+2. **Footer focus state propagation**
+- `DetailView` owns keyboard/focus ring.
+- `DetailView -> App` via `onFooterFocusChange(index)`.
+- `App -> Footer` via `focusedIndex` prop.
+- Footer remains purely presentational.
+
+3. **Enter on focused footer item**
+- Yes, for actionable items.
+- Define actions in footer shortcut data (in `footer.tsx`), but execute in `DetailView` through a switch mapping to existing methods (`exitThread`, `resolveThread`, `onHome`, etc.).
+- Non-action items (scroll hint, disabled shortcuts) are focusable for consistency but Enter is no-op.
+
+4. **`FOOTER_LINES` when wrapping**
+- Static `1` will cause layout drift when footer wraps.
+- Yes, conversation/input viewport budgeting should account for actual footer line count.
+- Best approach: dynamic line estimate from shortcut widths and terminal columns.
+
+5. **`flexWrap="wrap"` with spacing**
+- Use per-item `marginRight` rather than embedding separator spaces in text.
+- This prevents dangling leading spaces on wrapped lines and keeps item boundaries explicit.
+- Set `flexShrink={0}` on item boxes so items don’t compress and split internally.
+
+6. **Ink pitfalls with `<Text inverse>` in wrapped boxes**
+- Nested styled `<Text>` can fight `inverse`; apply focus style at item root text and minimize conflicting child styles.
+- `dimColor + inverse` can become hard to read; define explicit focused-disabled style decision.
+- Snapshot text output usually won’t expose inverse state; style assertions need behavioral/structural proxies.
+- Very narrow terminals may still force awkward truncation for a single long item; handle gracefully.
+
+7. **Footer test updates**
+- `footer.test.tsx`:
+  - Add tests for per-item wrapping integrity on narrow width (key+label contiguous).
+  - Add tests for new exported shortcut helper/action metadata.
+  - Update constructor calls for new Footer props (`focusedIndex` optional).
+- `detail.test.tsx`:
+  - Add regression test: Tab in thread view does not blur input via hidden header focus.
+  - Add focus ring order tests for Tab and Shift+Tab across input/header/footer.
+  - Add Enter-on-footer-item action dispatch tests (e.g., Back/Home/Resolve).
+- `app.test.tsx`:
+  - Add integration assertion that Detail focus changes propagate to Footer focus prop behavior (or at least no regressions on navigation + footer rendering with new props).
+Waiting for the debugger to disconnect...

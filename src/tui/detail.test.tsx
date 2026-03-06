@@ -64,6 +64,7 @@ const defaultProps = {
     onSend: noop as (message: string) => void,
     onQuit: noop,
     onThreadStateChange: noop as (info: { inThread: boolean }) => void,
+    onFooterFocusChange: noop as (index: number | null) => void,
 };
 
 describe('DetailView', () => {
@@ -134,7 +135,7 @@ describe('DetailView', () => {
     });
 
     it('renders type tags in unselected agent message headers', () => {
-        const { lastFrame } = render(<DetailView {...defaultProps} />);
+        const { lastFrame } = render(<DetailView {...defaultProps} rows={30} />);
         expect(lastFrame()).toContain('Analysis');
     });
 
@@ -342,7 +343,7 @@ describe('DetailView', () => {
         expect(ref.current!.threadStack).toHaveLength(1);
         expect(ref.current!.threadStack[0].parent).toBe(nodes[0]);
         expect(ref.current!.threadStack[0].savedSelectedIndex).toBe(0);
-        expect(onThreadStateChange).toHaveBeenCalledWith({ inThread: true, threadResolved: false });
+        expect(onThreadStateChange).toHaveBeenCalledWith({ inThread: true });
     });
 
     it('exitThread pops stack and restores cursor', () => {
@@ -493,6 +494,274 @@ describe('DetailView', () => {
             <DetailView {...defaultProps} />
         );
         expect(lastFrame()).toContain('Enter response:');
+    });
+
+    // ---- Focus ring (Tab cycling) ----
+
+    it('Tab from null focuses Group field (focusedField=0) in issue view', () => {
+        const ref = React.createRef<DetailView>();
+        render(<DetailView {...defaultProps} ref={ref} />);
+
+        ref.current!.cycleFocus(1);
+
+        expect(ref.current!.focusedField).toBe(0);
+        expect(ref.current!.focusedFooterIndex).toBeNull();
+    });
+
+    it('Tab in thread view skips header fields and goes to first footer item', () => {
+        const { root: chainRoot, nodes } = buildResponseChain(TEST_MESSAGES);
+        const replyNode: Response = {
+            id: 100,
+            content: createMessage(AuthorType.Agent, ResponseType.None, 'Reply', '2025-01-15T12:00:00Z'),
+            responding_to: null, response: null, replying_to: nodes[0], reply: null,
+            is_continuation: false, thread_resolved_at: null,
+        };
+        nodes[0].reply = replyNode;
+
+        const onFooterFocusChange = vi.fn();
+        const ref = React.createRef<DetailView>();
+        render(
+            <DetailView
+                {...defaultProps}
+                rootResponse={chainRoot}
+                onFooterFocusChange={onFooterFocusChange}
+                ref={ref}
+            />
+        );
+
+        ref.current!.selectedMessage = 0;
+        ref.current!.enterThread();
+
+        // Now Tab from input — should go to footer, not header
+        ref.current!.cycleFocus(1);
+
+        expect(ref.current!.focusedField).toBeNull();
+        expect(ref.current!.focusedFooterIndex).toBe(0);
+    });
+
+    it('Shift+Tab from null goes to last footer item', () => {
+        const ref = React.createRef<DetailView>();
+        render(<DetailView {...defaultProps} ref={ref} />);
+
+        ref.current!.cycleFocus(-1);
+
+        expect(ref.current!.focusedField).toBeNull();
+        expect(ref.current!.focusedFooterIndex).not.toBeNull();
+        // Last focusable item in Detail is 'home' (index 3)
+        expect(ref.current!.focusedFooterIndex).toBe(3);
+    });
+
+    it('full Tab cycle wraps back to input', () => {
+        const ref = React.createRef<DetailView>();
+        render(<DetailView {...defaultProps} ref={ref} />);
+
+        // Issue view: null -> Group(0) -> BlockedBy(1) -> Blocks(2) -> footer0..3 -> null
+        // That's 8 tabs to return to null
+        for (let i = 0; i < 8; i++) {
+            ref.current!.cycleFocus(1);
+        }
+
+        expect(ref.current!.focusedField).toBeNull();
+        expect(ref.current!.focusedFooterIndex).toBeNull();
+    });
+
+    it('cycleFocus calls onFooterFocusChange with index when entering footer', () => {
+        const onFooterFocusChange = vi.fn();
+        const ref = React.createRef<DetailView>();
+        render(
+            <DetailView {...defaultProps} onFooterFocusChange={onFooterFocusChange} ref={ref} />
+        );
+
+        // Tab 4 times: null -> Group -> BlockedBy -> Blocks -> footer0
+        for (let i = 0; i < 4; i++) {
+            ref.current!.cycleFocus(1);
+        }
+
+        expect(onFooterFocusChange).toHaveBeenLastCalledWith(0);
+    });
+
+    it('cycleFocus calls onFooterFocusChange(null) when leaving footer', () => {
+        const onFooterFocusChange = vi.fn();
+        const ref = React.createRef<DetailView>();
+        render(
+            <DetailView {...defaultProps} onFooterFocusChange={onFooterFocusChange} ref={ref} />
+        );
+
+        // Tab through entire ring to return to null
+        for (let i = 0; i < 8; i++) {
+            ref.current!.cycleFocus(1);
+        }
+
+        expect(onFooterFocusChange).toHaveBeenLastCalledWith(null);
+    });
+
+    it('focusedField resets to null when focus enters footer zone', () => {
+        const ref = React.createRef<DetailView>();
+        render(<DetailView {...defaultProps} ref={ref} />);
+
+        // Tab to Blocks (field 2), then one more to footer
+        ref.current!.cycleFocus(1); // Group
+        ref.current!.cycleFocus(1); // BlockedBy
+        ref.current!.cycleFocus(1); // Blocks
+        expect(ref.current!.focusedField).toBe(2);
+
+        ref.current!.cycleFocus(1); // footer0
+        expect(ref.current!.focusedField).toBeNull();
+        expect(ref.current!.focusedFooterIndex).toBe(0);
+    });
+
+    it('focusedFooterIndex resets to null when focus enters header zone', () => {
+        const ref = React.createRef<DetailView>();
+        render(<DetailView {...defaultProps} ref={ref} />);
+
+        // Shift+Tab to last footer item, then Shift+Tab to Blocks
+        ref.current!.cycleFocus(-1); // last footer
+        expect(ref.current!.focusedFooterIndex).toBe(3);
+
+        ref.current!.cycleFocus(-1); // footer2
+        ref.current!.cycleFocus(-1); // footer1
+        ref.current!.cycleFocus(-1); // footer0
+        ref.current!.cycleFocus(-1); // Blocks (field 2)
+        expect(ref.current!.focusedFooterIndex).toBeNull();
+        expect(ref.current!.focusedField).toBe(2);
+    });
+
+    // ---- Thread transitions reset focus ----
+
+    it('enterThread resets focusedField and focusedFooterIndex to null', () => {
+        const { root: chainRoot, nodes } = buildResponseChain(TEST_MESSAGES);
+        const replyNode: Response = {
+            id: 100,
+            content: createMessage(AuthorType.Agent, ResponseType.None, 'Reply', '2025-01-15T12:00:00Z'),
+            responding_to: null, response: null, replying_to: nodes[0], reply: null,
+            is_continuation: false, thread_resolved_at: null,
+        };
+        nodes[0].reply = replyNode;
+
+        const ref = React.createRef<DetailView>();
+        render(<DetailView {...defaultProps} rootResponse={chainRoot} ref={ref} />);
+
+        // Set some focus state
+        ref.current!.cycleFocus(1); // Group
+        expect(ref.current!.focusedField).toBe(0);
+
+        // Enter thread — should reset
+        ref.current!.selectedMessage = 0;
+        ref.current!.enterThread();
+
+        expect(ref.current!.focusedField).toBeNull();
+        expect(ref.current!.focusedFooterIndex).toBeNull();
+    });
+
+    it('enterThread calls onFooterFocusChange(null)', () => {
+        const { root: chainRoot, nodes } = buildResponseChain(TEST_MESSAGES);
+        const replyNode: Response = {
+            id: 100,
+            content: createMessage(AuthorType.Agent, ResponseType.None, 'Reply', '2025-01-15T12:00:00Z'),
+            responding_to: null, response: null, replying_to: nodes[0], reply: null,
+            is_continuation: false, thread_resolved_at: null,
+        };
+        nodes[0].reply = replyNode;
+
+        const onFooterFocusChange = vi.fn();
+        const ref = React.createRef<DetailView>();
+        render(
+            <DetailView
+                {...defaultProps}
+                rootResponse={chainRoot}
+                onFooterFocusChange={onFooterFocusChange}
+                ref={ref}
+            />
+        );
+
+        ref.current!.selectedMessage = 0;
+        ref.current!.enterThread();
+
+        expect(onFooterFocusChange).toHaveBeenCalledWith(null);
+    });
+
+    it('exitThread resets focusedField and focusedFooterIndex to null', () => {
+        const { root: chainRoot, nodes } = buildResponseChain(TEST_MESSAGES);
+        const replyNode: Response = {
+            id: 100,
+            content: createMessage(AuthorType.Agent, ResponseType.None, 'Reply', '2025-01-15T12:00:00Z'),
+            responding_to: null, response: null, replying_to: nodes[0], reply: null,
+            is_continuation: false, thread_resolved_at: null,
+        };
+        nodes[0].reply = replyNode;
+
+        const ref = React.createRef<DetailView>();
+        render(<DetailView {...defaultProps} rootResponse={chainRoot} ref={ref} />);
+
+        ref.current!.selectedMessage = 0;
+        ref.current!.enterThread();
+
+        // Tab to a footer item while in thread
+        ref.current!.cycleFocus(1);
+        expect(ref.current!.focusedFooterIndex).toBe(0);
+
+        // Exit thread — should reset
+        ref.current!.exitThread();
+        expect(ref.current!.focusedField).toBeNull();
+        expect(ref.current!.focusedFooterIndex).toBeNull();
+    });
+
+    // ---- InputBox focus condition ----
+
+    it('InputBox focused=false when focusedFooterIndex is set', () => {
+        const ref = React.createRef<DetailView>();
+        const { lastFrame } = render(<DetailView {...defaultProps} ref={ref} />);
+
+        // Input should be focused initially
+        expect(ref.current!.focusedField).toBeNull();
+        expect(ref.current!.focusedFooterIndex).toBeNull();
+
+        // Tab to footer — input should lose focus
+        for (let i = 0; i < 4; i++) {
+            ref.current!.cycleFocus(1);
+        }
+        ref.current!.forceUpdate();
+
+        expect(ref.current!.focusedFooterIndex).toBe(0);
+    });
+
+    // ---- Footer action dispatch ----
+
+    it('dispatchFooterAction back calls exitThread', () => {
+        const onBack = vi.fn();
+        const ref = React.createRef<DetailView>();
+        render(<DetailView {...defaultProps} onBack={onBack} ref={ref} />);
+
+        // Not in thread, so exitThread calls onBack
+        ref.current!.dispatchFooterAction('back');
+        expect(onBack).toHaveBeenCalledOnce();
+    });
+
+    it('dispatchFooterAction home calls onHome', () => {
+        const onHome = vi.fn();
+        const ref = React.createRef<DetailView>();
+        render(<DetailView {...defaultProps} onHome={onHome} ref={ref} />);
+
+        ref.current!.dispatchFooterAction('home');
+        expect(onHome).toHaveBeenCalledOnce();
+    });
+
+    it('dispatchFooterAction resolveThread calls resolveThread', () => {
+        const { root: chainRoot, nodes } = buildResponseChain(TEST_MESSAGES);
+        const replyNode: Response = {
+            id: 100,
+            content: createMessage(AuthorType.Agent, ResponseType.None, 'Reply', '2025-01-15T12:00:00Z'),
+            responding_to: null, response: null, replying_to: nodes[0], reply: null,
+            is_continuation: false, thread_resolved_at: null,
+        };
+        nodes[0].reply = replyNode;
+
+        const ref = React.createRef<DetailView>();
+        render(<DetailView {...defaultProps} rootResponse={chainRoot} ref={ref} />);
+
+        ref.current!.selectedMessage = 0;
+        ref.current!.dispatchFooterAction('resolveThread');
+        expect(nodes[0].thread_resolved_at).not.toBeNull();
     });
 });
 

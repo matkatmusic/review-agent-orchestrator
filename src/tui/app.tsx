@@ -48,6 +48,7 @@ class App extends React.Component<AppProps> {
     groupMode: GroupMode;
     threadInfo: { inThread: boolean; threadResolved?: boolean };
     savedSelectedMessage: Map<number, number>;
+    focusedFooterIndex: number | null;
 
     constructor(props: AppProps) {
         super(props);
@@ -55,6 +56,7 @@ class App extends React.Component<AppProps> {
         this.groupMode = GROUP_MODE_INITIAL;
         this.threadInfo = { inThread: false };
         this.savedSelectedMessage = new Map();
+        this.focusedFooterIndex = null;
     }
 
     get currentView(): View {
@@ -71,12 +73,14 @@ class App extends React.Component<AppProps> {
 
     navigateToView(view: View) {
         clearScreen();
+        this.focusedFooterIndex = null;
         this.viewStack = pushViewOntoStack(this.viewStack, view);
         this.forceUpdate();
     }
 
     replaceCurrentView(view: View) {
         clearScreen();
+        this.focusedFooterIndex = null;
         this.viewStack[this.viewStack.length - 1] = view;
         this.viewStack = [...this.viewStack];
         this.forceUpdate();
@@ -85,6 +89,7 @@ class App extends React.Component<AppProps> {
     goBackToPreviousView() {
         if (this.viewStack.length > 1) {
             clearScreen();
+            this.focusedFooterIndex = null;
             this.viewStack = popViewFromStack(this.viewStack);
             this.forceUpdate();
         }
@@ -92,6 +97,7 @@ class App extends React.Component<AppProps> {
 
     goHome() {
         clearScreen();
+        this.focusedFooterIndex = null;
         this.viewStack = [{ type: ViewType.Home }];
         this.forceUpdate();
     }
@@ -156,6 +162,10 @@ class App extends React.Component<AppProps> {
                             onNavigateIssue={(inumTo) => this.replaceCurrentView({ type: ViewType.Detail, inum: inumTo })}
                             onOpenPicker={(mode) => this.navigateToView({ type: ViewType.IssuePicker, mode, inum })}
                             onQuit={() => this.props.onExit?.()}
+                            onFooterFocusChange={(index) => {
+                                this.focusedFooterIndex = index;
+                                this.forceUpdate();
+                            }}
                             onThreadStateChange={(info) => {
                                 this.threadInfo = info;
                                 this.forceUpdate();
@@ -216,7 +226,7 @@ class App extends React.Component<AppProps> {
                     threadInfo={this.threadInfo}
                 />
                 {content}
-                <Footer viewType={this.currentView.type} inThread={this.threadInfo.inThread} threadResolved={this.threadInfo.threadResolved} />
+                <Footer viewType={this.currentView.type} inThread={this.threadInfo.inThread} threadResolved={this.threadInfo.threadResolved} focusedIndex={this.focusedFooterIndex} columns={this.columns} />
             </Box>
         );
     }

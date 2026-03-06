@@ -1,0 +1,57 @@
+Footer Tabbable Rewrite — Implementation Analysis
+===================================================
+
+You are analyzing a TUI application built with Ink (React for terminals).
+Read the source files listed below and produce an implementation plan for three
+interconnected changes. Focus on architecture, edge cases, and Ink-specific
+concerns.
+
+Context: The app renders a Footer bar at the bottom showing keyboard shortcuts.
+The Detail View has a text input (InputBox) and header fields that Tab cycles
+through. Three bugs/features need to be addressed together.
+
+ISSUE 1 (broken): Footer hotkey wrapping
+  File: src/tui/footer.tsx
+  All shortcuts are rendered inside a single <Text wrap="wrap">.
+  Ink wraps at any space, so [^R] can end up on one line and "Resolve" on the
+  next. The key and its label must stay together on the same line.
+
+ISSUE 2 (feature): Make footer items tabbable components
+  Each footer shortcut should become an individual component (Box) that:
+  - Stays together when the footer wraps (fixes Issue 1)
+  - Can be tabbed to (receives focus via Tab key cycling)
+  - Renders with inverse colors when focused/selected
+  Footer currently receives: viewType, inThread. It would need a new prop
+  for the focused item index.
+
+ISSUE 3 (broken): Tab in thread view moves cursor outside text input
+  File: src/tui/detail.tsx lines 326-329
+  Tab always calls cycleField() which sets focusedField to 0/1/2 (header
+  fields: Group, BlockedBy, Blocks). In thread view, the IssueHeader is NOT
+  rendered — only the thread parent is shown. But focusedField still gets set
+  to non-null, causing InputBox to receive focused={false} (line 585:
+  focused={this.focusedField === null}), making the text cursor disappear.
+  Pressing Tab again cycles back to null, restoring cursor.
+
+FILES TO READ:
+  src/tui/footer.tsx        — Footer component (99 lines)
+  src/tui/detail.tsx        — DetailView component (593 lines)
+  src/tui/input-box.tsx     — InputBox with TextInput (34 lines)
+  src/tui/app.tsx           — App wires Footer and DetailView (185 lines)
+
+QUESTIONS TO ADDRESS:
+1. How should the Tab focus ring work? What's the cycling order in issue view
+   vs thread view? How does Shift+Tab reverse it?
+2. How does Footer receive focus state? It's rendered in app.tsx, not detail.tsx.
+   What callback/prop chain communicates the focused footer index?
+3. Should Enter on a focused footer item activate that shortcut? If so, how
+   does the action dispatch work given shortcuts are defined in footer.tsx but
+   actions are handled in detail.tsx?
+4. What happens to FOOTER_LINES (currently 1) if footer wraps to 2 lines?
+   Does conversationHeight in DetailView need adjustment?
+5. How should flexWrap="wrap" interact with marginRight spacing between items?
+6. What Ink-specific pitfalls exist with <Text inverse> inside <Box flexWrap>?
+7. How do existing footer tests need to change?
+
+OUTPUT: A detailed implementation plan covering all file changes, the focus ring
+architecture, and any edge cases or risks.

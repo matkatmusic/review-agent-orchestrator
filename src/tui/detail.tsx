@@ -7,6 +7,8 @@ import { ResponseContainer } from './response-container.js';
 import { IssueHeader, ISSUE_HEADER_LINE_COUNT } from './issue-header.js';
 import { InputBox, INPUT_AREA_LINES } from './input-box.js';
 import { ResponseChain, flattenToArray } from './response-chain.js';
+import { ViewType } from './views.js';
+import { getFocusableShortcuts, getFooterShortcuts, computeFooterLines } from './footer.js';
 
 // ---- Helper functions ----
 
@@ -99,6 +101,7 @@ export interface DetailViewProps {
     onOpenPicker?: (mode: 'blockedBy' | 'blocks') => void;
     onNavigateIssue?: (inum: number) => void;
     onThreadStateChange: (info: { inThread: boolean }) => void;
+    onFooterFocusChange: (index: number | null) => void;
     initialSelectedMessage?: number;
 }
 
@@ -107,6 +110,7 @@ export interface DetailViewProps {
 export class DetailView extends React.Component<DetailViewProps> {
     inputValue: string;
     focusedField: number | null;
+    focusedFooterIndex: number | null;
     overlay: OverlayType;
     blockedBySet: Set<number>;
     blocksSet: Set<number>;
@@ -117,6 +121,7 @@ export class DetailView extends React.Component<DetailViewProps> {
         super(props);
         this.inputValue = '';
         this.focusedField = null;
+        this.focusedFooterIndex = null;
         this.overlay = OverlayType.None;
         this.blockedBySet = new Set(props.blockedBy);
         this.blocksSet = new Set(props.blocks);
@@ -154,9 +159,12 @@ export class DetailView extends React.Component<DetailViewProps> {
     }
 
     get conversationHeight(): number {
+        const isInThread = this.threadStack.length > 0;
+        const shortcuts = getFooterShortcuts(ViewType.Detail, isInThread);
+        const footerLines = computeFooterLines(shortcuts, this.props.columns);
         return Math.max(
             1,
-            this.props.rows - HEADER_LINES - this.headerLineCount - INPUT_AREA_LINES,
+            this.props.rows - HEADER_LINES - this.headerLineCount - INPUT_AREA_LINES - footerLines,
         );
     }
 
@@ -180,6 +188,11 @@ export class DetailView extends React.Component<DetailViewProps> {
         const threadMessages = flattenToArray(selected.reply);
         this.selectedMessage = Math.max(0, threadMessages.length - 1);
 
+        // Reset footer focus on thread change
+        this.focusedFooterIndex = null;
+        this.focusedField = null;
+        this.props.onFooterFocusChange(null);
+
         // Notify App of thread state change
         this.props.onThreadStateChange({ inThread: true });
 
@@ -201,6 +214,11 @@ export class DetailView extends React.Component<DetailViewProps> {
 
         // Restore cursor position
         this.selectedMessage = popped.savedSelectedIndex;
+
+        // Reset footer focus on thread change
+        this.focusedFooterIndex = null;
+        this.focusedField = null;
+        this.props.onFooterFocusChange(null);
 
         // Notify App of thread state change
         const stillInThread = this.threadStack.length > 0;
@@ -235,18 +253,50 @@ export class DetailView extends React.Component<DetailViewProps> {
 
     // ---- Field cycling & overlays ----
 
-    cycleField(direction: 1 | -1) {
-        if (this.focusedField === null) {
-            this.focusedField = direction === 1 ? 0 : DETAIL_FIELD_COUNT - 1;
+    cycleFocus(direction: 1 | -1) {
+        const isInThread = this.threadStack.length > 0;
+        const headerSlots = isInThread ? 0 : DETAIL_FIELD_COUNT;
+        const focusable = getFocusableShortcuts(ViewType.Detail, isInThread);
+        const footerSlots = focusable.length;
+        const totalSlots = 1 + headerSlots + footerSlots;
+
+        // Determine current position in ring
+        let current: number;
+        if (this.focusedField === null && this.focusedFooterIndex === null) {
+            current = 0; // input
+        } else if (this.focusedField !== null) {
+            current = 1 + this.focusedField; // header field
         } else {
-            const next = this.focusedField + direction;
-            if (next < 0 || next >= DETAIL_FIELD_COUNT) {
-                this.focusedField = null;
-            } else {
-                this.focusedField = next;
-            }
+            current = 1 + headerSlots + this.focusedFooterIndex!; // footer
         }
+
+        // Advance with wrapping
+        const next = ((current + direction) % totalSlots + totalSlots) % totalSlots;
+
+        // Map back to field/footer
+        if (next === 0) {
+            this.focusedField = null;
+            this.focusedFooterIndex = null;
+        } else if (next <= headerSlots) {
+            this.focusedField = next - 1;
+            this.focusedFooterIndex = null;
+        } else {
+            this.focusedField = null;
+            this.focusedFooterIndex = next - 1 - headerSlots;
+        }
+
+        this.props.onFooterFocusChange(this.focusedFooterIndex);
         this.forceUpdate();
+    }
+
+    dispatchFooterAction(action: string) {
+        switch (action) {
+            case 'enterThread':   this.enterThread(); break;
+            case 'exitThread':    this.exitThread(); break;
+            case 'resolveThread': this.resolveThread(); break;
+            case 'back':          this.exitThread(); break;
+            case 'home':          this.props.onHome(this.selectedMessage); break;
+        }
     }
 
     openOverlayForField() {
@@ -316,15 +366,24 @@ export class DetailView extends React.Component<DetailViewProps> {
             return;
         }
 
-        // Tab field cycling
+        // Tab focus cycling
         if (key.tab) {
-            this.cycleField(key.shift ? -1 : 1);
+            this.cycleFocus(key.shift ? -1 : 1);
             return;
         }
 
-        // Enter on focused field opens overlay
+        // Enter on focused header field opens overlay
         if (key.return && this.focusedField !== null) {
             this.openOverlayForField();
+            return;
+        }
+
+        // Enter on focused footer item dispatches action
+        if (key.return && this.focusedFooterIndex !== null) {
+            const isInThread = this.threadStack.length > 0;
+            const focusable = getFocusableShortcuts(ViewType.Detail, isInThread);
+            const shortcut = focusable[this.focusedFooterIndex];
+            if (shortcut?.action) this.dispatchFooterAction(shortcut.action);
             return;
         }
 
@@ -456,7 +515,7 @@ export class DetailView extends React.Component<DetailViewProps> {
 
                 <InputBox
                     value={this.inputValue}
-                    focused={this.focusedField === null}
+                    focused={this.focusedField === null && this.focusedFooterIndex === null}
                     columns={columns}
                     onChange={this.handleInputChange}
                     onSubmit={this.handleInputSubmit}
