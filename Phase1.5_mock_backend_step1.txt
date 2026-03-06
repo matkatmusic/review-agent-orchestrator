@@ -25,8 +25,12 @@ Make a currently missing view load by default. Interact with it, identify missin
   - [O:E1] broken feature: footer hotkey components should wrap so that the hot key display and the associated text are not split between lines. 
   - [O:E1] UX change: make each footer item into a component that can be tabbed to (possible Fix for above broken feature).  when selected, invert 
   - [O:E1] broken feature: pressing tab in text input in a Thread View moves the cursor somewhere outside of the text input, causing it to disappear.  pressing tab again moves the cursor back to the text input.
-  - [O:E2] broken feature: [^R] Resolve: should say "Resolve Thread", change hotkey to Ctrl Shift r
-  - [O:E2] broken feature: [r] resolve issue: issue not resolved when cursor is in text input. Change to Ctrl r
+  - [x] verify key presses when text input is not selected don't do anything.
+  - [x] broken feature: [^R] Resolve: should say "Resolve Thread", change hotkey to Ctrl Shift r
+  - [x] broken feature: [r] resolve issue: issue not resolved when cursor is in text input. Change to Ctrl r
+  - [x] Bug: pressing 'ctrl r' still puts 'r' into the text input, even though the Resolved state is changed.
+  - [x] UX change: 'Resolve Thread' should only be shown when a Response with Replies is selected.
+  - [O:E2] bug: pressing Ctrl-Shift r on a message that has replies doesn't resolve the thread.
   - [x] broken feature: adding a response in a thread doesn't create a new response in the thread view, and doesn't update the mock data json.
   - [x] broken feature: adding a response in an issue doesn't create a new response in the issue view, and doesn't update the mock data json.
   - [x] UX change: Thread resolution hotkey functionality: hot key toggles thread resolution state (resolved/unresolved).  Footer text updates accordingly.
