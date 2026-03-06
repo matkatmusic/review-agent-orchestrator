@@ -89,6 +89,7 @@ export interface DetailViewProps {
     rows: number;
     containers?: Container[];
     allIssues?: Issue[];
+    unreadInums?: Set<number>;
     userLastViewedAt?: string | null;
     onBack: (selectedMessage: number) => void;
     onHome: (selectedMessage: number) => void;
@@ -404,6 +405,7 @@ export class DetailView extends React.Component<DetailViewProps> {
                         title="Blocked by"
                         issues={otherIssues}
                         selected={this.blockedBySet}
+                        unreadInums={this.props.unreadInums}
                         onToggle={(toggledInum) => {
                             if (this.blockedBySet.has(toggledInum)) {
                                 this.blockedBySet.delete(toggledInum);
@@ -429,6 +431,7 @@ export class DetailView extends React.Component<DetailViewProps> {
                         title="Blocks"
                         issues={otherIssues}
                         selected={this.blocksSet}
+                        unreadInums={this.props.unreadInums}
                         onToggle={(toggledInum) => {
                             if (this.blocksSet.has(toggledInum)) {
                                 this.blocksSet.delete(toggledInum);

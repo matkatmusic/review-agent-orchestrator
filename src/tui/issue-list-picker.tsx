@@ -10,6 +10,7 @@ export interface IssueListPickerProps {
     title: string;
     issues: Issue[];
     selected: Set<number>;
+    unreadInums?: Set<number>;
     onToggle: (inum: number) => void;
     onClose: () => void;
 }
@@ -53,7 +54,7 @@ export class IssueListPicker extends React.Component<IssueListPickerProps> {
     };
 
     render() {
-        const { title, issues, selected } = this.props;
+        const { title, issues, selected, unreadInums } = this.props;
 
         return (
             <Box flexDirection="column" borderStyle="single" paddingLeft={1} paddingRight={1}>
@@ -65,6 +66,7 @@ export class IssueListPicker extends React.Component<IssueListPickerProps> {
                     issues.map((issue, i) => {
                         const focused = i === this.cursor;
                         const checked = selected.has(issue.inum);
+                        const hasNewReplies = unreadInums?.has(issue.inum) ?? false;
                         const statusLabel = IssueStatusStringsMap.get(issue.status) ?? '';
                         const sColor = statusToColor(issue.status);
                         return (
@@ -74,6 +76,9 @@ export class IssueListPicker extends React.Component<IssueListPickerProps> {
                                 </Text>
                                 <Text color={checked ? 'green' : 'gray'}>
                                     {checked ? '[x] ' : '[ ] '}
+                                </Text>
+                                <Text color={hasNewReplies ? 'yellow' : undefined}>
+                                    {hasNewReplies ? '★ ' : '  '}
                                 </Text>
                                 <Text bold={focused} color={focused ? 'cyan' : undefined}>
                                     {`I-${issue.inum}`.padEnd(6)}

@@ -36,6 +36,9 @@ Make a currently missing view load by default. Interact with it, identify missin
   - [x] UX change: --- [ Replies ] --- is too dark.
   - [x] UX change: Thread View: Thread Parent Response color should be different from thread replies color.  Need color scheme for Agent colors (as response, as thread parent) and User colors (as response, as thread parent)
   - [O:E3] UX Change: 'Blocked By' picker and 'Blocks' picker should visually indicate if an issue has new replies using '*' after issue title (ex: migrate_SessionCredentials*)
+  - [O:E3] Picker needs '* = Unread replies' shown below list, in place of 'Toggle (enter) Done (esc)', which is moved to the footer (see next task).
+  - [O:E3] make 'Blocked By' and 'Blocks' Picker into a separate view with its own set of footer hotkeys.  When the user tabs to the Blocked By or Blocks fields in the DetailsView and presses return, push this view onto the view stack. 
+  - [O:E3] the footer hotkeys for the Blocks/Blocked By picker are: [Enter] Toggle, [^v] Scroll, [Esc] Done, [Ctrl v] View issue
   - [ ] broken feature: Footer doesn't attach to the bottom of the view, there's a gap. 
   - [ ] broken feature: vertical resizing (getting bigger) doesn't update the number of displayed responses when the view allows for showing more responses. 
   - [ ] missing feature:

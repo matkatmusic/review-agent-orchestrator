@@ -146,6 +146,7 @@ class App extends React.Component<AppProps> {
                             rows={this.rows}
                             containers={MOCK_CONTAINERS}
                             allIssues={MOCK_ISSUES}
+                            unreadInums={MOCK_UNREAD_INUMS}
                             userLastViewedAt={mockData.issue.user_last_viewed_at}
                             initialSelectedMessage={this.savedSelectedMessage.get(inum)}
                             onBack={(sel) => this.saveSelectedAndGoBack(inum, sel)}
