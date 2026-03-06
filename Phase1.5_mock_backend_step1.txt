@@ -36,8 +36,8 @@ Make a currently missing view load by default. Interact with it, identify missin
   - [x] UX change: --- [ Replies ] --- is too dark.
   - [x] UX change: Thread View: Thread Parent Response color should be different from thread replies color.  Need color scheme for Agent colors (as response, as thread parent) and User colors (as response, as thread parent)
   - [ ] UX Change: 'Blocked By' picker should visually indicate if an issue has new replies.
-  - [ ] broken feature: Footer doesn't attach to the bottom of the view, there's a gap. 
-  - [ ] broken feature: vertical resizing (getting bigger) doesn't update the number of displayed responses when the view allows for showing more responses. 
+  - [x] broken feature: Footer doesn't attach to the bottom of the view, there's a gap. 
+  - [x] broken feature: vertical resizing (getting bigger) doesn't update the number of displayed responses when the view allows for showing more responses. 
   - [ ] missing feature:
   - [ ] broken feature: 
 - [ ] New Issue View
