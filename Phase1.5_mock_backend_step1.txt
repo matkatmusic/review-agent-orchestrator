@@ -42,7 +42,8 @@ Make a currently missing view load by default. Interact with it, identify missin
   - [x] broken feature: Footer doesn't attach to the bottom of the view, there's a gap.
   - [x] broken feature: vertical resizing (getting bigger) doesn't update the number of displayed responses when the view allows for showing more responses.
   - [ ] missing feature:
-  - [ ] broken feature: 
+  - [ ] broken feature: Discovered on O:E1. from Home screen: select I-2 -> Enter: no issue text is shown. 
+  - [ ] broken feature:  Discovered on O:E1. continuing above command sequence: pressing Exit Thread goes up a level in the view stack (correctly), but a thread has not been entered, so this key shouldn't work.  'exit thread' shouldn't even be shown.
 - [ ] New Issue View
   - [ ] load by default
   - [ ] missing feature:
