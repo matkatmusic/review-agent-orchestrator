@@ -60,12 +60,25 @@ enum OverlayType {
 
 const THREAD_SEPARATOR_LINES = 2; // separator replaces ResponseContainer's blank + adds blank below
 
-function threadSeparator(columns: number, resolved: boolean): string {
-    const label = resolved ? '[ Replies \u2014 Resolved ]' : '[ Replies ]';
+function centeredLabel(columns: number, label: string): { left: string; right: string } {
     const totalDashes = Math.max(0, columns - label.length);
-    const left = Math.floor(totalDashes / 2);
-    const right = totalDashes - left;
-    return '─'.repeat(left) + label + '─'.repeat(right);
+    const leftCount = Math.floor(totalDashes / 2);
+    return { left: '─'.repeat(leftCount), right: '─'.repeat(totalDashes - leftCount) };
+}
+
+function threadSeparator(columns: number): string {
+    const label = '[ Replies ]';
+    const { left, right } = centeredLabel(columns, label);
+    return left + label + right;
+}
+
+function ThreadHeaderSeparator({ columns, resolved }: { columns: number; resolved: boolean }) {
+    const label = resolved ? '[ Thread \u2014 Resolved ]' : '[ Thread ]';
+    const { left, right } = centeredLabel(columns, label);
+    if (resolved) {
+        return <Text color="gray">{left}[ Thread {'\u2014'} <Text color="white">Resolved</Text> ]{right}</Text>;
+    }
+    return <Text color="gray">{left}{label}{right}</Text>;
 }
 
 // ---- Thread stack entry ----
@@ -480,7 +493,7 @@ export class DetailView extends React.Component<DetailViewProps> {
                 {/* Header area: thread parent or issue metadata */}
                 {isInThread ? (
                     <>
-                        <Text color="gray">{(() => { const label = '[ Thread ]'; const dashes = Math.max(0, columns - label.length); const left = Math.floor(dashes / 2); const right = dashes - left; return '─'.repeat(left) + label + '─'.repeat(right); })()}</Text>
+                        <ThreadHeaderSeparator columns={columns} resolved={!!threadParent!.thread_resolved_at} />
                         <Box flexDirection="column" height={ResponseContainer.computeLineCount(threadParent!.content.body, columns) - 1} overflow="hidden">
                             <ResponseContainer
                                 response={threadParent!}
@@ -491,7 +504,7 @@ export class DetailView extends React.Component<DetailViewProps> {
                                 isThreadParent={true}
                             />
                         </Box>
-                        <Text color={threadParent!.thread_resolved_at ? undefined : 'red'}>{threadSeparator(columns, !!threadParent!.thread_resolved_at)}</Text>
+                        <Text color="gray">{threadSeparator(columns)}</Text>
                     </>
                 ) : (
                     <IssueHeader
