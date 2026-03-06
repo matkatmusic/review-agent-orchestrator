@@ -1,0 +1,300 @@
+Footer Tabbable Rewrite — Define Phase: Consensus Implementation Plan
+=====================================================================
+
+Source: Synthesized from 3 debate results (Claude, Codex, Gemini)
+Date: 2026-03-06
+
+==========================================================================
+RESOLVED DISAGREEMENTS
+==========================================================================
+
+DECISION 1: Inverse styling approach
+  Using Claude's single <Text inverse> pattern. It already exists in
+  issue-header.tsx:37-40 where focused fields render as
+  <Text inverse={focused} bold={focused}>. Consistency wins.
+  No need to introduce manual backgroundColor/color management.
+
+DECISION 2: Disabled items in focus ring
+  Excluding disabled items from the Tab ring. Disabled shortcuts are
+  placeholder features (Defer, Rebase, Block, Show pane) — tabbable-but-
+  inert items confuse users. The focus ring only includes actionable items.
+
+DECISION 3: Footer action dispatch
+  Adding an optional action string to the Shortcut interface. DetailView
+  maps action strings to existing methods. Shortcuts without an action
+  (Send, Scroll) are excluded from the focus ring — they are informational
+  only.
+
+
+==========================================================================
+CHANGE 1: footer.tsx — Wrap fix + focusable items + dynamic height
+==========================================================================
+
+A. Extend the Shortcut interface:
+
+    export interface Shortcut {
+        readonly key: string;
+        readonly label: string;
+        readonly disabled?: boolean;
+        readonly action?: string;    // NEW — action ID for dispatch
+    }
+
+B. Add action strings to Detail/Thread shortcuts:
+
+    Detail shortcuts with actions:
+      Thread    -> action: 'enterThread'
+      ^R        -> action: 'resolveThread'
+      Esc       -> action: 'back'
+      ⌥h        -> action: 'home'
+    Thread shortcuts with actions:
+      Sub-thread  -> action: 'enterThread'
+      Exit thread -> action: 'exitThread'
+      ^R          -> action: 'resolveThread'
+      Esc         -> action: 'back'
+      ⌥h          -> action: 'home'
+
+    Items with NO action (excluded from focus ring):
+      Enter/Send, ↑↓/Scroll, all disabled items
+
+C. Export helpers:
+
+    export function getFooterShortcuts(viewType, inThread): Shortcut[]
+        — returns the full shortcut list for the given view/thread state
+
+    export function getFocusableShortcuts(viewType, inThread): Shortcut[]
+        — filters to items where action is defined and disabled is not true
+
+D. Extend FooterProps:
+
+    export interface FooterProps {
+        readonly viewType: ViewType;
+        readonly inThread?: boolean;
+        readonly threadResolved?: boolean;
+        readonly focusedIndex?: number | null;   // NEW
+    }
+
+E. Replace rendering — from:
+
+    <Box>
+      <Text wrap="wrap">
+        {shortcuts.map(...)}
+      </Text>
+    </Box>
+
+  To:
+
+    <Box flexWrap="wrap">
+      {shortcuts.map((s, i) => {
+        const focusable = getFocusableShortcuts(...)
+        const focusIdx = focusable.indexOf(s)
+        const isFocused = focusedIndex != null && focusIdx === focusedIndex
+        return (
+          <Box key={i} marginRight={i < shortcuts.length - 1 ? 2 : 0}>
+            {isFocused
+              ? <Text inverse bold>{` [${s.key}] ${s.label} `}</Text>
+              : s.disabled
+                ? <Text dimColor>[{s.key}] {s.label}</Text>
+                : <><Text bold color="cyan">[{s.key}]</Text><Text> {s.label}</Text></>
+            }
+          </Box>
+        )
+      })}
+    </Box>
+
+F. Replace FOOTER_LINES with dynamic computation:
+
+    export function computeFooterLines(shortcuts: Shortcut[], columns: number): number {
+        let totalWidth = 0;
+        for (let i = 0; i < shortcuts.length; i++) {
+            const itemWidth = 1 + shortcuts[i].key.length + 2 + shortcuts[i].label.length;
+            if (i > 0) totalWidth += 2;  // marginRight gap
+            totalWidth += itemWidth;
+        }
+        return Math.max(1, Math.ceil(totalWidth / columns));
+    }
+
+    Keep FOOTER_LINES = 1 as deprecated alias for backward compat.
+
+
+==========================================================================
+CHANGE 2: detail.tsx — Unified focus ring + footer action dispatch
+==========================================================================
+
+A. Add instance variable:
+
+    focusedFooterIndex: number | null = null;  // index into focusable shortcuts
+
+B. Add prop:
+
+    onFooterFocusChange: (index: number | null) => void;
+
+C. Replace cycleField() with cycleFocus():
+
+    The ring is built dynamically:
+      Issue view slots:  [null, FIELD_GROUP, FIELD_BLOCKED_BY, FIELD_BLOCKS, footer0..N-1]
+      Thread view slots: [null, footer0..N-1]
+
+    cycleFocus(direction: 1 | -1) {
+      const isInThread = this.threadStack.length > 0;
+      const headerSlots = isInThread ? 0 : DETAIL_FIELD_COUNT;
+      const focusable = getFocusableShortcuts(ViewType.Detail, isInThread);
+      const footerSlots = focusable.length;
+      const totalSlots = 1 + headerSlots + footerSlots;  // 1 for null/input
+
+      // Determine current position in ring
+      let current: number;
+      if (this.focusedField === null && this.focusedFooterIndex === null) {
+        current = 0;  // input
+      } else if (this.focusedField !== null) {
+        current = 1 + this.focusedField;  // header field
+      } else {
+        current = 1 + headerSlots + this.focusedFooterIndex!;  // footer
+      }
+
+      // Advance
+      const next = ((current + direction) % totalSlots + totalSlots) % totalSlots;
+
+      // Map back
+      if (next === 0) {
+        this.focusedField = null;
+        this.focusedFooterIndex = null;
+      } else if (next <= headerSlots) {
+        this.focusedField = next - 1;
+        this.focusedFooterIndex = null;
+      } else {
+        this.focusedField = null;
+        this.focusedFooterIndex = next - 1 - headerSlots;
+      }
+
+      this.props.onFooterFocusChange(this.focusedFooterIndex);
+      this.forceUpdate();
+    }
+
+D. Update handleKey Tab handler (line 323-326):
+
+    Change: this.cycleField(key.shift ? -1 : 1)
+    To:     this.cycleFocus(key.shift ? -1 : 1)
+
+E. Update Enter handler (line 329-331) to also handle footer:
+
+    if (key.return && this.focusedField !== null) {
+        this.openOverlayForField();
+        return;
+    }
+    if (key.return && this.focusedFooterIndex !== null) {
+        const isInThread = this.threadStack.length > 0;
+        const focusable = getFocusableShortcuts(ViewType.Detail, isInThread);
+        const shortcut = focusable[this.focusedFooterIndex];
+        if (shortcut?.action) this.dispatchFooterAction(shortcut.action);
+        return;
+    }
+
+F. Add dispatchFooterAction method:
+
+    dispatchFooterAction(action: string) {
+        switch (action) {
+            case 'enterThread':   this.enterThread(); break;
+            case 'exitThread':    this.exitThread(); break;
+            case 'resolveThread': this.resolveThread(); break;
+            case 'back':          this.exitThread(); break;
+            case 'home':          this.props.onHome(this.selectedMessage); break;
+        }
+    }
+
+G. Update InputBox focused prop (line 510):
+
+    From: focused={this.focusedField === null}
+    To:   focused={this.focusedField === null && this.focusedFooterIndex === null}
+
+H. Reset focusedFooterIndex on thread transitions:
+
+    In enterThread(): this.focusedFooterIndex = null; + notify callback
+    In exitThread():  this.focusedFooterIndex = null; + notify callback
+
+I. Update conversationHeight getter to subtract footer lines:
+
+    Import computeFooterLines and getFooterShortcuts from footer.tsx.
+    Subtract computed footer lines from available height.
+
+
+==========================================================================
+CHANGE 3: app.tsx — Wire focus state between DetailView and Footer
+==========================================================================
+
+A. Add instance variable:
+
+    focusedFooterIndex: number | null = null;
+
+B. Pass callback to DetailView (around line 138):
+
+    onFooterFocusChange={(index) => {
+        this.focusedFooterIndex = index;
+        this.forceUpdate();
+    }}
+
+C. Pass focusedIndex to Footer (line 179):
+
+    <Footer
+        viewType={this.currentView.type}
+        inThread={this.threadInfo.inThread}
+        threadResolved={this.threadInfo.threadResolved}
+        focusedIndex={this.focusedFooterIndex}
+    />
+
+D. Reset focusedFooterIndex on navigation:
+
+    In navigateToView():       this.focusedFooterIndex = null;
+    In goBackToPreviousView(): this.focusedFooterIndex = null;
+    In goHome():               this.focusedFooterIndex = null;
+    In replaceCurrentView():   this.focusedFooterIndex = null;
+
+
+==========================================================================
+CHANGE 4: input-box.tsx — No changes needed
+==========================================================================
+
+The focused prop change is in detail.tsx line 510, not in input-box.tsx.
+
+
+==========================================================================
+CHANGE 5: Tests
+==========================================================================
+
+footer.test.tsx updates:
+  - Existing tests pass unchanged (focusedIndex is optional)
+  - Add: "focused item renders with inverse styling"
+  - Add: "focusedIndex=null renders all items unfocused"
+  - Add: "focusedIndex out of bounds renders no focus"
+  - Add: "computeFooterLines returns >= 1 for all views at 80 cols"
+  - Add: "computeFooterLines returns 2 for narrow terminal"
+  - Add: "getFocusableShortcuts excludes disabled items"
+  - Add: "every focusable Detail shortcut has an action"
+
+detail.test.tsx updates:
+  - Add: "Tab in thread view does not set focusedField to header indices"
+  - Add: "Tab cycles through footer items after header fields"
+  - Add: "Shift+Tab reverses focus ring"
+  - Add: "Enter on focused footer item dispatches action"
+
+
+==========================================================================
+EDGE CASES
+==========================================================================
+
+1. Thread enter/exit: focusedFooterIndex reset to null (avoids stale index
+   pointing at wrong shortcut set)
+2. View transitions: App resets focusedFooterIndex on all navigation
+3. Overlay open: handleKey returns early, so Tab/Enter don't change focus
+4. Terminal resize: conversationHeight recomputes dynamically each render
+5. Very narrow terminal: computeFooterLines clamps to minimum 1
+
+
+==========================================================================
+IMPLEMENTATION ORDER
+==========================================================================
+
+1. footer.tsx — Shortcut interface + actions + rendering + computeFooterLines
+2. detail.tsx — cycleFocus + dispatch + height fix + InputBox focus
+3. app.tsx — Wire callback + focusedIndex prop + reset on navigation
+4. Tests — Update footer.test.tsx, add detail.test.tsx focus ring tests
+5. Manual QA — Tab cycling in issue view, thread view, Shift+Tab, Enter

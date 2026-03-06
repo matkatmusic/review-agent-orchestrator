@@ -1,0 +1,557 @@
+Footer Tabbable Rewrite -- Implementation Plan
+================================================
+
+Analyst: Claude (claude-opus-4-6)
+Files analyzed:
+  src/tui/footer.tsx        (99 lines)
+  src/tui/detail.tsx        (593 lines)
+  src/tui/input-box.tsx     (34 lines)
+  src/tui/app.tsx           (185 lines)
+  src/tui/issue-header.tsx  (47 lines)
+  src/tui/header.tsx        (81 lines)
+  src/tui/views.ts          (25 lines)
+  src/tui/footer.test.tsx   (125 lines)
+
+
+==========================================================================
+QUESTION 1: How should the Tab focus ring work?
+==========================================================================
+
+The Tab key must cycle through a unified ring of focusable items. The ring
+composition differs between issue view and thread view because the IssueHeader
+(with its three tabbable fields) only renders in issue view.
+
+ISSUE VIEW focus ring (Tab cycles forward, Shift+Tab cycles backward):
+
+  [null] -> [Group] -> [BlockedBy] -> [Blocks] -> [Footer 0] -> [Footer 1] -> ... -> [Footer N-1] -> [null]
+
+  null represents "no field focused" -- the InputBox text cursor is active.
+  Group/BlockedBy/Blocks are focusedField indices 0, 1, 2 from the IssueHeader.
+  Footer 0..N-1 are the footer shortcut items for the current view.
+
+  Cycling forward from the last footer item wraps back to null (InputBox).
+  Cycling backward from null goes to the last footer item.
+  Cycling backward from Footer 0 goes to Blocks (field 2).
+  Cycling backward from Group (field 0) wraps to null (InputBox).
+
+  Total ring size: 1 (null) + 3 (header fields) + N (footer items).
+
+THREAD VIEW focus ring:
+
+  [null] -> [Footer 0] -> [Footer 1] -> ... -> [Footer N-1] -> [null]
+
+  The IssueHeader is not rendered in thread view, so the three header fields
+  are excluded entirely. Tab goes directly from null to Footer 0.
+  This fixes Issue 3: pressing Tab in thread view no longer sets focusedField
+  to 0/1/2 (which would point at invisible header fields and steal focus from
+  the InputBox). Instead it jumps to the footer.
+
+  Total ring size: 1 (null) + N (footer items).
+
+Shift+Tab reverses the direction in both views. The cycling logic uses modular
+arithmetic over a conceptual array of focus "slots":
+
+  Issue view slots:  [null, Group, BlockedBy, Blocks, Footer0, Footer1, ...]
+  Thread view slots: [null, Footer0, Footer1, ...]
+
+  currentIndex = indexOf(currentFocusState)
+  nextIndex = (currentIndex + direction) mod slotCount
+  if nextIndex lands on slot 0, set focusedField = null and focusedFooter = null
+  if nextIndex lands on a header slot, set focusedField = slotIndex - 1, focusedFooter = null
+  if nextIndex lands on a footer slot, set focusedField = null, focusedFooter = footerOffset
+
+This replaces the existing cycleField() method in DetailView.
+
+
+==========================================================================
+QUESTION 2: How does Footer receive focus state?
+==========================================================================
+
+The problem: Footer is rendered in App.render() (line 179 of app.tsx), but the
+focus state is managed by DetailView (a child of App). The two components do
+not share direct parent-child communication for this state.
+
+Proposed architecture: lift the focused-footer index into App via a callback,
+identical to the existing onThreadStateChange pattern.
+
+Step-by-step:
+
+1. Add a new instance variable to App:
+     focusedFooterIndex: number | null = null;
+
+2. Add a new prop to DetailViewProps:
+     onFooterFocusChange: (index: number | null) => void;
+
+3. In App.render(), when rendering DetailView, pass:
+     onFooterFocusChange={(index) => {
+         this.focusedFooterIndex = index;
+         this.forceUpdate();
+     }}
+
+4. In App.render(), pass the index to Footer:
+     <Footer
+         viewType={this.currentView.type}
+         inThread={this.threadInfo.inThread}
+         focusedIndex={this.focusedFooterIndex}
+     />
+
+5. In DetailView, whenever the unified Tab ring changes the focused footer
+   item, call this.props.onFooterFocusChange(newIndex). When focus leaves the
+   footer (back to null or to a header field), call
+   this.props.onFooterFocusChange(null).
+
+6. When App navigates away from DetailView (goBack, goHome, navigateToView),
+   reset focusedFooterIndex to null so the footer renders unfocused for other
+   views.
+
+7. FooterProps gains:
+     readonly focusedIndex?: number | null;
+
+This mirrors the established onThreadStateChange / threadInfo pattern exactly,
+so it is consistent with the existing codebase style.
+
+Alternative considered: Use React Context. Rejected because the rest of the
+codebase uses direct props and callbacks (class components with forceUpdate).
+Adding a Context just for this would be inconsistent.
+
+
+==========================================================================
+QUESTION 3: Should Enter on a focused footer item activate that shortcut?
+==========================================================================
+
+Yes. A tabbable footer item that cannot be activated is useless -- it would
+just be a decoration. Pressing Enter on a focused footer item should invoke
+the action that the shortcut represents.
+
+Dispatch architecture:
+
+The shortcuts are defined as data in footer.tsx (VIEW_SHORTCUTS and
+THREAD_SHORTCUTS). The actions are handled in detail.tsx's handleKey method.
+To bridge these, introduce an action dispatch callback:
+
+1. Extend the Shortcut interface with an optional action identifier:
+     export interface Shortcut {
+         readonly key: string;
+         readonly label: string;
+         readonly disabled?: boolean;
+         readonly action?: string;  // e.g. 'resolve', 'back', 'home', 'thread', etc.
+     }
+
+2. Add action strings to each shortcut definition. For example:
+     { key: '^R', label: 'Resolve', action: 'resolveThread' }
+     { key: 'Esc', label: 'Back', action: 'back' }
+
+3. Add a new prop to FooterProps:
+     readonly onActivate?: (action: string) => void;
+
+4. Footer renders each item as a Box. When focusedIndex matches and Enter is
+   pressed, Footer calls onActivate with the action string. However, since
+   Footer itself does not use useInput (it is a presentational component),
+   the Enter detection actually happens in DetailView's handleKey:
+
+     if (key.return && this.focusedFooterIndex !== null) {
+         const shortcuts = this.getCurrentShortcuts();
+         const shortcut = shortcuts[this.focusedFooterIndex];
+         if (shortcut?.action) {
+             this.dispatchFooterAction(shortcut.action);
+         }
+         return;
+     }
+
+5. DetailView.dispatchFooterAction maps action strings to method calls:
+     dispatchFooterAction(action: string) {
+         switch (action) {
+             case 'resolveThread': this.resolveThread(); break;
+             case 'back':          this.exitThread(); break;
+             case 'home':          this.props.onHome(this.selectedMessage); break;
+             case 'enterThread':   this.enterThread(); break;
+             case 'exitThread':    this.exitThread(); break;
+             // ...etc
+         }
+     }
+
+For disabled shortcuts (disabled: true), Enter should be a no-op. The focused
+rendering still shows the item as dimmed/disabled so the user gets visual
+feedback that it is not activatable.
+
+Edge case: Some shortcuts like "Send" and "Scroll" do not map cleanly to
+footer activation. "Send" makes no sense from the footer (there is no text
+to send). "Scroll" is continuous, not a single action. These items should
+either have no action string (Enter is ignored) or be excluded from the
+focus ring entirely. Recommendation: include them in the focus ring for visual
+consistency but give them no action string, making Enter a no-op.
+
+
+==========================================================================
+QUESTION 4: What happens to FOOTER_LINES if footer wraps to 2 lines?
+==========================================================================
+
+Current state of FOOTER_LINES:
+
+FOOTER_LINES is exported as 1 from footer.tsx. However, it is NOT actually
+used in any height calculation. DetailView.conversationHeight subtracts
+HEADER_LINES (3) + headerLineCount (5 or thread-header-dependent) +
+INPUT_AREA_LINES (3) from this.props.rows, but never subtracts FOOTER_LINES.
+
+This works today because App.render() wraps everything in a
+<Box flexDirection="column" height={this.rows}>. The Footer is a child of this
+column. The DetailView does not set an explicit height on itself -- it just
+renders its content. The footer naturally takes its line(s) at the bottom.
+However, the conversation area (ResponseChain) DOES get an explicit height
+via this.conversationHeight. Because FOOTER_LINES is not subtracted, the
+footer is effectively stealing one line from whatever Ink allocates, which
+may cause a slight layout overflow that Ink handles by truncating.
+
+When the footer wraps from 1 line to 2 lines, this overflow doubles.
+
+Required changes:
+
+1. FOOTER_LINES must be included in the conversation height calculation:
+
+     get conversationHeight(): number {
+         return Math.max(
+             1,
+             this.props.rows - HEADER_LINES - this.headerLineCount
+                 - INPUT_AREA_LINES - footerLines,
+         );
+     }
+
+2. FOOTER_LINES can no longer be a static constant of 1. It must be dynamic,
+   computed based on the actual shortcuts being rendered and the terminal
+   width. There are two approaches:
+
+   Approach A -- Pre-compute from shortcut data (recommended):
+     Compute the total character width of all shortcut items including spacing.
+     Divide by terminal columns. Ceiling gives the line count. Pass this as a
+     prop from App to DetailView, or compute it inside DetailView since it has
+     access to columns and knows the current shortcuts.
+
+     function computeFooterLines(shortcuts: Shortcut[], columns: number): number {
+         let totalWidth = 0;
+         for (let i = 0; i < shortcuts.length; i++) {
+             // "[key] label" + 2-space separator (except first)
+             const itemWidth = 1 + shortcuts[i].key.length + 2 + shortcuts[i].label.length;
+             if (i > 0) totalWidth += 2; // separator
+             totalWidth += itemWidth;
+         }
+         return Math.max(1, Math.ceil(totalWidth / columns));
+     }
+
+     Export this function from footer.tsx so DetailView can call it.
+
+   Approach B -- Measure after render (fragile):
+     Use Ink's measureElement or a ref to measure the actual rendered height.
+     This is fragile in Ink and creates a chicken-and-egg problem: you need
+     the height to set the conversation area, but you need to render to
+     measure. Rejected.
+
+3. The FOOTER_LINES constant should be replaced with a function:
+     export function getFooterLineCount(viewType: ViewType, inThread: boolean, columns: number): number
+
+   Or alternatively keep FOOTER_LINES as a minimum (1) for backward compat
+   and add the dynamic function alongside it.
+
+4. App needs to pass the footer line count to DetailView, or DetailView needs
+   to import the shortcut data and compute it. Since DetailView already knows
+   columns and could know the viewType (it is always ViewType.Detail), the
+   cleanest approach is for DetailView to import the computation function
+   and the shortcut arrays directly.
+
+Risk: If the pre-computed line count disagrees with Ink's actual wrapping
+behavior (e.g., due to Unicode character widths in the key symbols like
+arrows), the layout will be off by a line. Mitigation: use the same width
+calculation that Ink uses, or add 1 line of padding as a safety margin.
+
+
+==========================================================================
+QUESTION 5: How should flexWrap="wrap" interact with marginRight spacing?
+==========================================================================
+
+Current approach (broken):
+  Each shortcut is a <Text> inside a parent <Text wrap="wrap">. Spacing is
+  done via string concatenation: a 2-space separator string prepended to each
+  item after the first. Because this is inside a single <Text>, Ink treats the
+  whole thing as one text node and wraps at any whitespace boundary -- including
+  the space between [^R] and Resolve.
+
+New approach with flexWrap:
+  Replace the single <Text wrap="wrap"> with a <Box flexWrap="wrap">. Each
+  shortcut becomes its own <Box> child. Spacing uses marginRight on each item
+  Box (except the last).
+
+  <Box flexWrap="wrap">
+      {shortcuts.map((s, i) => (
+          <Box key={i} marginRight={i < shortcuts.length - 1 ? 2 : 0}>
+              <Text bold color="cyan">[{s.key}]</Text>
+              <Text> {s.label}</Text>
+          </Box>
+      ))}
+  </Box>
+
+  Each <Box> is an atomic unit that Ink will not break apart. When the total
+  width exceeds the terminal columns, Ink wraps entire Boxes to the next line.
+  The marginRight: 2 creates the same visual spacing as the old 2-space
+  separator.
+
+Important details:
+
+  - marginRight is applied to the Box, not to the Text. This means the margin
+    is not part of the content width. Ink handles it as layout spacing.
+
+  - The last item should have marginRight: 0 to avoid trailing whitespace
+    that could cause an unnecessary wrap.
+
+  - Each item Box should NOT set a fixed width. Let it be intrinsic so it
+    shrinks to fit [key] + space + label.
+
+  - If an individual shortcut is wider than the terminal (highly unlikely but
+    theoretically possible with very long labels on very narrow terminals),
+    Ink will truncate it. This is acceptable.
+
+  - The gap between items should be marginRight={2} to match the current
+    2-space visual gap. Using marginRight={1} would feel cramped.
+
+  - When focused, the entire item Box gets inverse styling. The marginRight
+    gap ensures the inverse highlight does not bleed into adjacent items.
+
+
+==========================================================================
+QUESTION 6: Ink-specific pitfalls with <Text inverse> inside <Box flexWrap>
+==========================================================================
+
+Pitfall 1 -- inverse on Text vs Box:
+  <Text inverse> applies inverse colors to the text content only. If the item
+  Box has padding, the padding area will NOT be inversed because Ink does not
+  render background colors in padding/margin areas. To make the focus
+  highlight look clean, keep padding minimal (paddingLeft={0} paddingRight={0})
+  or use spaces inside the Text content as pseudo-padding:
+    <Text inverse>{` [${s.key}] ${s.label} `}</Text>
+  The leading/trailing spaces inside the Text become part of the inverted
+  area. This is the same technique used in IssueHeader (line 37-40 of
+  issue-header.tsx) where focused fields use {` ${group} `} with inverse.
+
+Pitfall 2 -- nested Text with different inverse states:
+  If the item contains multiple <Text> children (one for the key, one for
+  the label), and only some have inverse={true}, Ink renders each segment
+  independently. When focused, ALL text in the item should be inverse. This
+  means the focused rendering should use a single <Text inverse> wrapping
+  the entire "[key] label" string, rather than two separate Text nodes with
+  individual inverse props. This avoids a visual gap between the key and
+  label where inverse might not apply.
+
+  Unfocused: <Text bold color="cyan">[{s.key}]</Text><Text> {s.label}</Text>
+  Focused:   <Text inverse bold>{` [${s.key}] ${s.label} `}</Text>
+
+Pitfall 3 -- flexWrap and height:
+  <Box flexWrap="wrap"> does not set its own height. The wrapping simply
+  causes the Box to grow taller. This is fine for layout, but if a parent
+  Box has a fixed height, content can overflow. In our case, the App root
+  Box has height={this.rows}, so if the footer unexpectedly takes 3 lines,
+  it could push content off screen. The dynamic FOOTER_LINES calculation
+  (Question 4) mitigates this.
+
+Pitfall 4 -- flexWrap with marginRight on last item:
+  If the last item in a row has marginRight > 0, Ink may count that margin
+  toward the row width and wrap the item to the next line even though the
+  visible content fits. Always set marginRight={0} on the last item in the
+  array. Or better: use a gap-like approach where marginRight is applied to
+  all items uniformly and accept that the last item in each visual row may
+  have trailing margin (which is invisible but still counts for wrapping).
+  Testing with the actual terminal width is needed to confirm behavior.
+
+Pitfall 5 -- dimColor + inverse together (disabled + focused):
+  If a disabled item receives focus, <Text dimColor inverse> may produce
+  unexpected visuals depending on the terminal. Some terminals render
+  dim+inverse as a lighter background with dim foreground, which can be
+  hard to read. Test with common terminals (iTerm2, Terminal.app, VS Code
+  integrated terminal). Consider rendering disabled+focused as just inverse
+  with a dimColor label but bright key, or simply skip disabled items in the
+  focus ring entirely.
+
+  Recommendation: Exclude disabled shortcuts from the Tab ring. They are
+  shown as informational placeholders for future features. Users should not
+  be able to Tab to or activate them.
+
+Pitfall 6 -- memo invalidation:
+  Footer is currently wrapped in React.memo. Adding focusedIndex as a prop
+  means the memo comparison must include it. Since React.memo does shallow
+  comparison by default, and focusedIndex is a primitive (number | null),
+  this works correctly without a custom comparator. No changes needed to
+  the memo wrapper.
+
+
+==========================================================================
+QUESTION 7: How do existing footer tests need to change?
+==========================================================================
+
+Current test structure (footer.test.tsx, 125 lines):
+
+  Test suite 1: "Footer -- shortcut data"
+    - VIEW_SHORTCUTS has an entry for every ViewType
+    - Every shortcut has non-empty key and label
+    - FOOTER_LINES constant is exported
+
+  Test suite 2: "Footer -- per-view rendering"
+    - Dashboard renders all 9 shortcuts
+    - Detail shows all shortcuts with disabled indicators
+    - NewIssue shows 2 shortcuts
+    - NewIssue does NOT show Dashboard-only shortcuts
+    - AgentStatus shows 3 shortcuts
+    - BlockingMap shows 3 shortcuts
+    - GroupView shows 4 shortcuts
+
+Required changes:
+
+1. FOOTER_LINES test:
+   If FOOTER_LINES becomes a function (getFooterLineCount), update the test:
+     - Remove "FOOTER_LINES constant is exported" test
+     - Add "getFooterLineCount returns >= 1 for all view types at 80 columns"
+     - Add "getFooterLineCount returns 2 when shortcuts exceed column width"
+       (test with a very narrow column count, e.g., 20)
+
+2. FooterProps change -- all render tests must be updated:
+   Every render(<Footer ...>) call needs the new focusedIndex prop. Since
+   it is optional (focusedIndex?: number | null), existing tests will still
+   compile and run without it -- the footer renders in unfocused mode.
+   However, new tests should be added:
+
+3. New tests for focused rendering:
+   - "focused item renders with inverse styling"
+     Render <Footer viewType={ViewType.Home} focusedIndex={0} />, verify
+     that the first shortcut text appears differently (inverse attribute).
+     Note: ink-testing-library's lastFrame() strips ANSI in some configs.
+     May need to check raw output or use snapshot testing.
+
+   - "focusedIndex=null renders all items without inverse"
+     Baseline to ensure unfocused is the default.
+
+   - "focusedIndex beyond shortcut count is clamped/ignored"
+     Render with focusedIndex={99}. Verify no crash, no item appears focused.
+
+   - "disabled items render dimColor even when focused"
+     (If disabled items are kept in the focus ring. If excluded, this test
+     is not needed.)
+
+4. New tests for the flexWrap behavior:
+   - "shortcut key and label stay on the same line"
+     Render with a column width that would previously split [^R] and Resolve.
+     Verify they appear on the same line. This is the core regression test
+     for Issue 1.
+     Note: This is hard to test with ink-testing-library because it does not
+     enforce a terminal width during render. May need to wrap Footer in a
+     <Box width={N}> to constrain it, or use snapshot testing.
+
+5. Shortcut data tests:
+   - If action strings are added to Shortcut, add:
+     "every non-disabled shortcut in Detail/Thread has an action string"
+     This ensures no shortcut is accidentally missing its activation mapping.
+
+6. Thread shortcut tests:
+   - "Footer with inThread=true shows thread shortcuts instead of detail"
+     Render <Footer viewType={ViewType.Detail} inThread={true} />, verify
+     it contains 'Sub-thread' and 'Exit thread' and does NOT contain the
+     detail-only items like 'Defer', 'Rebase', etc.
+   (This test may already be implicitly covered but should be explicit.)
+
+
+==========================================================================
+SUMMARY OF FILE CHANGES
+==========================================================================
+
+src/tui/footer.tsx:
+  - Add focusedIndex prop to FooterProps
+  - Replace <Text wrap="wrap"> with <Box flexWrap="wrap">
+  - Each shortcut becomes its own <Box marginRight={2}>
+  - Focused item renders with <Text inverse bold>
+  - Disabled items excluded from focus ring (rendered but not focusable)
+  - Add optional action string to Shortcut interface
+  - Replace FOOTER_LINES constant with getFooterLineCount() function
+  - Keep FOOTER_LINES as deprecated alias (= 1) for backward compat if needed
+
+src/tui/detail.tsx:
+  - Replace cycleField() with cycleFocus() that handles unified ring
+  - Add focusedFooterIndex instance variable (number | null)
+  - Add onFooterFocusChange prop to DetailViewProps
+  - In cycleFocus(), compute ring based on isInThread:
+      thread view:  [null, ...footer items]
+      issue view:   [null, Group, BlockedBy, Blocks, ...footer items]
+  - Call onFooterFocusChange whenever focusedFooterIndex changes
+  - Handle Enter on focusedFooterIndex to dispatch footer actions
+  - Update conversationHeight to subtract dynamic footer line count
+  - Import getFooterLineCount (or equivalent) from footer.tsx
+  - Tab handler in thread view no longer sets focusedField to 0/1/2
+
+src/tui/input-box.tsx:
+  - No changes needed. The focused prop already works correctly:
+    focused={this.focusedField === null && this.focusedFooterIndex === null}
+    (This change is in detail.tsx line 585, not in input-box.tsx itself.)
+
+  Wait -- actually detail.tsx line 585 currently reads:
+    focused={this.focusedField === null}
+  This must change to:
+    focused={this.focusedField === null && this.focusedFooterIndex === null}
+  So InputBox loses focus when either a header field or a footer item is
+  focused. This is a change in detail.tsx, not input-box.tsx.
+
+src/tui/app.tsx:
+  - Add focusedFooterIndex instance variable (number | null = null)
+  - Pass onFooterFocusChange callback to DetailView
+  - Pass focusedIndex={this.focusedFooterIndex} to Footer
+  - Reset focusedFooterIndex to null on navigation (goBack, goHome, etc.)
+
+src/tui/footer.test.tsx:
+  - Update FOOTER_LINES tests for new function signature
+  - Add focused rendering tests
+  - Add flexWrap / no-split regression tests
+  - Add thread shortcut rendering test
+  - Add action string coverage test
+
+
+==========================================================================
+EDGE CASES AND RISKS
+==========================================================================
+
+1. Terminal resize: If the terminal is resized while a footer item is focused,
+   the footer line count may change. The focused index could point to an item
+   that is now on a different visual line. This is purely cosmetic and does
+   not break functionality, but the conversationHeight must be recomputed.
+   The existing resize handling (commit 3dc5a5a) already forces a re-render
+   on resize, so this should work automatically as long as getFooterLineCount
+   is called on each render, not cached.
+
+2. View transitions: When navigating from Detail to Home, the footer shortcuts
+   change entirely. The focusedFooterIndex must be reset to null. If it is
+   not reset, the Home footer could render with a stale focused index pointing
+   to a nonexistent item. The App.navigateToView / goHome / goBack methods
+   must all reset focusedFooterIndex.
+
+3. Thread enter/exit: Entering a thread changes the shortcut set from
+   VIEW_SHORTCUTS[Detail] (11 items) to THREAD_SHORTCUTS (7 items). If the
+   user has focusedFooterIndex=8 (valid in detail mode) and enters a thread,
+   index 8 is out of bounds for thread shortcuts. The cycleFocus logic must
+   reset focusedFooterIndex to null on thread transitions. The existing
+   onThreadStateChange callback already fires at this point, so adding a
+   focusedFooterIndex reset there is straightforward.
+
+4. Overlay open: When an overlay (Group picker, BlockedBy, Blocks) is open,
+   the handleKey method returns early at line 289. Tab presses are swallowed.
+   This is correct -- the footer focus should not change while an overlay is
+   open. However, the footer still renders underneath the overlay. It should
+   either be hidden during overlays or rendered unfocused. Since overlays
+   currently replace the entire content area (lines 452-521), and the footer
+   is rendered by App outside DetailView, it remains visible. Consider passing
+   an "overlayActive" prop to Footer to dim it, or accept the current behavior
+   since overlays are modal and the user cannot interact with the footer.
+
+5. Focus ring size of 1: If there is only one shortcut in the footer (unlikely
+   but possible in future views), and the user is in thread view (no header
+   fields), the ring is [null, Footer0]. Tab toggles between InputBox and the
+   single footer item. This is correct behavior.
+
+6. Disabled items and the focus ring: The plan excludes disabled items from
+   the Tab ring. This means the number of tabbable footer items differs from
+   the total number of rendered items. The focusedFooterIndex must index into
+   the filtered (non-disabled) list, or alternatively index into the full list
+   but skip disabled items during cycling. Recommendation: index into the full
+   list and skip disabled items during cycling. This keeps the index stable
+   even if disabled states change dynamically.

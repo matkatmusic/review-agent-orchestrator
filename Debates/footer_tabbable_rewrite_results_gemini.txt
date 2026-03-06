@@ -1,0 +1,113 @@
+Debugger listening on ws://127.0.0.1:51336/e391836b-1e35-4008-b3b3-6f06f8d5112b
+For help, see: https://nodejs.org/en/docs/inspector
+Debugger attached.
+Debugger listening on ws://127.0.0.1:51346/55cf99b0-0454-4552-92a7-ba76703d0e4c
+For help, see: https://nodejs.org/en/docs/inspector
+Debugger attached.
+Loaded cached credentials.
+[ERROR] [IDEClient] Failed to connect to IDE companion extension. Please ensure the extension is running. To install the extension, run /ide install.
+Hook registry initialized with 0 hook entries
+Here is a comprehensive implementation plan to address the three interconnected issues, answering your specific architectural questions and highlighting Ink-specific caveats.
+
+### 1. Focus Ring Architecture & Bypassing Header in Thread View
+**Context:** Issue 3 occurs because `DetailView` hardcodes a 3-field focus ring (`DETAIL_FIELD_COUNT = 3`), regardless of whether the header is visible (in a thread) or how many footer items exist.
+
+**Solution:**
+We must dynamically calculate the total number of focusable fields. The focus ring will span: `Input (null) -> Header Fields (if visible) -> Footer Items`.
+
+*   **Determine Field Counts:**
+    *   `headerFieldCount` = `isInThread ? 0 : 3`
+    *   `footerFieldCount` = `shortcuts.length`
+    *   `totalFields` = `headerFieldCount + footerFieldCount`
+*   **Update `cycleField(direction)` in `detail.tsx`:**
+    *   If `focusedField === null`:
+        *   Going forward (`1`) jumps to `0` (which maps to Group if not in thread, or the first footer item if in thread).
+        *   Going backward (`-1`) jumps to `totalFields - 1` (the last footer item).
+    *   If `focusedField !== null`:
+        *   `next = focusedField + direction`.
+        *   If `next < 0` or `next >= totalFields`, wrap to `null` (InputBox).
+    *   *This directly fixes Issue 3 by treating `headerFieldCount` as `0` in threads, ensuring the cursor never gets lost in non-rendered header fields.*
+
+### 2. Passing Focus State to the Footer Component
+**Context:** `DetailView` manages keyboard input, but `App` renders `Footer`. 
+
+**Solution:** 
+State lifting. `App` will hold the current focused footer index and pass it down.
+
+*   **In `App.tsx`:**
+    *   Add `focusedFooterIndex: number | null = null;` to the `App` class.
+    *   Pass a new callback to `DetailView`: `onFooterFocusChange={(idx) => { this.focusedFooterIndex = idx; this.forceUpdate(); }}`.
+    *   Pass `focusedIndex={this.focusedFooterIndex}` as a prop to `<Footer>`.
+    *   Reset `this.focusedFooterIndex = null` inside view navigation methods (`navigateToView`, `goBackToPreviousView`, etc.).
+*   **In `DetailView.tsx`:**
+    *   In `cycleField`, after determining `this.focusedField`, calculate:
+        `const footerIdx = (this.focusedField !== null && this.focusedField >= headerFieldCount) ? this.focusedField - headerFieldCount : null;`
+    *   Invoke `this.props.onFooterFocusChange?.(footerIdx)`.
+
+### 3. Activating Footer Items with Enter
+**Context:** Footer shortcuts act as visual hints, but if they become focusable, users will expect `Enter` to activate them.
+
+**Solution:**
+Action dispatching mapped from the shortcut definitions.
+
+*   Export a helper from `footer.tsx`: `export const getShortcuts = (viewType, inThread) => ...`
+*   In `DetailView.handleKey`, intercept `key.return`:
+    ```typescript
+    if (key.return && this.focusedField !== null) {
+        if (this.focusedField < headerFieldCount) {
+            this.openOverlayForField(); // Existing behavior for Group/Blocks
+        } else {
+            // New behavior: Dispatch Footer Action
+            const footerIndex = this.focusedField - headerFieldCount;
+            const shortcut = getShortcuts(ViewType.Detail, isInThread)[footerIndex];
+            if (!shortcut.disabled) {
+                this.dispatchFooterAction(shortcut.key);
+            }
+        }
+        return;
+    }
+    ```
+*   Create `dispatchFooterAction(shortcutKey: string)` in `DetailView` which switches on the key and explicitly calls the corresponding method (e.g., `'^R'` -> `this.resolveThread()`, `'Esc'` -> `this.exitThread()`).
+
+### 4. Fixing the Footer Wrapping (Issue 1) and Ink Styling Pitfalls
+**Context:** Ink's `<Text wrap="wrap">` wraps character-by-character or at spaces indiscriminately. To keep `[^R] Resolve` together, we must use `Box` components.
+
+**Solution:**
+Refactor `<FooterComponent>` to use a Flexbox row wrapper.
+
+*   Replace `<Text wrap="wrap">` with `<Box flexWrap="wrap">`.
+*   Render each shortcut as a `<Box key={i} marginRight={2}>`. Flexbox will naturally wrap these boxes to the next line without breaking the inner text apart.
+
+**Ink-specific `<Text inverse>` pitfall:**
+When you use `<Text inverse>` around text that has specific nested colors (like `color="cyan"` for the shortcut key), the terminal often fails to invert the nested colors properly, leading to unreadable artifacts.
+*   **Do not use `inverse`.** Instead, manually swap the `color` and `backgroundColor` props based on the `isFocused` state:
+    ```tsx
+    const isFocused = focusedIndex === i;
+    const bgColor = isFocused ? 'white' : undefined;
+    const textColor = isFocused ? 'black' : (s.disabled ? 'gray' : 'white');
+    const keyColor = isFocused ? 'black' : 'cyan';
+
+    return (
+        <Box key={i} marginRight={2}>
+            <Text backgroundColor={bgColor} color={textColor}>
+                <Text bold color={keyColor}>[{s.key}]</Text> {s.label}
+            </Text>
+        </Box>
+    );
+    ```
+
+### 5. Layout Height Calculation for Dynamic Footers
+**Context:** If the footer wraps, it uses 2 lines instead of 1. If `DetailView.conversationHeight` continues subtracting `1` for the footer, the app will overflow and terminal scrolling will glitch.
+
+**Solution:**
+*   Create a helper function `computeFooterLines(shortcuts, columns)` in `footer.tsx` that sums the character length of all labels + keys + padding, and divides by `columns` (rounded up).
+*   In `DetailView.tsx`'s `get conversationHeight()`, dynamically calculate and subtract this value instead of assuming it's `0` or `1`. (Currently, `DetailView` forgets to subtract `FOOTER_LINES` at all, which is a hidden bug that dynamic wrapping will expose).
+*   Formula: `Math.max(1, this.props.rows - HEADER_LINES - this.headerLineCount - INPUT_AREA_LINES - calculatedFooterLines)`.
+
+### Summary of required File Changes
+1.  **`src/tui/footer.tsx`**: Add `focusedIndex` prop, switch to `<Box flexWrap="wrap">`, implement manual color inversion, and export `getShortcuts` and `computeFooterLines`.
+2.  **`src/tui/app.tsx`**: Add `focusedFooterIndex` state, pass state/callback to `DetailView` and `Footer`, and reset state on navigation.
+3.  **`src/tui/detail.tsx`**: Update `cycleField` to account for dynamic field counts (skipping header in thread), dispatch `onFooterFocusChange`, map `Enter` key to footer actions, and patch `conversationHeight` to handle multiline footers.
+4.  **Tests**: Update `footer.test.tsx` (or similar) to assert `<Box>` existence instead of `<Text wrap="wrap">` and verify styling changes based on the new `focusedIndex` prop.
+Waiting for the debugger to disconnect...
+Waiting for the debugger to disconnect...
