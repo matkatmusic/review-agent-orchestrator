@@ -13,6 +13,7 @@ import { BlockingMap } from './blocking-map.js';
 import { GroupView, GROUP_MODE_INITIAL } from './group-view.js';
 import type { GroupMode } from './group-view.js';
 import { IssueStatus } from '../types.js';
+import { IssueListPicker } from './issue-list-picker.js';
 
 function pushViewOntoStack(viewStack: View[], view: View): View[] {
     let newStack: View[] = [];
@@ -146,12 +147,14 @@ class App extends React.Component<AppProps> {
                             rows={this.rows}
                             containers={MOCK_CONTAINERS}
                             allIssues={MOCK_ISSUES}
+                            unreadInums={MOCK_UNREAD_INUMS}
                             userLastViewedAt={mockData.issue.user_last_viewed_at}
                             initialSelectedMessage={this.savedSelectedMessage.get(inum)}
                             onBack={(sel) => this.saveSelectedAndGoBack(inum, sel)}
                             onHome={(sel) => this.saveSelectedAndGoHome(inum, sel)}
                             onSend={() => {}}
                             onNavigateIssue={(inumTo) => this.replaceCurrentView({ type: ViewType.Detail, inum: inumTo })}
+                            onOpenPicker={(mode) => this.navigateToView({ type: ViewType.IssuePicker, mode, inum })}
                             onQuit={() => this.props.onExit?.()}
                             onThreadStateChange={(info) => {
                                 this.threadInfo = info;
@@ -161,6 +164,43 @@ class App extends React.Component<AppProps> {
                     );
                 } else {
                     content = <Text color="red">Issue I-{this.currentView.inum} not found</Text>;
+                }
+                break;
+            }
+            case ViewType.IssuePicker: {
+                const pickerView = this.currentView;
+                const mockData = MOCK_DETAIL_DATA[pickerView.inum];
+                if (mockData) {
+                    const otherIssues = MOCK_ISSUES.filter(i => i.inum !== pickerView.inum);
+                    const selectedSet = new Set(
+                        pickerView.mode === 'blockedBy' ? mockData.blockedBy : mockData.blocks
+                    );
+                    content = (
+                        <Box flexDirection="column" height={this.rows - HEADER_LINES}>
+                            <IssueListPicker
+                                title={pickerView.mode === 'blockedBy' ? 'Blocked by' : 'Blocks'}
+                                issues={otherIssues}
+                                selected={selectedSet}
+                                unreadInums={MOCK_UNREAD_INUMS}
+                                onToggle={(toggledInum) => {
+                                    const arr = pickerView.mode === 'blockedBy'
+                                        ? mockData.blockedBy
+                                        : mockData.blocks;
+                                    const idx = arr.indexOf(toggledInum);
+                                    if (idx >= 0) {
+                                        arr.splice(idx, 1);
+                                    } else {
+                                        arr.push(toggledInum);
+                                    }
+                                    this.forceUpdate();
+                                }}
+                                onClose={() => this.goBackToPreviousView()}
+                                onViewIssue={(viewInum) => this.navigateToView({ type: ViewType.Detail, inum: viewInum })}
+                            />
+                        </Box>
+                    );
+                } else {
+                    content = <Text color="red">Issue I-{pickerView.inum} not found</Text>;
                 }
                 break;
             }

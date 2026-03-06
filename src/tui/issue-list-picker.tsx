@@ -10,8 +10,10 @@ export interface IssueListPickerProps {
     title: string;
     issues: Issue[];
     selected: Set<number>;
+    unreadInums?: Set<number>;
     onToggle: (inum: number) => void;
     onClose: () => void;
+    onViewIssue?: (inum: number) => void;
 }
 
 // ---- Input bridge ----
@@ -49,11 +51,14 @@ export class IssueListPicker extends React.Component<IssueListPickerProps> {
         } else if (key.return && this.props.issues.length > 0) {
             const issue = this.props.issues[this.cursor];
             this.props.onToggle(issue.inum);
+        } else if (key.ctrl && input === 'v' && this.props.issues.length > 0) {
+            const issue = this.props.issues[this.cursor];
+            this.props.onViewIssue?.(issue.inum);
         }
     };
 
     render() {
-        const { title, issues, selected } = this.props;
+        const { title, issues, selected, unreadInums } = this.props;
 
         return (
             <Box flexDirection="column" borderStyle="single" paddingLeft={1} paddingRight={1}>
@@ -65,8 +70,12 @@ export class IssueListPicker extends React.Component<IssueListPickerProps> {
                     issues.map((issue, i) => {
                         const focused = i === this.cursor;
                         const checked = selected.has(issue.inum);
+                        const hasNewReplies = unreadInums?.has(issue.inum) ?? false;
                         const statusLabel = IssueStatusStringsMap.get(issue.status) ?? '';
                         const sColor = statusToColor(issue.status);
+                        const titleDisplay = issue.title.length > 30
+                            ? issue.title.slice(0, 27) + '...'
+                            : issue.title;
                         return (
                             <Box key={issue.inum}>
                                 <Text color={focused ? 'cyan' : undefined}>
@@ -75,13 +84,14 @@ export class IssueListPicker extends React.Component<IssueListPickerProps> {
                                 <Text color={checked ? 'green' : 'gray'}>
                                     {checked ? '[x] ' : '[ ] '}
                                 </Text>
+                                <Text color={hasNewReplies ? 'yellow' : undefined}>
+                                    {hasNewReplies ? '* ' : '  '}
+                                </Text>
                                 <Text bold={focused} color={focused ? 'cyan' : undefined}>
                                     {`I-${issue.inum}`.padEnd(6)}
                                 </Text>
                                 <Text bold={focused} color={focused ? 'cyan' : undefined}>
-                                    {issue.title.length > 30
-                                        ? issue.title.slice(0, 27) + '...'
-                                        : issue.title.padEnd(30)}
+                                    {titleDisplay}
                                 </Text>
                                 <Text> </Text>
                                 <Text color={sColor}>{statusLabel}</Text>
@@ -89,7 +99,7 @@ export class IssueListPicker extends React.Component<IssueListPickerProps> {
                         );
                     })
                 )}
-                <Text dimColor>Toggle (enter)   Done (esc)</Text>
+                <Text><Text color="yellow">*</Text><Text dimColor> = Unread replies</Text></Text>
             </Box>
         );
     }

@@ -61,6 +61,12 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
         { key: 'p',     label: 'Prev issue' },
         { key: 'Esc',   label: 'Back' },
     ],
+    [ViewType.IssuePicker]: [
+        { key: 'Enter', label: 'Toggle' },
+        { key: '↑↓',    label: 'Scroll' },
+        { key: 'Esc',   label: 'Done' },
+        { key: 'Ctrl v', label: 'View issue' },
+    ],
 };
 
 const THREAD_SHORTCUTS: readonly Shortcut[] = [
