@@ -1,0 +1,445 @@
+Debugger listening on ws://127.0.0.1:60638/6a99253f-46de-4899-a5ba-f840e5ff0577
+For help, see: https://nodejs.org/en/docs/inspector
+Debugger attached.
+Reading prompt from stdin...
+OpenAI Codex v0.111.0 (research preview)
+--------
+workdir: /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator
+model: gpt-5.3-codex
+provider: openai
+approval: never
+sandbox: workspace-write [workdir, /tmp, $TMPDIR, /Users/matkatmusicllc/.codex/memories]
+reasoning effort: high
+reasoning summaries: none
+session id: 019cca31-f820-7873-850c-e4ea5567558f
+--------
+user
+DEPENDENCY AUDIT OF TUI_REWRITE_PLAN.txt
+
+You are auditing a TDD build plan for a terminal UI rewrite. The plan file is at:
+./TUI_REWRITE_PLAN.txt
+
+Read the entire file. It contains 13 phases (Phase 0 through Phase 12), each with
+numbered steps and substeps. Each step lists tests to write and implementation items.
+
+YOUR TASK:
+
+1. Check ALL steps and substeps across ALL 13 phases for dependency issues:
+   - Forward dependencies: a step depends on something not yet built in an earlier step
+   - Circular references: step A depends on step B which depends on step A
+   - Contradictions: two steps say different things about the same file or concept
+   - TDD violations: steps with implementation but no tests
+   - Duplicate tests: the same test appearing in multiple steps
+   - Incorrect metadata: wrong critical path, wrong test counts, wrong dependency lists
+
+2. For each issue found, propose a specific fix:
+   - Which step to move, merge, or modify
+   - What test to add, remove, or relocate
+   - What metadata to correct
+
+3. Evaluate the existing GATE TEST RULE section (near the end of the file).
+   Does it adequately enforce that each step must have an explicit passing test
+   before the next step can begin? If not, propose improvements.
+
+OUTPUT FORMAT:
+
+For each issue, write:
+  ISSUE [number]: [severity: HIGH/MEDIUM/LOW]
+  Location: Phase X, Step Y.Z, line(s) approximate
+  Problem: [description]
+  Fix: [specific proposed change]
+
+Then at the end, write:
+  SUMMARY: [total issues found], [HIGH count], [MEDIUM count], [LOW count]
+  GATE TEST ASSESSMENT: [adequate/needs improvement] + [what to change if needed]
+
+mcp startup: no servers
+codex
+I’m going to read `TUI_REWRITE_PLAN.txt` end-to-end first, then I’ll map step-to-step dependencies and metadata to identify ordering, TDD, and duplication issues with precise fixes.
+exec
+/bin/zsh -lc "wc -l TUI_REWRITE_PLAN.txt && nl -ba TUI_REWRITE_PLAN.txt | sed -n '1,260p'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+    1365 TUI_REWRITE_PLAN.txt
+     1	TUI REWRITE PLAN — Incremental Build with TDD
+     2	===============================================
+     3	
+     4	Companion to: TUI_REWRITE_REQUIREMENTS.txt
+     5	Methodology: Test-Driven Development (Red-Green-Refactor)
+     6	Principle: Every step produces a runnable, testable app.
+     7	
+     8	
+     9	================================================================================
+    10	PHASE 0: SCAFFOLDING & TEST INFRASTRUCTURE
+    11	================================================================================
+    12	
+    13	Goal: Clean slate for the rewrite. Existing src/tui/ is preserved on a branch
+    14	for reference. New files are created alongside or replace them.
+    15	
+    16	- [x] Step 0.1: Preserve Current Code
+    17	---------------------------------
+    18	  - [x] Create branch: tui-rewrite
+    19	  - [x] Tag current HEAD for reference: pre-rewrite
+codex
+I’ve loaded the first section with architecture notes; next I’m pulling the remaining phases and metadata sections in chunks with line numbers so I can cross-check dependencies and test counts accurately.
+exec
+/bin/zsh -lc "nl -ba TUI_REWRITE_PLAN.txt | sed -n '261,540p'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "nl -ba TUI_REWRITE_PLAN.txt | sed -n '541,820p'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "nl -ba TUI_REWRITE_PLAN.txt | sed -n '1101,1365p'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "nl -ba TUI_REWRITE_PLAN.txt | sed -n '821,1100p'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 51ms:
+   541	    - [ ] test: "getNextResponseId increments and persists"
+   542	
+   543	  Then implement:
+   544	    - [ ] Update data/mock-data.default.json with above schema
+   545	    - [ ] Update src/tui/mock-store.ts:
+   546	      - [ ] Add quoted_response_id to MockResponseRow
+   547	      - [ ] Hydration handles quoted_response_id
+   548	      - [ ] Flattening preserves quoted_response_id
+   549	    - [ ] Update src/tui/mock-data.ts:
+   550	      - [ ] All MOCK_* exports use immutable patterns
+   551	      - [ ] MOCK_AGENTS consolidated here (from agent-status.tsx)
+   552	      - [ ] MOCK_CONTAINERS with 2 groups: "Inbox" and "Sprint 1"
+   553	      - [ ] MOCK_DEPS: I-3 blocked by I-2, I-7 blocked by I-1 and I-2
+   554	
+   555	- [ ] Step 3.3: Thread Builders Update
+   556	-----------------------------------
+   557	  Write tests FIRST:
+   558	    - [ ] test: "buildQuotedResponse sets quoted_response_id on child"
+   559	    - [ ] test: "buildQuotedResponse links to parent chain"
+   560	    - [ ] test: "createMessage with quoted_response_id round-trips through flatten/hydrate"
+ succeeded in 51ms:
+   261	            │     ├── GroupView       — owns useInput, does NOT call setFooterOptions
+   262	            │     └── DetailView      — owns useInput, CALLS setFooterOptions
+   263	            │           useEffect: when focus state changes, calls
+   264	            │           setFooterOptions({ inThread, responseSelected,
+   265	            │                              hasReplies, isQuoting })
+   266	            │
+   267	            └── Footer  (receives viewType + footerOptions as props)
+   268	                  viewType is passed from App/AppShell
+   269	                  footerOptions comes from AppShell state
+   270	                  calls getFooterShortcuts(viewType, footerOptions)
+   271	
+   272	  Callback flow (downward):
+   273	    AppShell --setFooterOptions--> ViewRouter --setFooterOptions--> DetailView
+   274	
+   275	  Data flow (upward via state):
+   276	    DetailView --calls setFooterOptions()--> AppShell state updates
+   277	                                             --> Footer re-renders with new props
+   278	
+   279	  useGlobalKeys(currentViewType, inputActive):
+   280	    Lives in AppShell. Handles q/s/b/g/n/Esc.
+ succeeded in 51ms:
+  1101	
+  1102	Goal: Mutations to mock data (status changes, new responses, new issues)
+  1103	persist between app launches.
+  1104	
+  1105	Req coverage: REQ-MOCK-001 through REQ-MOCK-007, REQ-STATE-007
+  1106	
+  1107	- [ ] Step 10.1: Immutable State Updates
+  1108	------------------------------------
+  1109	  Write tests FIRST:
+  1110	    - [ ] test: "activating an issue produces new issues array"
+  1111	    - [ ] test: "sending a response produces new response chain"
+  1112	    - [ ] test: "adding a dependency produces new deps array"
+  1113	    - [ ] test: "creating an issue produces new issues array with new item"
+  1114	    - [ ] test: "saveMockStore writes JSON to disk"
+  1115	    Note: "loadMockData reads back what was saved" and "resetMockData restores
+  1116	    defaults" are covered in Step 3.2. Not duplicated here.
+  1117	
+  1118	  Then implement:
+  1119	    - [ ] State management layer between views and mock data
+  1120	    - [ ] All mutations create new objects (spread/map/filter)
+ succeeded in 51ms:
+   821	    File: src/tui/use-viewport.tsx (NEW)
+   822	    - [ ] useViewport(messages, selectedIndex, height, columns, userLastViewedAt)
+   823	    - [ ] Returns: { visibleMessages, firstVisible, lastVisible, newRepliesIndex, scrollToMessage }
+   824	    - [ ] Tracks lastFirstVisible, lastHeight, lastRootId via useRef
+   825	    - [ ] centerOnSelection() and deriveFirstVisible() logic
+   826	
+   827	- [ ] Step 7.3: ResponseChain Component
+   828	------------------------------------
+   829	  Write tests FIRST:
+   830	    - [ ] test: "renders visible messages within height"
+   831	    - [ ] test: "shows new replies separator"
+   832	    - [ ] test: "selected message is highlighted"
+   833	    - [ ] test: "viewport scrolls with selection"
+   834	
+   835	  Then implement:
+   836	    - [ ] Functional component using useViewport hook
+   837	    - [ ] Props: rootResponse, columns, height, userLastViewedAt,
+   838	      selectedIndex, viewRepliesFocusedIndex
+   839	    - [ ] Maps visible messages to ResponseContainer
+   840	
+codex
+I’ve collected the full plan; now I’m doing a mechanical pass to validate test-count metadata and locate repeated test names so the findings are concrete, not subjective.
+exec
+/bin/zsh -lc "awk '
+/"'^PHASE [0-9]+:/ {phase=$2; gsub(":","",phase)}
+/''^[[:space:]]*- '"\\[[ x]\\] test:/ {cnt[phase]++}
+END {for(i=0;i<=12;i++) printf(\"P%s %d\\n\",i,cnt[i]+0)}
+' TUI_REWRITE_PLAN.txt" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 51ms:
+P0 8
+P1 19
+P2 22
+P3 12
+P4 22
+P5 24
+P6 5
+P7 33
+P8 72
+P9 7
+P10 9
+P11 10
+P12 4
+exec
+/bin/zsh -lc "awk '/"'^[[:space:]]*- '"\\[[ x]\\] test:/ {n++} END{print n}' TUI_REWRITE_PLAN.txt" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 51ms:
+247
+exec
+/bin/zsh -lc "rg -n \"test:\\s*\\\"\" TUI_REWRITE_PLAN.txt | sed -E 's/"'^([0-9]+):.*test:'"\\s*\"(.*)\".*/\\2\\t\\1/' | awk -F '\\t' '{c["'$1]++; l[$1]=l[$1]" "$2} END {for (t in c) if (c[t]>1) print c[t]"'"\\t\"t\"\\t\"l[t]}' | sort -nr" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+
+codex
+I’m now mapping concrete issues to exact line ranges. I’ve identified several likely ordering and consistency problems; I’m pulling precise line anchors before finalizing the report.
+exec
+/bin/zsh -lc "rg -n \"setFooterOptions updates footer shortcuts|Detail-specific context-sensitive shortcut sets are implemented in Step 8.10|Write tests FIRST \\(deferred from Step 1.3\\)|footerOptions reset to \\{\\} when view changes\" TUI_REWRITE_PLAN.txt" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc 'rg -n "navigation sequence: Home -> Detail -> back -> Home|deep navigation: Home -> Detail -> NewIssue -> home -> Home|ViewRouter Component|Wire App Together" TUI_REWRITE_PLAN.txt' in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "rg -n \"all 7\\+ view types|each of the 7 view types|All 7 cases present\" TUI_REWRITE_PLAN.txt" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "rg -n \"Deliverable: Running app showing Header \\+ empty content \\+ Footer\\.|All 15\\+ tests green\\.|Phase  Description|1    App Shell \\(Header \\+ Footer \\+ Shell\\)      19\" TUI_REWRITE_PLAN.txt" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "rg -n \"Escape calls goBack|Escape exits thread, then exits view|Escape while quoting cancels quote|useGlobalKeys\\(currentViewType, inputActive\\)|Priority 5: Escape\" TUI_REWRITE_PLAN.txt" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc 'rg -n "modified files:|Unchanged files:|newissue.tsx|agent-status.tsx|blocking-map.tsx|group-view.tsx" TUI_REWRITE_PLAN.txt' in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc 'rg -n "Return on focused footer shortcut dispatches action|Dispatch footer actions|moved from Step 8.8" TUI_REWRITE_PLAN.txt' in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 51ms:
+336:    - Detail-specific context-sensitive shortcut sets are implemented in Step 8.10.
+346:    - [ ] test: "setFooterOptions updates footer shortcuts"
+458:  Write tests FIRST (deferred from Step 1.3):
+459:    - [ ] test: "footerOptions reset to {} when view changes"
+ succeeded in 52ms:
+992:    - [ ] Dispatch footer actions
+1014:    - [ ] test: "Return on focused footer shortcut dispatches action" (moved from Step 8.8)
+ succeeded in 52ms:
+379:  Deliverable: Running app showing Header + empty content + Footer.
+381:  All 15+ tests green.
+1249:Phase  Description                        Planned Tests     Deps
+1252:  1    App Shell (Header + Footer + Shell)      19         P0
+ succeeded in 52ms:
+135:    Priority 5: Escape       -> cancel quote / exit thread / go back
+279:  useGlobalKeys(currentViewType, inputActive):
+421:    - [ ] test: "pressing Escape calls goBack"
+433:    - [ ] useGlobalKeys(currentViewType, inputActive): uses useInput
+966:    - [ ] test: "Escape exits thread, then exits view"
+1001:    - [ ] test: "Escape while quoting cancels quote"
+ succeeded in 52ms:
+551:      - [ ] MOCK_AGENTS consolidated here (from agent-status.tsx)
+1353:Unchanged files:
+1357:  src/tui/newissue.tsx
+1358:  src/tui/agent-status.tsx        (minor: remove inline mock data)
+1359:  src/tui/blocking-map.tsx        (minor: remove direct imports)
+1360:  src/tui/group-view.tsx          (minor: remove direct imports)
+ succeeded in 52ms:
+324:    - [ ] VIEW_SHORTCUTS data structure (all 7+ view types)
+445:    - [ ] test: "renders placeholder for each of the 7 view types"
+452:    - [ ] All 7 cases present (fix gap 1 from validation)
+ succeeded in 52ms:
+440:- [ ] Step 2.3: ViewRouter Component
+446:    - [ ] test: "navigation sequence: Home -> Detail -> back -> Home"
+447:    - [ ] test: "deep navigation: Home -> Detail -> NewIssue -> home -> Home"
+456:- [ ] Step 2.4: Wire App Together
+exec
+/bin/zsh -lc "rg -n \"Gate test|Write tests FIRST|Write gate test FIRST|Write integration tests:\" TUI_REWRITE_PLAN.txt | sed -n '1,200p'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 50ms:
+20:  Gate test (must pass before Step 0.2):
+299:  Write tests FIRST:
+315:  Write tests FIRST:
+341:  Write tests FIRST:
+368:  Write tests FIRST:
+401:  Write tests FIRST:
+419:  Write tests FIRST:
+442:  Write tests FIRST:
+458:  Write tests FIRST (deferred from Step 1.3):
+491:  Write gate test FIRST:
+533:  Write tests FIRST:
+557:  Write tests FIRST:
+591:  Write tests FIRST:
+613:  Write tests FIRST:
+635:  Write tests FIRST:
+667:  Write tests FIRST:
+688:  Write tests FIRST:
+712:  Write tests FIRST:
+743:  Write tests FIRST:
+776:  Write tests FIRST:
+exec
+/bin/zsh -lc "rg -n \"New Replies separator|new replies separator|footer wraps correctly|Global shortcuts don't duplicate views on stack|pressing 's' when already on AgentStatus is no-op\" TUI_REWRITE_PLAN.txt" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+423:    - [ ] test: "pressing 's' when already on AgentStatus is no-op"
+816:    - [ ] test: "new replies separator inserted at correct position"
+831:    - [ ] test: "shows new replies separator"
+1088:    - [ ] test: "Global shortcuts don't duplicate views on stack"
+1163:    - [ ] test: "New Replies separator visible for unread responses"
+1168:    - [ ] New Replies separator in ResponseChain
+1184:    - [ ] test: "footer wraps correctly at 80 columns"
+1185:    - [ ] test: "footer wraps correctly at 120 columns"
+exec
+/bin/zsh -lc "nl -ba src/tui/views.ts | sed -n '1,220p'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+     1	export enum ViewType {
+     2	    Home,
+     3	    Detail,
+     4	    NewIssue,
+     5	    AgentStatus,
+     6	    BlockingMap,
+     7	    GroupView,
+     8	    IssuePicker,
+     9	}
+    10	
+    11	export const ViewTypeStringsMap = new Map<ViewType, string>([
+    12	    [ViewType.Home, "Home"],
+    13	    [ViewType.Detail, "Detail"],
+    14	    [ViewType.NewIssue, "New Issue"],
+    15	    [ViewType.AgentStatus, "Agent Status"],
+    16	    [ViewType.BlockingMap, "Blocking Map"],
+    17	    [ViewType.GroupView, "Group View"],
+    18	    [ViewType.IssuePicker, "Issue Picker"],
+    19	]);
+    20	
+exec
+/bin/zsh -lc "rg -n \"function resetMockData|export .*resetMockData|resetMockData\" src/tui -g'*.ts*'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+src/tui/mock-data.ts:12:import { loadMockData, saveMockData, resetMockData, type MockStore } from './mock-store.js';
+src/tui/mock-data.ts:56:    resetMockData();
+src/tui/mock-store.ts:280:export function resetMockData(): void {
+src/tui/run.tsx:4: * --resetMockData flag must be processed BEFORE mock-data.ts is imported,
+src/tui/run.tsx:8:import { resetMockData } from './mock-store.js';
+src/tui/run.tsx:10:if (process.argv.includes('--resetMockData')) {
+src/tui/run.tsx:11:    resetMockData();
+exec
+/bin/zsh -lc "rg -n \"Slot 0 = InputBox, Slots 1-3 = header fields, Slot 4\\+ = footer items|Tab cycles: input -> group -> blockedBy -> blocks -> viewReplies -> footer\" TUI_REWRITE_PLAN.txt" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 51ms:
+122:    - Slot 0 = InputBox, Slots 1-3 = header fields, Slot 4+ = footer items
+980:    - [ ] test: "Tab cycles: input -> group -> blockedBy -> blocks -> viewReplies -> footer"
+exec
+/bin/zsh -lc 'rg -n "Step 3.1|mock schema fixture covers|Step 3.2|Update data/mock-data.default.json with above schema" TUI_REWRITE_PLAN.txt' in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 51ms:
+489:- [ ] Step 3.1: Mock Data Schema
+492:    - [ ] test: "mock schema fixture covers threads, nested threads, quotes, continuations, and unread cases"
+531:- [ ] Step 3.2: Mock Data Files
+544:    - [ ] Update data/mock-data.default.json with above schema
+1116:    defaults" are covered in Step 3.2. Not duplicated here.
+exec
+/bin/zsh -lc 'rg -n "Step 4.3|minor cleanup|Unchanged files:|newissue.tsx|agent-status.tsx|blocking-map.tsx|group-view.tsx" TUI_REWRITE_PLAN.txt' in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 51ms:
+551:      - [ ] MOCK_AGENTS consolidated here (from agent-status.tsx)
+631:- [ ] Step 4.3: NewIssue View
+646:    - [ ] Functional component (already functional, minor cleanup)
+1353:Unchanged files:
+1357:  src/tui/newissue.tsx
+1358:  src/tui/agent-status.tsx        (minor: remove inline mock data)
+1359:  src/tui/blocking-map.tsx        (minor: remove direct imports)
+1360:  src/tui/group-view.tsx          (minor: remove direct imports)
+exec
+/bin/zsh -lc "awk '
+/"'^- '"\\[[ x]\\] Step [0-9]+\\.[0-9]+:/ {step="'$0; s++}
+/''^[[:space:]]*Gate test|''^[[:space:]]*Write gate test FIRST:/ {g++}
+END{print "steps",s,"gate_blocks",g}
+'"' TUI_REWRITE_PLAN.txt" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+steps 46 gate_blocks 6
+codex
+ISSUE 1: [severity: HIGH]  
+Location: Phase 2, Step 2.2 and Phase 8, Steps 8.7/8.9 (lines ~421, ~966, ~1001; key priority line ~135)  
+Problem: Escape handling is contradictory. Step 2.2 makes `Escape` globally `goBack`, but Phase 8 requires `Escape` to first cancel quote or exit thread before leaving the view.  
+Fix: Split Escape behavior by priority and context. In Step 2.2, change test to “Escape calls goBack when not quoting and not in thread.” Add/keep DetailView tests in 8.7/8.9 for quote/thread precedence. Implement one shared `handleEscape()` priority rule.
+
+ISSUE 2: [severity: MEDIUM]  
+Location: Phase 2, Step 2.3 (lines ~446-447) vs Step 2.4 (line ~456+)  
+Problem: Step 2.3 includes navigation-sequence integration tests that depend on app wiring done in 2.4 (provider + app shell + router integration).  
+Fix: Move “Home -> Detail -> back -> Home” and “deep navigation” tests from 2.3 to 2.4. Keep 2.3 focused on pure router mapping tests.
+
+ISSUE 3: [severity: MEDIUM]  
+Location: Phase 1, Step 1.3 and Phase 8, Step 8.10 (lines ~346, ~336, ~1013+)  
+Problem: Step 1.3 test “setFooterOptions updates footer shortcuts” depends on Detail context-sensitive shortcut logic explicitly deferred to 8.10.  
+Fix: In 1.3, test only state plumbing (`setFooterOptions` reaches Footer props). Move shortcut-set behavioral assertions to 8.10.
+
+ISSUE 4: [severity: HIGH]  
+Location: Phase 8, Step 8.8 and Step 8.10 (lines ~992, ~1014)  
+Problem: TDD violation: 8.8 includes implementation item “Dispatch footer actions,” but the test for it was moved to 8.10.  
+Fix: Either move the implementation bullet to 8.10, or move the test back to 8.8 before implementation.
+
+ISSUE 5: [severity: MEDIUM]  
+Location: Phase 3, Steps 3.1 and 3.2 (lines ~492, ~544)  
+Problem: Step 3.1 gate test references a schema fixture, but fixture implementation is specified in 3.2. Forward dependency.  
+Fix: Merge 3.1+3.2, or move the 3.1 gate test into 3.2 and make 3.1 a design-only step with a non-runtime gate (e.g., schema checklist committed).
+
+ISSUE 6: [severity: HIGH]  
+Location: Plan-wide; Gate rule section lines ~1307-1319 vs most steps (e.g., lines ~299, ~315, etc.)  
+Problem: The plan’s own rule says every step/substep must have explicit `Gate test` blocks, but only a small subset do.  
+Fix: Add explicit `Gate test` block under every step/substep, including exact test names and required pass command. Remove deferred gate wording so each step has local pass criteria.
+
+ISSUE 7: [severity: LOW]  
+Location: Phase 1 deliverable vs execution summary (lines ~381 and ~1252)  
+Problem: Metadata mismatch: Phase 1 says “All 15+ tests green,” while phase table lists 19 tests.  
+Fix: Update Phase 1 deliverable text to “All 19 tests green” (or “19+” if intentionally elastic).
+
+ISSUE 8: [severity: LOW]  
+Location: Phase 1 Step 1.2 and Phase 2 Step 2.3 (lines ~324, ~445, ~452)  
+Problem: View-type cardinality is inconsistent (“7+ view types” vs “7 view types”).  
+Fix: Standardize to exact count from `ViewType` enum (currently 7) and list them once to avoid drift.
+
+ISSUE 9: [severity: MEDIUM]  
+Location: File inventory section and earlier implementation steps (lines ~646, ~1353-1360)  
+Problem: Inventory contradiction: files listed under “Unchanged” include notes implying edits (“minor: remove imports/data”), and `newissue.tsx` is likely touched by Step 4.3 cleanup.  
+Fix: Move those files to “Modified files,” or remove planned edits from earlier steps if truly unchanged.
+
+ISSUE 10: [severity: LOW]  
+Location: Phase 7/11 tests for new-replies separator (lines ~816, ~831, ~1163)  
+Problem: Overlapping test intent across hook/component/integration layers risks duplicate coverage without clear scope separation.  
+Fix: Keep all three only if scoped explicitly: 7.2 = index calculation logic, 7.3 = render placement, 11.1 = end-to-end unread lifecycle. Rename tests accordingly.
+
+SUMMARY: 10 total issues found, 3 HIGH, 4 MEDIUM, 3 LOW
+
+GATE TEST ASSESSMENT: needs improvement.  
+Change needed: require a mandatory per-step `Gate test` block with explicit test IDs, command to run, and pass criteria before progressing; disallow deferred gates; require step completion metadata to record gate result (test names/count + pass timestamp).
+tokens used
+41,668
+ISSUE 1: [severity: HIGH]  
+Location: Phase 2, Step 2.2 and Phase 8, Steps 8.7/8.9 (lines ~421, ~966, ~1001; key priority line ~135)  
+Problem: Escape handling is contradictory. Step 2.2 makes `Escape` globally `goBack`, but Phase 8 requires `Escape` to first cancel quote or exit thread before leaving the view.  
+Fix: Split Escape behavior by priority and context. In Step 2.2, change test to “Escape calls goBack when not quoting and not in thread.” Add/keep DetailView tests in 8.7/8.9 for quote/thread precedence. Implement one shared `handleEscape()` priority rule.
+
+ISSUE 2: [severity: MEDIUM]  
+Location: Phase 2, Step 2.3 (lines ~446-447) vs Step 2.4 (line ~456+)  
+Problem: Step 2.3 includes navigation-sequence integration tests that depend on app wiring done in 2.4 (provider + app shell + router integration).  
+Fix: Move “Home -> Detail -> back -> Home” and “deep navigation” tests from 2.3 to 2.4. Keep 2.3 focused on pure router mapping tests.
+
+ISSUE 3: [severity: MEDIUM]  
+Location: Phase 1, Step 1.3 and Phase 8, Step 8.10 (lines ~346, ~336, ~1013+)  
+Problem: Step 1.3 test “setFooterOptions updates footer shortcuts” depends on Detail context-sensitive shortcut logic explicitly deferred to 8.10.  
+Fix: In 1.3, test only state plumbing (`setFooterOptions` reaches Footer props). Move shortcut-set behavioral assertions to 8.10.
+
+ISSUE 4: [severity: HIGH]  
+Location: Phase 8, Step 8.8 and Step 8.10 (lines ~992, ~1014)  
+Problem: TDD violation: 8.8 includes implementation item “Dispatch footer actions,” but the test for it was moved to 8.10.  
+Fix: Either move the implementation bullet to 8.10, or move the test back to 8.8 before implementation.
+
+ISSUE 5: [severity: MEDIUM]  
+Location: Phase 3, Steps 3.1 and 3.2 (lines ~492, ~544)  
+Problem: Step 3.1 gate test references a schema fixture, but fixture implementation is specified in 3.2. Forward dependency.  
+Fix: Merge 3.1+3.2, or move the 3.1 gate test into 3.2 and make 3.1 a design-only step with a non-runtime gate (e.g., schema checklist committed).
+
+ISSUE 6: [severity: HIGH]  
+Location: Plan-wide; Gate rule section lines ~1307-1319 vs most steps (e.g., lines ~299, ~315, etc.)  
+Problem: The plan’s own rule says every step/substep must have explicit `Gate test` blocks, but only a small subset do.  
+Fix: Add explicit `Gate test` block under every step/substep, including exact test names and required pass command. Remove deferred gate wording so each step has local pass criteria.
+
+ISSUE 7: [severity: LOW]  
+Location: Phase 1 deliverable vs execution summary (lines ~381 and ~1252)  
+Problem: Metadata mismatch: Phase 1 says “All 15+ tests green,” while phase table lists 19 tests.  
+Fix: Update Phase 1 deliverable text to “All 19 tests green” (or “19+” if intentionally elastic).
+
+ISSUE 8: [severity: LOW]  
+Location: Phase 1 Step 1.2 and Phase 2 Step 2.3 (lines ~324, ~445, ~452)  
+Problem: View-type cardinality is inconsistent (“7+ view types” vs “7 view types”).  
+Fix: Standardize to exact count from `ViewType` enum (currently 7) and list them once to avoid drift.
+
+ISSUE 9: [severity: MEDIUM]  
+Location: File inventory section and earlier implementation steps (lines ~646, ~1353-1360)  
+Problem: Inventory contradiction: files listed under “Unchanged” include notes implying edits (“minor: remove imports/data”), and `newissue.tsx` is likely touched by Step 4.3 cleanup.  
+Fix: Move those files to “Modified files,” or remove planned edits from earlier steps if truly unchanged.
+
+ISSUE 10: [severity: LOW]  
+Location: Phase 7/11 tests for new-replies separator (lines ~816, ~831, ~1163)  
+Problem: Overlapping test intent across hook/component/integration layers risks duplicate coverage without clear scope separation.  
+Fix: Keep all three only if scoped explicitly: 7.2 = index calculation logic, 7.3 = render placement, 11.1 = end-to-end unread lifecycle. Rename tests accordingly.
+
+SUMMARY: 10 total issues found, 3 HIGH, 4 MEDIUM, 3 LOW
+
+GATE TEST ASSESSMENT: needs improvement.  
+Change needed: require a mandatory per-step `Gate test` block with explicit test IDs, command to run, and pass criteria before progressing; disallow deferred gates; require step completion metadata to record gate result (test names/count + pass timestamp).
+Waiting for the debugger to disconnect...

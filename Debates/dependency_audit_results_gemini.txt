@@ -1,0 +1,48 @@
+Debugger listening on ws://127.0.0.1:60634/bf765edf-ea70-4ee8-9201-bf2d48c44b80
+For help, see: https://nodejs.org/en/docs/inspector
+Debugger attached.
+Debugger listening on ws://127.0.0.1:60650/cb85e17f-2cbe-405d-ad43-7afaa5b532a2
+For help, see: https://nodejs.org/en/docs/inspector
+Debugger attached.
+Loaded cached credentials.
+[ERROR] [IDEClient] Failed to connect to IDE companion extension. Please ensure the extension is running. To install the extension, run /ide install.
+ISSUE 1: [MEDIUM]
+Location: Phase 1, Step 1.3 and Step 1.4
+Problem: Step 1.3 includes the test `"resize updates dimensions"`. However, Step 1.3 builds `AppShell`, which is a stateless container that only receives `rows` and `columns` via props. The actual terminal resize tracking (`useStdout()`) is not implemented until Step 1.4 (`AppWrapper`). This is a TDD violation because the test cannot pass in 1.3 without the implementation from 1.4.
+Fix: Move the `test: "resize updates dimensions"` from Step 1.3 to Step 1.4.
+
+ISSUE 2: [LOW]
+Location: Phase 2, Step 2.4
+Problem: The implementation item says "ViewRouter passes setFooterOptions to views that need it (DetailView)". In Phase 2, `DetailView` does not exist yet (it is built later in Phase 8) and is just a placeholder. This is a forward dependency reference.
+Fix: Change it to "ViewRouter passes setFooterOptions to placeholder views" or move this specific wiring detail to Step 8.6 where `DetailView` is actually introduced.
+
+ISSUE 3: [MEDIUM]
+Location: Phase 8, Step 8.6 and Step 8.9
+Problem: Step 8.6's implementation says to "Wire useQuote", but the quote feature's UI and keybindings are not implemented or tested until Step 8.9. Wiring it early is a forward dependency. Additionally, Step 8.9 includes a test marked "(deferred from Step 8.5)", but focus movement is managed by `DetailView`, not the `useQuote` hook built in 8.5, so it shouldn't be deferred from there.
+Fix: Move "Wire useQuote" from the implementation list of Step 8.6 to Step 8.9. Remove the text "(deferred from Step 8.5)" from the focus test in Step 8.9.
+
+ISSUE 4: [MEDIUM]
+Location: Phase 8, Step 8.7
+Problem: There is a direct contradiction in the implementation items. One line instructs to "Render ThreadHeaderSeparator + thread parent when in thread", but the very next line says "Use LabeledSeparator for thread header [CHANGED]". The `ThreadHeaderSeparator` component does not exist (it was replaced by `LabeledSeparator` in Phase 6).
+Fix: Remove "ThreadHeaderSeparator" and update the line to read: "Render LabeledSeparator + thread parent when in thread".
+
+ISSUE 5: [HIGH]
+Location: Phase 8, Step 8.8
+Problem: The step contains a test `"Return on focused blockedBy opens IssuePicker"`. However, the implementation list only mentions wiring `GroupPicker` as an overlay, completely omitting `IssuePicker`. This is an implementation gap and a TDD violation because the test will fail without the corresponding wiring code.
+Fix: Add "Wire IssueListPicker as an overlay within DetailView" to the implementation list for Step 8.8.
+
+ISSUE 6: [LOW]
+Location: Phase 8, Step 8.10
+Problem: The implementation list includes "AppShell passes footerOptions to Footer as props". This is a duplicate implementation item that was already fully implemented in Phase 1 (Step 1.3) and Phase 2 (Step 2.4).
+Fix: Remove "AppShell passes footerOptions to Footer as props" from Step 8.10.
+
+ISSUE 7: [LOW]
+Location: Phase 11, Step 11.1
+Problem: The implementation list includes "New Replies separator in ResponseChain". This is redundant, as the new replies separator was already built, tested, and visually mapped in Phase 7 (Steps 7.2 and 7.3).
+Fix: Remove "New Replies separator in ResponseChain" from Step 11.1's implementation items.
+
+SUMMARY: 7, 1, 3, 3
+GATE TEST ASSESSMENT: needs improvement
+The current rule mandates an explicit `Gate test` block for every step and explicitly forbids "deferred-only" gates. However, almost every step in the document uses `Write tests FIRST:` instead of `Gate test:`, making the whole plan technically in violation of its own rule. Furthermore, Step 2.4 consists entirely of a deferred-only test, breaking the second rule. To fix this, update the Gate Test Rule text to explicitly accept the `Write tests FIRST:` block as satisfying the gate requirement. Additionally, either remove the strict prohibition on deferred-only gates or add a native integration test to Step 2.4 (e.g., `test: "App wiring renders ViewRouter without crashing"`) so it is not exclusively deferred.
+Waiting for the debugger to disconnect...
+Waiting for the debugger to disconnect...

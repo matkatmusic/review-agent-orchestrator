@@ -1,0 +1,38 @@
+DEPENDENCY AUDIT OF TUI_REWRITE_PLAN.txt
+
+You are auditing a TDD build plan for a terminal UI rewrite. The plan file is at:
+./TUI_REWRITE_PLAN.txt
+
+Read the entire file. It contains 13 phases (Phase 0 through Phase 12), each with
+numbered steps and substeps. Each step lists tests to write and implementation items.
+
+YOUR TASK:
+
+1. Check ALL steps and substeps across ALL 13 phases for dependency issues:
+   - Forward dependencies: a step depends on something not yet built in an earlier step
+   - Circular references: step A depends on step B which depends on step A
+   - Contradictions: two steps say different things about the same file or concept
+   - TDD violations: steps with implementation but no tests
+   - Duplicate tests: the same test appearing in multiple steps
+   - Incorrect metadata: wrong critical path, wrong test counts, wrong dependency lists
+
+2. For each issue found, propose a specific fix:
+   - Which step to move, merge, or modify
+   - What test to add, remove, or relocate
+   - What metadata to correct
+
+3. Evaluate the existing GATE TEST RULE section (near the end of the file).
+   Does it adequately enforce that each step must have an explicit passing test
+   before the next step can begin? If not, propose improvements.
+
+OUTPUT FORMAT:
+
+For each issue, write:
+  ISSUE [number]: [severity: HIGH/MEDIUM/LOW]
+  Location: Phase X, Step Y.Z, line(s) approximate
+  Problem: [description]
+  Fix: [specific proposed change]
+
+Then at the end, write:
+  SUMMARY: [total issues found], [HIGH count], [MEDIUM count], [LOW count]
+  GATE TEST ASSESSMENT: [adequate/needs improvement] + [what to change if needed]

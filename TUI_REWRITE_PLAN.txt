@@ -17,6 +17,8 @@ for reference. New files are created alongside or replace them.
 ---------------------------------
   - [x] Create branch: tui-rewrite
   - [x] Tag current HEAD for reference: pre-rewrite
+  Gate test (must pass before Step 0.2):
+    - [x] test: "git ref safety snapshot exists (branch tui-rewrite + tag pre-rewrite)"
 
 - [x] Step 0.2: Test Harness Setup
 ------------------------------
@@ -131,6 +133,8 @@ React/Ink key event dispatch design (replaces the C++ imperative model above):
     Priority 3: Ctrl+R      -> resolve issue/thread
     Priority 4: Alt+Q       -> start quoting
     Priority 5: Escape       -> cancel quote / exit thread / go back
+                               (priority: quoting > thread > goBack;
+                                see Step 2.2 and Steps 8.7/8.9)
     Priority 6: Up/Down     -> scroll conversation
     Priority 7: Return      -> dispatch based on focusedSlot
                                (send if input, open overlay if header field,
@@ -231,7 +235,7 @@ Architectural decision — View Configuration Pattern:
   translate to React. The React-idiomatic solution:
 
   - App owns fixed Header and Footer instances (one each, always rendered)
-  - Header derives its content from NavigationContext (reads currentView)
+  - Header derives its content from currentView (Phase 1 via prop, Phase 2+ via nav-driven app state)
   - Footer derives shortcuts from viewType + footerOptions props
   - Views configure the footer via a setFooterOptions callback from AppShell
   - Most views don't call setFooterOptions (their shortcuts are static per type)
@@ -244,11 +248,12 @@ Architectural decision — View Configuration Pattern:
   Component tree and data flow:
 
     NavigationProvider  (provides currentView, navigateTo, goBack, etc.)
-      └── AppShell  (owns footerOptions state, owns useGlobalKeys hook)
+      └── AppShell  (calls useNavigation() to read currentView,
+                     owns footerOptions state, owns useGlobalKeys hook)
             │
             ├── Header
-            │     reads currentView from NavigationContext
-            │     derives subtitle, view label — no props from AppShell needed
+            │     receives currentView from AppShell
+            │     derives subtitle and view label from that value
             │
             ├── ViewRouter  (receives setFooterOptions callback as prop)
             │     │
@@ -260,10 +265,11 @@ Architectural decision — View Configuration Pattern:
             │     └── DetailView      — owns useInput, CALLS setFooterOptions
             │           useEffect: when focus state changes, calls
             │           setFooterOptions({ inThread, responseSelected,
-            │                              hasReplies, isQuoting })
+            │                              hasReplies, isQuoting,
+            │                              focusedAction, inputFocused })
             │
             └── Footer  (receives viewType + footerOptions as props)
-                  viewType comes from NavigationContext
+                  viewType derived from AppShell's useNavigation()
                   footerOptions comes from AppShell state
                   calls getFooterShortcuts(viewType, footerOptions)
 
@@ -316,11 +322,12 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
     - [x] test: "disabled shortcuts render dimmed"
     - [x] test: "focused shortcut renders inverse+bold"
     - [x] test: "computeFooterLines returns correct height"
+    - [ ] test: "footer shows correct shortcuts for each non-Detail ViewType"
 
   Then implement:
-    - [ ] VIEW_SHORTCUTS data structure (all 7+ view types)
+    - [ ] VIEW_SHORTCUTS data structure (all 7 view types)
     - [ ] Define FooterOptions interface: { inThread?, responseSelected?,
-          hasReplies?, isQuoting? }
+          hasReplies?, isQuoting?, focusedAction?, inputFocused? }
     - [ ] getFooterShortcuts(viewType, options?) — accepts optional FooterOptions,
           returns VIEW_SHORTCUTS[viewType] when no options provided
     - [ ] FooterProps accepts FooterOptions fields as optional props
@@ -329,14 +336,9 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
     - [x] computeRows() — break into rows fitting column width
     - [x] Export all computation functions for use by DetailView
 
-  Then write test:
-    - [ ] test: "footer shows correct shortcuts for each ViewType"
-
-  Deferred to Step 8.10 (requires Detail shortcut sets and focus state):
-    - [ ] Define context-sensitive Detail shortcut sets [CHANGED]:
-          InputBox-focused set, Response-selected set, Thread-mode set
-    - [ ] getFooterShortcuts returns different sets based on FooterOptions
-    - [ ] test: "Detail footer changes based on focus context" [CHANGED]
+  Note:
+    - Detail-specific context-sensitive shortcut sets are implemented in Step 8.10.
+      Step 1.2 is complete when non-Detail shortcuts and Footer primitives are green.
 
 - [ ] Step 1.3: AppShell Component
 -------------------------------
@@ -345,13 +347,13 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
     - [ ] test: "app shell constrains height to rows prop"
     - [ ] test: "content area gets remaining height after header and footer"
     - [ ] test: "resize updates dimensions"
-    - [ ] test: "setFooterOptions updates footer shortcuts"
+    - [ ] test: "setFooterOptions state reaches Footer props"
 
   Then implement:
     - [ ] Functional component
-    - [ ] Props: currentView, children, columns, rows
-          (currentView is a prop in Phase 1; in Phase 2, the parent App
-          reads from NavigationContext and passes it down)
+    - [ ] Props: children, columns, rows
+          (In Phase 2, AppShell reads currentView from NavigationContext
+          via useNavigation() — it is NOT passed as a prop from App)
     - [ ] Owns footerOptions state (useState<FooterOptions>({}))
     - [ ] Passes setFooterOptions callback down through children
     - [ ] Header receives currentView as prop
@@ -362,9 +364,8 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
         <Footer viewType={currentView.type} {...footerOptions} />
       </Box>
 
-  Deferred to Phase 2 (requires NavigationContext):
-    - [ ] test: "footerOptions reset to {} when view changes"
-    - [ ] Resets footerOptions to {} when currentView changes (useEffect)
+  Note:
+    - View-change-driven footer reset is introduced in Step 2.4 after NavigationContext exists.
 
 - [ ] Step 1.4: Entry Point (run.tsx)
 ---------------------------------
@@ -376,12 +377,12 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
     - [ ] AppWrapper that tracks terminal dimensions via useStdout()
     - [ ] No ANSI escape codes (REQ-INK-005)
     - [ ] Passes dimensions to AppShell
-    - [ ] Passes currentView: { type: ViewType.Home } to AppShell
-          (hardcoded in Phase 1; replaced by NavigationContext in Phase 2)
+    - [ ] In Phase 1, AppShell reads a hardcoded ViewType.Home internally
+          (replaced by NavigationContext's useNavigation() in Phase 2)
 
   Deliverable: Running app showing Header + empty content + Footer.
   Can be launched with: node dist/tui/run.js
-  All 15+ tests green.
+  All 19 tests green.
 
 
 Bugs
@@ -421,7 +422,7 @@ Req coverage: REQ-STATE-001, REQ-STATE-002, REQ-NAV-001 through REQ-NAV-008,
 -------------------------------
   Write tests FIRST:
     - [ ] test: "pressing 'q' calls exit"
-    - [ ] test: "pressing Escape calls goBack"
+    - [ ] test: "pressing Escape calls goBack when not quoting and not in thread"
     - [ ] test: "pressing 's' navigates to AgentStatus"
     - [ ] test: "pressing 's' when already on AgentStatus is no-op"
     - [ ] test: "pressing 'b' navigates to BlockingMap"
@@ -446,27 +447,29 @@ Req coverage: REQ-STATE-001, REQ-STATE-002, REQ-NAV-001 through REQ-NAV-008,
     - [ ] test: "renders placeholder for Home view"
     - [ ] test: "renders placeholder for Detail view"
     - [ ] test: "renders placeholder for each of the 7 view types"
-    - [ ] test: "navigation sequence: Home -> Detail -> back -> Home"
-    - [ ] test: "deep navigation: Home -> Detail -> NewIssue -> home -> Home"
 
   Then implement:
     File: src/tui/view-router.tsx (NEW)
     - [ ] Switch on currentView.type, render stub <Text> for each view
-    - [ ] All 7 cases present (fix gap 1 from validation)
-    Note: ViewRouter imports mock data directly from mock-data.ts and passes
-    as props to views. In Phase 10, imports replaced by AppStateContext reads.
+    - [ ] All 7 cases present (matches ViewType enum count exactly)
+    Note: In Phase 2, ViewRouter remains placeholder-only (no view data wiring).
+    Real view data wiring starts in Phases 4/5 and is migrated in Phase 10.
 
 - [ ] Step 2.4: Wire App Together
 ------------------------------
   Write tests FIRST (deferred from Step 1.3):
     - [ ] test: "footerOptions reset to {} when view changes"
+    - [ ] test: "navigation sequence: Home -> Detail -> back -> Home" (moved from Step 2.3)
+    - [ ] test: "deep navigation: Home -> Detail -> NewIssue -> home -> Home" (moved from Step 2.3)
 
   Update src/tui/app.tsx:
     - [ ] Functional component
     - [ ] NavigationProvider wrapping AppShell wrapping ViewRouter
-    - [ ] App reads currentView from NavigationContext, passes to AppShell
-          (AppShell no longer receives hardcoded view from Step 1.4)
+    - [ ] AppShell calls useNavigation() internally to read currentView
+          (App does NOT read from NavigationContext — that would violate
+          React hook rules since App renders NavigationProvider)
     - [ ] AppShell resets footerOptions to {} when currentView changes (useEffect)
+    - [ ] AppShell passes footerOptions.inputFocused to useGlobalKeys
     - [ ] ViewRouter passes setFooterOptions to views that need it (DetailView)
     - [ ] Footer receives viewType + footerOptions as props from AppShell
 
@@ -489,9 +492,13 @@ This data drives view development in subsequent phases.
 
 Req coverage: REQ-MOCK-001 through REQ-MOCK-010, REQ-QUO-001, REQ-QUO-002
 
-- [ ] Step 3.1: Mock Data Schema
------------------------------
-  Gate: Step 3.2 tests validate this schema. No separate gate test needed.
+- [ ] Step 3.1: Mock Data Schema (design-only)
+--------------------------------------------
+  This step defines the schema. The runtime gate tests are in Step 3.2
+  (which implements the fixtures this schema describes).
+
+  Gate: Commit the schema definition below. No runtime test — the schema
+  is validated by Step 3.2's tests against the actual fixture data.
 
   Define mock data that exercises every relationship type:
 
@@ -533,7 +540,13 @@ Req coverage: REQ-MOCK-001 through REQ-MOCK-010, REQ-QUO-001, REQ-QUO-002
 - [ ] Step 3.2: Mock Data Files
 ----------------------------
   Write tests FIRST:
-    - [ ] test: "loadMockData returns all issues"
+    - [ ] test: "loadMockData returns all 8 issues"
+    - [ ] test: "I-1 has 3-message main chain, no threads, no quotes"
+    - [ ] test: "I-2 has unresolved thread with 2 replies"
+    - [ ] test: "I-3 has nested threads (outer resolved, inner unresolved)"
+    - [ ] test: "I-4 has quoted responses with quoted_response_id set"
+    - [ ] test: "I-5 has continuation nodes with is_continuation=true"
+    - [ ] test: "I-8 has unread messages after user_last_viewed_at"
     - [ ] test: "hydrated responses have correct forward/back pointers"
     - [ ] test: "continuation nodes have is_continuation=true"
     - [ ] test: "quoted responses have quoted_response_id set"
@@ -619,7 +632,7 @@ Build the three simplest views. Each follows the pattern:
     - [ ] test: "status is color-coded"
     - [ ] test: "cursor navigation works"
     - [ ] test: "Return navigates to selected issue"
-    - [ ] test: "receives data via props"
+    - [ ] test: "BlockingMap receives data via props (no module imports)"
 
   Then implement:
     - [ ] Functional component with useInput
@@ -673,7 +686,7 @@ PHASE 5: MEDIUM VIEWS (GroupView, HomeView, IssuePicker)
     - [ ] test: "issue mode shows issues in container"
     - [ ] test: "n/p navigate in issue mode"
     - [ ] test: "group mode persists across navigation away and back"
-    - [ ] test: "receives data via props"
+    - [ ] test: "GroupView receives data via props (no module imports)"
 
   Then implement:
     - [ ] Functional component with useInput
@@ -815,13 +828,14 @@ These are prerequisites for DetailView.
     - [ ] test: "scroll up shifts viewport"
     - [ ] test: "resize triggers reflow (re-center)"
     - [ ] test: "chain change (new root) resets anchor"
-    - [ ] test: "new replies separator inserted at correct position"
+    - [ ] test: "new replies separator index calculated at correct position"
     - [ ] test: "viewport fills available height"
+    - [ ] test: "scrollToMessage moves viewport to include target message id"
 
   Then implement:
     File: src/tui/use-viewport.tsx (NEW)
     - [ ] useViewport(messages, selectedIndex, height, columns, userLastViewedAt)
-    - [ ] Returns: { visibleMessages, firstVisible, lastVisible, newRepliesIndex }
+    - [ ] Returns: { visibleMessages, firstVisible, lastVisible, newRepliesIndex, scrollToMessage }
     - [ ] Tracks lastFirstVisible, lastHeight, lastRootId via useRef
     - [ ] centerOnSelection() and deriveFirstVisible() logic
 
@@ -829,7 +843,7 @@ These are prerequisites for DetailView.
 ------------------------------------
   Write tests FIRST:
     - [ ] test: "renders visible messages within height"
-    - [ ] test: "shows new replies separator"
+    - [ ] test: "renders new replies separator at correct render position"
     - [ ] test: "selected message is highlighted"
     - [ ] test: "viewport scrolls with selection"
 
@@ -880,6 +894,8 @@ The most complex view. Built incrementally with sub-steps.
     - [ ] test: "quoting banner appears when quotedMessage provided" [NEW]
     - [ ] test: "quoting banner shows first 40 chars" [NEW]
     - [ ] test: "quoting banner uses author color, dimmed" [NEW]
+    - [ ] test: "Ctrl+R does not echo 'r' into text input" (moved from deleted Step 8.12)
+    - [ ] test: "Alt+Q does not echo 'q' into text input" (moved from deleted Step 8.12)
 
   Then implement:
     - [ ] Add focused prop controlling TextInput enabled/focus
@@ -938,7 +954,7 @@ The most complex view. Built incrementally with sub-steps.
     File: src/tui/use-quote.tsx (NEW)
     - [ ] useQuote()
     - [ ] Returns: { quotedResponse, startQuote, clearQuote, isQuoting }
-    Note: "startQuote moves focus to input" tested in Step 8.9 (DetailView integration)
+    Note: Focus movement behavior belongs to DetailView integration and is tested in Step 8.9.
 
 - [ ] Step 8.6: DetailView — Basic Rendering
 -----------------------------------------
@@ -984,14 +1000,12 @@ The most complex view. Built incrementally with sub-steps.
     - [ ] test: "Return on focused group opens GroupPicker"
     - [ ] test: "Return on focused blockedBy opens IssuePicker"
     - [ ] test: "Return on focused viewReplies resolves thread"
-    - [ ] test: "Return on focused footer shortcut dispatches action"
     - [ ] test: "focus resets on thread change"
 
   Then implement:
     - [ ] Map useFocusRing slots to header fields / viewReplies / footer items
     - [ ] Wire GroupPicker (group-picker.tsx) as overlay within DetailView
     - [ ] GroupPicker overlay rendering
-    - [ ] Dispatch footer actions
 
 - [ ] Step 8.9: DetailView — Quote Feature [NEW]
 ---------------------------------------------
@@ -1002,32 +1016,38 @@ The most complex view. Built incrementally with sub-steps.
     - [ ] test: "sending while quoting includes quoted_response_id"
     - [ ] test: "Escape while quoting cancels quote"
     - [ ] test: "Ctrl+Alt+Q scrolls to quoted message"
-    - [ ] test: "Show quoted shortcut only shown when response has quote"
 
   Then implement:
     - [ ] Wire Alt+Q to useQuote.startQuote
     - [ ] Wire Escape (when quoting) to useQuote.clearQuote
     - [ ] Wire Ctrl+Alt+Q to viewport scroll-to-quoted
     - [ ] Pass quotedBody to ResponseContainer for visual rendering
-    - [ ] Context-sensitive footer: swap shortcuts when quoting
+    - [ ] Defer quote-specific footer shortcuts to Step 8.10
 
 - [ ] Step 8.10: DetailView — Context-Sensitive Footer [CHANGED]
 ------------------------------------------------------------
   Write tests FIRST:
+    - [ ] test: "Return on focused footer shortcut dispatches action" (moved from Step 8.8)
     - [ ] test: "footer shows InputBox shortcuts when InputBox focused"
     - [ ] test: "footer shows Response shortcuts when Response selected"
     - [ ] test: "Response shortcuts show 'Create Thread' when no replies"
     - [ ] test: "Response shortcuts show 'View Thread' when has replies"
     - [ ] test: "thread mode footer has reduced shortcuts"
     - [ ] test: "Ctrl+R, Esc, Alt+H removed from thread footer display"
+    - [ ] test: "footer shows quote-mode shortcuts when isQuoting=true"
+    - [ ] test: "Show quoted shortcut only shown when selected response has quote"
 
   Then implement:
+    - [ ] Dispatch footer actions (moved from Step 8.8)
     - [ ] DetailView tracks which footer set to show based on:
       - Is InputBox focused? -> InputBox shortcuts
       - Is a Response selected? -> Response-selected shortcuts
       - Is in thread? -> Thread shortcuts
+      - Is quoting? -> Quote-mode shortcuts
     - [ ] DetailView calls setFooterOptions({ inThread, responseSelected,
-          hasReplies, isQuoting }) in a useEffect when focus state changes
+          hasReplies, isQuoting, focusedAction, inputFocused })
+          in a useEffect when focus state changes
+    - [ ] Add explicit quote-mode shortcut set keyed by isQuoting
     - [ ] AppShell passes footerOptions to Footer as props
     - [ ] Footer calls getFooterShortcuts(viewType, footerOptions) to
           derive the correct shortcut set
@@ -1043,15 +1063,9 @@ The most complex view. Built incrementally with sub-steps.
   Then implement:
     - [ ] Wire Shift+Arrow to navigateToAdjacentIssue
 
-- [ ] Step 8.12: DetailView — Key Blocking
----------------------------------------
-  Write tests FIRST:
-    - [ ] test: "Ctrl+R does not echo 'r' into text input"
-    - [ ] test: "Alt+Q does not echo 'q' into text input"
-
-  Then implement:
-    - [ ] Check for modifier keys before forwarding to TextInput
-    - [ ] Clean solution (no suppressNextInput hack)
+  [Step 8.12 deleted — contradicted Phase 0 architecture ("no key forwarding
+  needed — components observe state"). Modifier keys are natively ignored by
+  Ink TextInput. Tests moved to Step 8.2 to verify native behavior.]
 
   Deliverable: Complete DetailView with all features.
   70+ tests for DetailView alone. All green.
@@ -1130,11 +1144,14 @@ Req coverage: REQ-MOCK-001 through REQ-MOCK-007, REQ-STATE-007
     - [ ] test: "status change in HomeView reflected in Header counts"
     - [ ] test: "new response in DetailView updates unread set"
     - [ ] test: "new issue appears in HomeView list"
+    - [ ] test: "ViewRouter reads from AppStateContext and passes data via props (no direct mock-data imports)"
 
   Then implement:
     - [ ] AppStateContext providing issues, unreadInums, containers, etc.
     - [ ] Mutation functions update state and trigger re-render
     - [ ] saveMockStore() debounced on mutation
+    - [ ] Replace direct mock-data imports with AppStateContext at app/router layer
+    - [ ] Keep view components data-driven via props (do not couple views to AppStateContext)
 
   Deliverable: Full persistence. Launch app, make changes, quit,
   relaunch — changes preserved.
@@ -1155,12 +1172,14 @@ PHASE 11: POLISH & INTEGRATION
     - [ ] test: "entering DetailView calls markViewed for that issue"
     - [ ] test: "unread indicator disappears after viewing issue"
     - [ ] test: "Header unread count decrements after viewing"
-    - [ ] test: "New Replies separator visible for unread responses"
+    - [ ] test: "New Replies separator end-to-end: unread responses show separator after viewing"
+    - [ ] test: "GroupPicker integration: selecting group from overlay updates issue"
 
   Then implement:
     - [ ] markViewed() called when entering DetailView
     - [ ] Unread indicators update in HomeView, Header, IssuePicker
     - [ ] New Replies separator in ResponseChain
+    - [ ] Verify GroupPicker works in new functional component tree
 
 - [ ] Step 11.2: Error States
 --------------------------
@@ -1198,6 +1217,9 @@ PHASE 12: FINAL VALIDATION
 
 - [ ] Step 12.1: Requirements Cross-Reference
 ------------------------------------------
+  Write gate test FIRST:
+    - [ ] test: "REQ-to-test trace map is complete (every REQ-* has >=1 automated test)"
+
   Walk through every REQ-* in TUI_REWRITE_REQUIREMENTS.txt.
   For each requirement, verify:
     - [ ] a. There is at least one test covering it
@@ -1206,16 +1228,25 @@ PHASE 12: FINAL VALIDATION
 
 - [ ] Step 12.2: Test Coverage Report
 ---------------------------------
+  Write gate test FIRST:
+    - [ ] test: "coverage thresholds enforce >90% line coverage for src/tui/*"
+
   - [ ] Run: npx vitest run --coverage
   - [ ] Target: >90% line coverage for src/tui/ files
 
 - [ ] Step 12.3: Manual Smoke Test
 -------------------------------
+  Gate test (must pass before Step 12.4):
+    - [ ] test: "manual smoke checklist completed with zero critical failures"
+
   - [ ] Launch app in tmux. Exercise every view, every shortcut, every
     transition. Verify visual output matches requirements.
 
 - [ ] Step 12.4: Anti-Pattern Audit
 -------------------------------
+  Gate test (must pass before plan sign-off):
+    - [ ] test: "AP-001 through AP-012 audit has zero violations"
+
   - [ ] Walk through AP-001 through AP-012 in Part 18 of requirements.
   - [ ] Confirm none of these patterns exist in the new code.
 
@@ -1229,31 +1260,31 @@ Bugs
 EXECUTION ORDER SUMMARY
 ================================================================================
 
-Phase  Description                        Est. Tests  Deps
------  ---------------------------------  ----------  ----
-  0    Scaffolding & test infrastructure       10      none
-  1    App Shell (Header + Footer + Shell)     15+     P0
-  2    Navigation system                       20+     P1
-  3    Mock data foundation                    13+     P0
-  4    Simple views (Agent/Block/NewIssue)     25+     P2, P3
-  5    Medium views (Group/Home/Picker)        30+     P2, P3
-  6    Separator components                     5      P0
-  7    Response rendering pipeline             25+     P3, P6
-  8    DetailView (12 sub-steps)               72+     P5, P6, P7
-  9    Keyboard integration                     7+     P8
-  10   Mock data persistence                    8+     P8
-  11   Polish & integration                    10+     P10
-  12   Final validation                         —      P11
+Phase  Description                        Planned Tests     Deps
+-----  ---------------------------------  ---------------  ----
+  0    Scaffolding & test infrastructure         8         none
+  1    App Shell (Header + Footer + Shell)      19         P0
+  2    Navigation system                         22         P1
+  3    Mock data foundation                      17         P0
+  4    Simple views (Agent/Block/NewIssue)      22         P2, P3
+  5    Medium views (Group/Home/Picker)         24         P2, P3
+  6    Separator components                       5         P0
+  7    Response rendering pipeline               33         P3, P6
+  8    DetailView (12 sub-steps)                72         P5, P6, P7
+  9    Keyboard integration                       7         P4, P8
+  10   Mock data persistence                      9         P4, P8
+  11   Polish & integration                      11         P10
+  12   Final validation                           4         P9, P11
 
-Total estimated tests: ~240+
+Total listed planned tests (all must be promoted to per-step gate tests): 253
 
 Parallelizable:
   - P3 (mock data) can run parallel with P1 (shell) and P2 (nav)
   - P6 (separators) can run parallel with P4/P5
   - P4 and P5 can partially overlap (different views)
 
-Critical path: P0 -> P1 -> P2 -> P5 -> P8 -> P10 -> P11 -> P12
-               (P3, P6, P7 must also complete before P8)
+Critical path: P0 -> P1 -> P2 -> P5 -> P7 -> P8 -> P10 -> P11 -> P12
+Required predecessor branch before P8: P0 -> P3 -> P7 and P0 -> P6
 
 
 ================================================================================
@@ -1264,7 +1295,7 @@ For EVERY step:
 
   1. Write failing tests (RED)
      - Tests encode the requirement
-     - Tests use mock data from Phase 3
+     - Tests use Phase 3 mock data where applicable (otherwise local fixtures)
      - Tests use ink-testing-library for component tests
      - Tests use plain function calls for hook/utility tests
 
@@ -1287,17 +1318,24 @@ For EVERY step:
 GATE TEST RULE
 ================================================================================
 
-Every step and substep must have at least one explicit test that validates
-the step's deliverable. ALL tests for a step must pass before the next step
-begins. No step may be marked complete with failing tests.
+Every step and substep MUST include an explicit `Gate test` block with at
+least one named test/check. ALL tests for a step MUST pass before the next
+step/substep begins. No implicit or deferred-only gates are allowed. No step
+may be marked complete with failing tests.
 
-  - Implementation steps: at least one test per step (required by TDD above).
-  - Schema/design steps: gate = downstream tests compile against the schema.
+  - Implementation steps: at least one NEW test per step (required by TDD above).
+  - Schema/design steps: gate test must still be explicit and local to the step.
+    (Exception: design-only steps may use a commit gate instead of a runtime test.)
   - Integration/wiring steps: at least one integration test verifying the wiring.
   - Polish steps: at least one visual/behavioral regression test.
 
-Enforcement: Run `npx vitest run` after completing each step. Zero failures
-required before proceeding. Record pass count in the step's checkbox line.
+Enforcement:
+  1. Run `npx vitest run` after completing each step. Zero failures required.
+  2. Run `npx tsc --noEmit` after each step to verify structural type safety.
+  3. Each step's git commit MUST include at least one new test case or test file.
+     Running only the pre-existing test suite does not satisfy the gate.
+  4. Record pass count in the step's checkbox line.
+  5. All previous steps' tests MUST remain green (regression clause).
 
 
 ================================================================================
@@ -1332,14 +1370,16 @@ Modified files:
   src/tui/run.tsx                 Simplified, use AppWrapper
   src/types.ts                    quoted_response_id field
 
+Modified files (minor edits):
+  src/tui/newissue.tsx            Fix blockedBy parsing (Step 4.3)
+  src/tui/agent-status.tsx        Remove inline mock data (Step 4.1)
+  src/tui/blocking-map.tsx        Remove direct imports (Step 4.2)
+  src/tui/group-view.tsx          Remove direct imports (Step 5.1)
+
 Unchanged files:
   src/tui/status-color.ts
   src/tui/paragraph-utils.ts
   src/tui/group-picker.tsx
-  src/tui/newissue.tsx
-  src/tui/agent-status.tsx        (minor: remove inline mock data)
-  src/tui/blocking-map.tsx        (minor: remove direct imports)
-  src/tui/group-view.tsx          (minor: remove direct imports)
 
 
 ================================================================================

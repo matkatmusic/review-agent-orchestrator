@@ -1,0 +1,510 @@
+DEPENDENCY AUDIT OF TUI_REWRITE_PLAN.txt
+==========================================
+
+Auditor: Claude (Security Auditor persona)
+Scope: All 13 phases (Phase 0 through Phase 12), all steps and substeps
+File: TUI_REWRITE_PLAN.txt (1366 lines)
+
+
+ISSUE 1: HIGH
+Location: Phase 7, Step 7.1, lines 772-804
+Problem: Forward dependency on Phase 3 mock data. ResponseContainer tests
+  need Response objects with quoted_response_id, continuation flags, reply
+  chains, and unread state. These fixtures are defined in Phase 3 (Steps
+  3.1-3.3), but the Execution Order Summary lists Phase 7 deps as "P3, P6"
+  which is correct. However, the critical path listed on line 1272 says
+  "P0 -> P1 -> P2 -> P5 -> P8 -> P10 -> P11 -> P12" and the required
+  predecessor branch on line 1273 says "P0 -> P3 -> P7 and P0 -> P6".
+  The problem: Phase 7 depends on P3 and P6, and Phase 8 depends on P5,
+  P6, and P7 (per the dep column). But Phase 5 depends on P2 and P3.
+  The critical path omits Phase 7 entirely. The actual critical path
+  should include P7 since P8 depends on it. The correct critical path is:
+  P0 -> P1 -> P2 -> P5 -> P7 -> P8 -> P10 -> P11 -> P12
+  (with P3 and P6 joining as predecessors into P7).
+Fix: Update line 1272 to:
+  Critical path: P0 -> P1 -> P2 -> P5 -> P7 -> P8 -> P10 -> P11 -> P12
+  This reflects that P8 cannot start until P7 completes.
+
+
+ISSUE 2: MEDIUM
+Location: Phase 8, Step 8.6, line 955
+Problem: Forward dependency within Phase 8. Step 8.6 says "Wire
+  useThreadNavigation, useFocusRing, useQuote, useViewport" in its
+  implementation section. However, useQuote is not defined until Step 8.5,
+  which immediately precedes 8.6 -- that is fine. But the tests for Step
+  8.6 do not test quoting behavior (that is deferred to Step 8.9). The
+  issue is that the implementation instructions in 8.6 say to wire
+  useQuote, but the tests in 8.6 do not exercise it. This creates a gap
+  where useQuote is wired in 8.6 but not tested until 8.9. If the wiring
+  is wrong, it will not be caught until three steps later.
+Fix: Either (a) add a minimal test to Step 8.6: test: "useQuote hook is
+  initialized (quotedResponse is null on mount)", or (b) change the
+  implementation note in 8.6 to say "Wire useThreadNavigation,
+  useFocusRing, useViewport. (useQuote wired in Step 8.9.)" and defer
+  the useQuote wiring to 8.9 where the tests exist.
+
+
+ISSUE 3: HIGH
+Location: Phase 8, Step 8.10, line 1014
+Problem: Test moved from Step 8.8 to Step 8.10 creates a gap. The test
+  "Return on focused footer shortcut dispatches action" was explicitly
+  noted as "(moved from Step 8.8)". But Step 8.8 implements "Dispatch
+  footer actions" on line 992. This means Step 8.8 implements footer
+  action dispatching but has no test for it -- the test was moved to
+  Step 8.10 which is two steps later. This violates the TDD principle
+  stated in the TEST-FIRST DISCIPLINE section: "Write failing tests
+  (RED)" before implementation.
+Fix: Either (a) move the "Dispatch footer actions" implementation item
+  from Step 8.8 to Step 8.10 alongside the test, or (b) keep a test in
+  Step 8.8 that verifies basic footer dispatch (e.g., test: "Return on
+  focused footer item triggers callback") and have Step 8.10 test the
+  context-sensitive variations.
+
+
+ISSUE 4: MEDIUM
+Location: Phase 1, Step 1.2 vs Phase 8, Step 8.10, lines 313-337 vs 1011-1035
+Problem: Split responsibility for footer shortcuts creates an implicit
+  dependency from Step 1.2 to Step 8.10 that is not documented. Step 1.2
+  defines getFooterShortcuts(viewType, options?) and FooterOptions
+  interface. Step 8.10 adds the Detail-specific context-sensitive logic.
+  The FooterOptions interface must be designed in Step 1.2 to accept
+  fields that are not exercised until Step 8.10 (inThread,
+  responseSelected, hasReplies, isQuoting). If the interface is designed
+  wrong in Step 1.2, it will not surface until Step 8.10 -- seven phases
+  later.
+Fix: Add a note to Step 1.2 explicitly stating the FooterOptions fields
+  that must be included (inThread, responseSelected, hasReplies,
+  isQuoting) and add a test: "getFooterShortcuts accepts FooterOptions
+  with unknown fields without error" to ensure forward compatibility.
+  Alternatively, defer FooterOptions interface definition to Step 8.10
+  and have Step 1.2 use a simpler getFooterShortcuts(viewType) without
+  the options parameter.
+
+
+ISSUE 5: MEDIUM
+Location: Phase 8, Step 8.1, lines 855-869
+Problem: Step 8.1 says "Use LabeledSeparator from Phase 6" but the
+  dependency table on line 1259 lists Phase 8 deps as "P5, P6, P7".
+  This is correct in the table, but the critical path on line 1272
+  does not mention P6 as a prerequisite for P8. The required predecessor
+  branch on line 1273 says "P0 -> P3 -> P7 and P0 -> P6" which implies
+  P6 feeds into P7, but P6 also feeds directly into P8 (via Step 8.1).
+  The predecessor branch should read "P0 -> P6 -> P7 and P0 -> P6 -> P8"
+  or more clearly "P6 is a prerequisite for both P7 and P8".
+Fix: Clarify line 1273: "Required predecessor branches before P8:
+  P0 -> P3 -> P7, P0 -> P6 (feeds both P7 and P8 directly)"
+
+
+ISSUE 6: MEDIUM
+Location: Phase 10, Step 10.1, lines 1115-1116
+Problem: Step 10.1 says 'Note: "loadMockData reads back what was saved"
+  and "resetMockData restores defaults" are covered in Step 3.2. Not
+  duplicated here.' This is a correct anti-duplication note, but it
+  creates a hidden cross-phase dependency. If Step 3.2 tests are later
+  modified or removed, Step 10.1's persistence guarantees become
+  untested with no obvious link.
+Fix: Add a cross-reference comment in Step 3.2 stating: "These tests
+  are also relied upon by Step 10.1 for persistence coverage. Do not
+  remove without adding equivalent tests to Step 10.1." This makes the
+  dependency bidirectionally visible.
+
+
+ISSUE 7: LOW
+Location: Phase 2, Step 2.2, lines 417-438
+Problem: useGlobalKeys tests reference NavigationContext actions
+  (navigateTo AgentStatus, BlockingMap, etc.) but NavigationContext is
+  not defined until Step 2.1. Step 2.2 correctly follows Step 2.1
+  sequentially, so this is not a build-order issue. However, the tests
+  for 2.2 assume the navigation actions work correctly, meaning a
+  failure in Step 2.1's implementation could cascade silently into
+  Step 2.2 test failures with misleading error messages.
+Fix: Add a note to Step 2.2: "Tests require NavigationContext from
+  Step 2.1. If 2.2 tests fail on navigation calls, verify 2.1 gate
+  tests pass first." This is documentation only -- no structural change
+  needed.
+
+
+ISSUE 8: HIGH
+Location: Phase 8, Step 8.8, lines 977-992
+Problem: Step 8.8 tests "Return on focused viewReplies resolves thread"
+  on line 985, but thread resolution is implemented in Step 8.3
+  (useThreadNavigation) via resolveThread. Step 8.8 is testing
+  integration of focus ring + thread resolution, which is fine. But
+  Step 8.8's implementation says "Wire GroupPicker (group-picker.tsx) as
+  overlay within DetailView" and "GroupPicker overlay rendering". The
+  GroupPicker component is listed in the FILE INVENTORY as an
+  "Unchanged file" (line 1356: src/tui/group-picker.tsx). However,
+  there is no step that ports or tests GroupPicker. If GroupPicker
+  is an existing class component that needs to be rendered inside
+  DetailView (a functional component), there may be compatibility
+  issues. No step verifies GroupPicker renders correctly in the new
+  functional component tree.
+Fix: Add a test to Step 8.8: test: "GroupPicker overlay renders list
+  of containers". If GroupPicker is a class component, add a porting
+  task to Step 0.3 or create a new sub-step in Phase 8.
+
+
+ISSUE 9: MEDIUM
+Location: Phase 5, Step 5.2, line 697
+Problem: HomeView test "a/d/r change issue status" tests mutation
+  behavior (changing issue status), but mock data mutations are not
+  implemented until Phase 10 (Step 10.1). In Phase 5, what does
+  "change issue status" mean? The test either (a) tests a callback
+  prop (onActivate, onDefer, onResolve) is called, which is fine, or
+  (b) tests that the issue list visually updates, which requires
+  state management from Phase 10. The ambiguity is the problem.
+Fix: Clarify the test description to: test: "a/d/r keys call
+  onActivate/onDefer/onResolve callbacks with correct issue". This
+  makes clear the test verifies callback invocation, not state mutation.
+
+
+ISSUE 10: LOW
+Location: Phase 11, Step 11.1, lines 1157-1168
+Problem: Step 11.1 "Unread Tracking" implements "New Replies separator
+  in ResponseChain" but this was already implemented in Phase 7, Step
+  7.2 (line 816: "new replies separator inserted at correct position")
+  and tested in Step 7.3 (line 831: "shows new replies separator").
+  Step 11.1 appears to duplicate this work.
+Fix: Change Step 11.1's implementation item from "New Replies separator
+  in ResponseChain" to "Verify New Replies separator integrates with
+  live unread tracking (separator position updates when markViewed
+  changes userLastViewedAt)". This distinguishes the Phase 11 work
+  (integration with persistence) from the Phase 7 work (rendering).
+
+
+ISSUE 11: MEDIUM
+Location: Phase 9, Step 9.1, lines 1073-1090
+Problem: Phase 9 deps are listed as "P4, P8" in the summary table.
+  But the integration tests in Step 9.1 include "Any view -> press
+  'q' -> app exits" which requires useGlobalKeys from Phase 2 (Step
+  2.2) and "Home -> press Return -> Detail view shown" which requires
+  HomeView from Phase 5. The dependency should be P2, P4, P5, P8 or
+  more simply "all view phases" since integration tests exercise the
+  full app.
+Fix: Update the dependency column for Phase 9 from "P4, P8" to
+  "P2, P4, P5, P8" (or "P8" alone if we accept that P8 transitively
+  depends on P2, P4, P5 -- but the table uses direct deps for other
+  phases, so transitive-only is inconsistent).
+
+
+ISSUE 12: LOW
+Location: Phase 1, Step 1.2, lines 330-331
+Problem: Step 1.2 says "getFocusableShortcuts() -- filter by action +
+  !disabled" is marked [x] (complete), but the step overall is marked
+  [ ] (incomplete). This mixed state is confusing. Several implementation
+  items in Step 1.2 are [x] while others are [ ]. The checkbox
+  semantics are inconsistent: does [x] mean "designed" or "implemented"?
+  For a plan document, having partial completion markers within an
+  incomplete step makes it hard to track actual progress.
+Fix: Establish a convention: either (a) only mark a sub-item [x] when
+  the entire step is complete, or (b) document that [x] means "this
+  specific sub-item is done" even if the step is incomplete. The current
+  mixed usage should be clarified with a note at the top of the plan.
+
+
+ISSUE 13: HIGH
+Location: Phase 3, Step 3.1, lines 489-530
+Problem: Step 3.1 has only one gate test: "mock schema fixture covers
+  threads, nested threads, quotes, continuations, and unread cases".
+  This is a single meta-test that checks the schema has coverage. But
+  the step defines 8 mock issues with specific structural requirements
+  (I-1 through I-8). If the schema test passes but a specific issue
+  (e.g., I-5 with continuations) is malformed, downstream phases will
+  fail with confusing errors. The gate test is too coarse.
+Fix: Add structural gate tests for the most complex mock issues:
+  test: "I-3 has nested thread structure (reply within reply)"
+  test: "I-5 has continuation nodes (is_continuation=true)"
+  test: "I-8 has correct unread boundary (user_last_viewed_at)"
+  These catch structural errors at the source rather than letting them
+  propagate to Phase 7 or Phase 8.
+
+
+ISSUE 14: MEDIUM
+Location: Phase 8, Step 8.9, line 1007
+Problem: Step 8.9 says "Wire Ctrl+Alt+Q to viewport scroll-to-quoted"
+  but the useViewport hook (Step 7.2) returns scrollToMessage (line 823).
+  The name mismatch (scroll-to-quoted vs scrollToMessage) is minor, but
+  more importantly, scrollToMessage scrolls to a message by ID.
+  Ctrl+Alt+Q needs to look up the quoted_response_id of the currently
+  selected message and then call scrollToMessage with that ID. This
+  lookup logic is not tested anywhere. Step 8.9 tests "Ctrl+Alt+Q
+  scrolls to quoted message" but does not test the case where the
+  selected message has no quote (should be no-op) or where the quoted
+  message is not in the current chain (e.g., it is in a parent thread).
+Fix: Add edge case tests to Step 8.9:
+  test: "Ctrl+Alt+Q is no-op when selected message has no quote"
+  test: "Ctrl+Alt+Q when quoted message not in current chain is no-op"
+
+
+ISSUE 15: LOW
+Location: Phase 4, Step 4.1, line 596
+Problem: Step 4.1 test "Return calls onFocusPane" references a callback
+  named onFocusPane, but no other step defines what onFocusPane does.
+  The name suggests focusing a pane, but AgentStatus is described as a
+  table view. If onFocusPane navigates to a detail view for the selected
+  agent, this should be clearer. If it does something else, it should be
+  documented.
+Fix: Clarify test description: test: "Return on selected agent row
+  calls onFocusPane callback with agent data" and add a note explaining
+  what onFocusPane does in the AgentStatus context.
+
+
+ISSUE 16: MEDIUM
+Location: Phase 7, Step 7.1 vs Phase 8, Step 8.2, lines 790-791 vs 879-881
+Problem: Both Step 7.1 and Step 8.2 test quote-related visual rendering
+  but from different angles. Step 7.1 tests ResponseContainer's quote
+  display ("quoted response shows '> first 40 chars' line", "quoted text
+  truncated with '...' at 40 chars"). Step 8.2 tests InputBox's quoting
+  banner ("quoting banner shows first 40 chars"). Both use the "40 chars"
+  truncation rule. If this magic number changes, two separate test files
+  need updating. There is no shared constant or test for the truncation
+  length.
+Fix: Define a shared constant QUOTE_PREVIEW_LENGTH = 40 (in a shared
+  module) and reference it in both Step 7.1 and Step 8.2 implementations.
+  Add a note to both steps that the truncation length is shared.
+
+
+ISSUE 17: MEDIUM
+Location: Phase 2, Step 2.3, line 452
+Problem: Step 2.3 says "All 7 cases present (fix gap 1 from validation)"
+  but the plan never defines what "gap 1 from validation" refers to.
+  This appears to be a reference to an external validation document or
+  review that is not included in the plan. A reader cannot verify
+  whether the gap was fixed without access to the referenced document.
+Fix: Either (a) inline the description of "gap 1": what view type was
+  missing and was added, or (b) add a cross-reference: "See
+  TUI_REWRITE_REQUIREMENTS.txt Part X, validation item Y."
+
+
+ISSUE 18: LOW
+Location: Phase 12, Step 12.4, lines 1231-1237
+Problem: Step 12.4 references "AP-001 through AP-012 in Part 18 of
+  requirements" but the plan does not list what these anti-patterns are.
+  The gate test is "AP-001 through AP-012 audit has zero violations"
+  which is a manual audit, not an automated test. This means the gate
+  test cannot be enforced by "npx vitest run" as required by the GATE
+  TEST RULE. The same issue applies to Step 12.3 "manual smoke checklist
+  completed with zero critical failures" -- this is not automatable.
+Fix: For Steps 12.3 and 12.4, either (a) acknowledge these are manual
+  gates that cannot be enforced by vitest and add an exception to the
+  GATE TEST RULE, or (b) create automatable proxy tests such as:
+  test: "no class components in src/tui/" (for AP anti-patterns)
+  test: "no direct mock-data imports in view components" (for AP-*)
+  This does not replace manual review but gives automated coverage.
+
+
+ISSUE 19: HIGH
+Location: Execution Order Summary, line 1259
+Problem: Phase 8 deps are listed as "P5, P6, P7" but this is incomplete.
+  Phase 8, Step 8.8 wires GroupPicker which is mentioned in Step 0.3
+  as a ported file. Step 8.6 uses useViewport from Phase 7 and
+  useThreadNavigation, useFocusRing, useQuote from Phase 8 itself
+  (earlier sub-steps). The external dependencies P5, P6, P7 look
+  correct for external phases, but Phase 8 also depends on Phase 2
+  for NavigationContext (Step 8.7 tests "thread state change notifies
+  parent" which likely uses navigation, and Step 8.11 uses
+  replaceCurrentView from the navigation system). Phase 2 is an
+  indirect dependency through Phase 5, but if the table intends to
+  show direct dependencies, P2 should be listed.
+Fix: Either (a) add P2 to Phase 8 deps: "P2, P5, P6, P7", or
+  (b) add a footnote that the deps column shows only direct
+  dependencies and indirect deps are implied through the chain.
+
+
+ISSUE 20: MEDIUM
+Location: Phase 5, Step 5.3, lines 717-718
+Problem: IssueListPicker test "Ctrl+V navigates to issue" introduces a
+  keyboard shortcut (Ctrl+V) that is not defined in Step 0.3's hotkey
+  additions (which added ALT_Q, CTRL_ALT_Q, CTRL_ALT_R). Ctrl+V is a
+  well-known system shortcut (paste) on most platforms. Using it for
+  navigation could conflict with terminal paste behavior, especially in
+  environments where Ctrl+V sends the literal paste sequence.
+Fix: (a) Verify Ctrl+V does not conflict with terminal paste in the
+  Ink environment and add a note explaining the choice, or (b) consider
+  an alternative shortcut and add it to the hotkeys.ts additions in
+  Step 0.3.
+
+
+ISSUE 21: LOW
+Location: Phase 1, Step 1.4, line 381
+Problem: Step 1.4 deliverable says "All 15+ tests green" but the actual
+  test count for Phase 0 + Phase 1 is 8 + 19 = 27 tests. The "15+"
+  appears to be a stale count that was not updated when tests were added.
+Fix: Update line 381 to: "All 27 tests green (Phase 0 + Phase 1)."
+
+
+ISSUE 22: MEDIUM
+Location: Phase 8, Step 8.6, lines 942-959
+Problem: Step 8.6 "Basic Rendering" tests include "InputBox focused on
+  first load" which requires the useFocusRing hook from Step 8.4.
+  The test "sending message keeps InputBox focused" requires the send
+  callback, which involves state mutation. In Phase 8, mutations are
+  not wired (that happens in Phase 10). So the "sending message" test
+  must be testing that the focus state remains after a callback is
+  invoked, not that the message actually persists. This is not explicit.
+Fix: Clarify the test: test: "sending message calls onSend callback
+  and keeps InputBox focused (focus does not shift to response list)".
+
+
+ISSUE 23: LOW
+Location: Phase 7, Step 7.1, lines 793-794
+Problem: Two tests overlap conceptually:
+  "computeLineCount includes quote line" and "computeLineCount matches
+  actual rendered height". The second test is a superset of the first --
+  if computeLineCount matches actual rendered height and the component
+  renders a quote line, then the quote line is necessarily included.
+  Having both is not harmful but is slightly redundant.
+Fix: No structural change needed. Optionally merge into:
+  test: "computeLineCount matches actual rendered height (including
+  quote line when present)". This reduces the count by 1 but the
+  separate tests are defensible for debugging clarity.
+
+
+ISSUE 24: MEDIUM
+Location: Phase 10, Step 10.2, line 1135
+Problem: Test "ViewRouter reads from AppStateContext and passes data via
+  props (no direct mock-data imports)" is an architectural constraint
+  test. But the implementation says "Replace direct mock-data imports
+  with AppStateContext at app/router layer". This migration affects
+  ViewRouter (Phase 2, Step 2.3), all simple views (Phase 4), and
+  medium views (Phase 5). The migration is done in Phase 10 but could
+  break tests written in Phases 4 and 5 that may rely on direct imports
+  for their fixtures. If Phases 4/5 tests use mock-data imports directly,
+  removing those imports in Phase 10 will break the tests.
+Fix: Add a note to Phase 10: "When replacing direct mock-data imports,
+  update Phase 4/5 view tests to receive data via props/context instead
+  of direct imports. Run full test suite after migration." The tests in
+  Phases 4/5 should already use prop-based data (Steps 4.1, 4.2, 5.1
+  all say "receives data via props, no module imports") but this should
+  be verified.
+
+
+ISSUE 25: LOW
+Location: Phase 8, Step 8.7, line 970
+Problem: Test "thread state change notifies parent" is vague. What does
+  "notifies parent" mean? Does it call a callback prop? Does it update
+  context? Does it call setFooterOptions? The test name does not specify
+  the mechanism.
+Fix: Clarify: test: "thread state change (enter/exit) calls
+  onThreadStateChange callback with current thread depth".
+
+
+ISSUE 26: MEDIUM
+Location: Phase 11, Step 11.1, lines 1157-1168, vs Phase 7, Step 7.2, line 816
+Problem: Step 11.1 tests "New Replies separator visible for unread
+  responses" but the "new replies separator inserted at correct position"
+  test already exists in Step 7.2. The difference should be that Step
+  7.2 tests the viewport hook's separator positioning logic in isolation,
+  while Step 11.1 tests the full integration with markViewed and live
+  unread state. But this distinction is not stated, creating ambiguity
+  about whether these are duplicate tests.
+Fix: Rename Step 11.1 test to: test: "New Replies separator position
+  updates after markViewed changes userLastViewedAt" to distinguish
+  from the Step 7.2 static positioning test.
+
+
+ISSUE 27: HIGH
+Location: GATE TEST RULE, lines 1303-1318
+Problem: The GATE TEST RULE states "Every step and substep MUST include
+  an explicit Gate test block" but many steps do not have a separate
+  "Gate test" block. Steps 0.1 and 3.1 have explicit "Gate test" blocks.
+  Most other steps have "Write tests FIRST" blocks but no separate
+  "Gate test" label. The rule says the tests serve as gates, and the
+  TEST-FIRST DISCIPLINE section says all tests must pass before
+  proceeding. But the inconsistency in labeling (some steps have "Gate
+  test:", most have "Write tests FIRST:") means the enforcement is
+  ambiguous. Are all tests in a step gate tests, or only those labeled
+  "Gate test"?
+Fix: Add a clarifying statement: "All tests listed under 'Write tests
+  FIRST' for a step are gate tests for that step. The explicit 'Gate
+  test' label is used for non-implementation steps (e.g., schema design,
+  manual audits) where the gate is not a standard TDD test."
+
+
+ISSUE 28: LOW
+Location: Phase 0, Step 0.3, line 44
+Problem: Step 0.3 says thread-builders.ts is "modified in Step 3.3"
+  but the file is listed under "Port Stable Modules (no changes)".
+  The header says "no changes" but the parenthetical on line 44
+  acknowledges it will be modified later. This is not a dependency
+  issue but a labeling contradiction.
+Fix: Change the step title to "Step 0.3: Port Stable Modules (minimal
+  changes)" or add a note: "These files are carried forward as-is in
+  this step; modifications noted in parentheses happen in later steps."
+
+
+ISSUE 29: MEDIUM
+Location: Phase 8, Step 8.10, lines 1020-1021
+Problem: Tests "Ctrl+R, Esc, Alt+H removed from thread footer display"
+  references Alt+H but Alt+H is not listed in the key priority table
+  (lines 131-140) in the Architectural Discussion section. Alt+H
+  appears once in Step 0.3 (line 53) as a hotkey test "ALT_H matches
+  unicode" but its function is never defined in any step. What does
+  Alt+H do? Why is it removed from the thread footer? Without knowing
+  what Alt+H triggers, the test cannot be properly verified.
+Fix: Add Alt+H to the key priority list in the Architectural Discussion
+  with its function (e.g., "Alt+H -> show help overlay" or similar).
+  Document its purpose in Step 0.3 or the step where it is implemented.
+
+
+ISSUE 30: LOW
+Location: Execution Order Summary, line 1265
+Problem: "Total listed planned tests (all must be promoted to per-step
+  gate tests): 247". The phrase "must be promoted" implies the tests are
+  not yet gate tests and need a future action to become gates. This
+  contradicts the GATE TEST RULE which says they already are gates.
+Fix: Reword to: "Total listed planned tests (each serves as a gate
+  test for its step): 247"
+
+
+==========================================================================
+
+SUMMARY: 30 issues found, 5 HIGH, 13 MEDIUM, 12 LOW
+
+
+GATE TEST ASSESSMENT: needs improvement
+
+Issues with the current GATE TEST RULE:
+
+1. Inconsistent labeling. Some steps have explicit "Gate test:" blocks
+   (Steps 0.1, 3.1, 12.1-12.4) while most use "Write tests FIRST:".
+   The rule says "every step MUST include an explicit Gate test block"
+   but most steps do not have one. The "Write tests FIRST" block serves
+   the same purpose but uses different vocabulary. The rule should
+   clarify that "Write tests FIRST" tests are the gate tests.
+
+2. Manual gates are not enforceable. Steps 12.3 and 12.4 have gate
+   tests that are manual checklists, not automated tests. The rule says
+   "Run npx vitest run after completing each step" but manual gates
+   cannot be validated this way. The rule needs an exception clause for
+   manual validation steps, or the manual steps need automated proxies.
+
+3. No test count verification. The rule does not require recording the
+   expected test count per step. A step could have 6 listed tests but
+   only 4 implemented, and the gate would still pass (vitest reports
+   zero failures). Adding "verify N tests ran" to the gate protocol
+   would catch missing tests.
+
+4. No regression clause. The rule says "Zero failures required before
+   proceeding" but does not say "including all tests from prior steps."
+   A strict reading allows running only the current step's tests and
+   ignoring regressions. The rule should explicitly state: "npx vitest
+   run executes ALL tests, not just the current step's tests."
+
+Proposed improvements to the GATE TEST RULE:
+
+  a. Add: "Tests listed under 'Write tests FIRST' are the gate tests
+     for that step. The 'Gate test' label is used only for
+     non-implementation steps."
+
+  b. Add: "Steps with manual-only gates (12.3, 12.4) are exempt from
+     automated enforcement but must be documented with a dated sign-off
+     in the step's checkbox line."
+
+  c. Add: "After completing each step, run npx vitest run (full suite,
+     all prior tests included). Verify (1) zero failures and (2) total
+     test count matches cumulative expected count for all completed
+     steps."
+
+  d. Add: "Record the pass count and total test count on the step's
+     completion line, e.g.: - [x] Step 3.2 (12/12 tests, 42 total)"
