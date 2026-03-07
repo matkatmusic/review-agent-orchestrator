@@ -247,3 +247,27 @@ describe('Footer — memoization', () => {
         expect(Footer).toHaveProperty('$$typeof', Symbol.for('react.memo'));
     });
 });
+
+// ---- Shortcut content per non-Detail view ----
+
+describe('Footer — footer shows correct shortcuts for each non-Detail ViewType', () => {
+    const nonDetailViews: ViewType[] = [
+        ViewType.Home,
+        ViewType.NewIssue,
+        ViewType.AgentStatus,
+        ViewType.BlockingMap,
+        ViewType.GroupView,
+        ViewType.IssuePicker,
+    ];
+
+    it('each non-Detail view renders all its shortcut keys and labels', () => {
+        for (const vt of nonDetailViews) {
+            const { lastFrame } = render(<Footer viewType={vt} columns={120} />);
+            const output = stripAnsi(lastFrame()!);
+            for (const shortcut of VIEW_SHORTCUTS[vt]) {
+                expect(output, `view ${ViewType[vt]}: missing key "${shortcut.key}"`).toContain(shortcut.key);
+                expect(output, `view ${ViewType[vt]}: missing label "${shortcut.label}"`).toContain(shortcut.label);
+            }
+        }
+    });
+});

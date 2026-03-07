@@ -314,7 +314,7 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
     - [x] 3 fixed lines: title, status bar, subtitle
     - [x] Export HEADER_LINES = 3 constant
 
-- [ ] Step 1.2: Footer Component
+- [x] Step 1.2: Footer Component
 -----------------------------
   Write tests FIRST:
     - [x] test: "footer renders shortcut chips as [key] label"
@@ -322,15 +322,15 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
     - [x] test: "disabled shortcuts render dimmed"
     - [x] test: "focused shortcut renders inverse+bold"
     - [x] test: "computeFooterLines returns correct height"
-    - [ ] test: "footer shows correct shortcuts for each non-Detail ViewType"
+    - [x] test: "footer shows correct shortcuts for each non-Detail ViewType"
 
   Then implement:
-    - [ ] VIEW_SHORTCUTS data structure (all 7 view types)
-    - [ ] Define FooterOptions interface: { inThread?, responseSelected?,
+    - [x] VIEW_SHORTCUTS data structure (all 7 view types)
+    - [x] Define FooterOptions interface: { inThread?, responseSelected?,
           hasReplies?, isQuoting?, focusedAction?, inputFocused? }
-    - [ ] getFooterShortcuts(viewType, options?) — accepts optional FooterOptions,
+    - [x] getFooterShortcuts(viewType, options?) — accepts optional FooterOptions,
           returns VIEW_SHORTCUTS[viewType] when no options provided
-    - [ ] FooterProps accepts FooterOptions fields as optional props
+    - [x] FooterProps accepts FooterOptions fields as optional props
     - [x] getFocusableShortcuts() — filter by action + !disabled
     - [x] computeFooterLines() — row wrapping logic
     - [x] computeRows() — break into rows fitting column width

@@ -12,20 +12,28 @@ export interface Shortcut {
     readonly action?: string;
 }
 
-export interface FooterProps {
-    readonly viewType: ViewType;
+export interface FooterOptions {
     readonly inThread?: boolean;
+    readonly responseSelected?: boolean;
+    readonly hasReplies?: boolean;
+    readonly isQuoting?: boolean;
+    readonly focusedAction?: string;
+    readonly inputFocused?: boolean;
+}
+
+export interface FooterProps extends FooterOptions {
+    readonly viewType: ViewType;
     readonly threadResolved?: boolean;
     readonly focusedIndex?: number | null;
     readonly columns?: number;
 }
 
-const ik = (k: Ink_keyofKeys_Choices) => InkKeyOfKeysStringMap.get(k)!;
-const ck = (k: KeyCombinations) => getHotKeyLabel(k);
+const inkKey = (k: Ink_keyofKeys_Choices) => InkKeyOfKeysStringMap.get(k)!;
+const comboKey = (k: KeyCombinations) => getHotKeyLabel(k);
 
 export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
     [ViewType.Home]: [
-        { key: ik(Ink_keyofKeys_Choices.RETURN), label: 'View' },
+        { key: inkKey(Ink_keyofKeys_Choices.RETURN), label: 'View' },
         { key: 'n',     label: 'New' },
         { key: 'a',     label: 'Activate' },
         { key: 'd',     label: 'Defer' },
@@ -36,63 +44,68 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
         { key: 'q',     label: 'Quit' },
     ],
     [ViewType.Detail]: [
-        { key: ik(Ink_keyofKeys_Choices.RETURN), label: 'Send' },
-        { key: ck(KeyCombinations.SCROLL_UP_DOWN), label: 'Scroll' },
-        { key: ck(KeyCombinations.CTRL_SHIFT_RIGHT_ARROW), label: 'Thread', action: 'enterThread' },
-        { key: ck(KeyCombinations.CTRL_R), label: 'Resolve Issue' },
-        { key: ik(Ink_keyofKeys_Choices.ESCAPE), label: 'Back', action: 'back' },
-        { key: ck(KeyCombinations.ALT_H), label: 'Home', action: 'home' },
+        { key: inkKey(Ink_keyofKeys_Choices.RETURN), label: 'Send' },
+        { key: comboKey(KeyCombinations.SCROLL_UP_DOWN), label: 'Scroll' },
+        { key: comboKey(KeyCombinations.CTRL_SHIFT_RIGHT_ARROW), label: 'Thread', action: 'enterThread' },
+        { key: comboKey(KeyCombinations.CTRL_R), label: 'Resolve Issue' },
+        { key: inkKey(Ink_keyofKeys_Choices.ESCAPE), label: 'Back', action: 'back' },
+        { key: comboKey(KeyCombinations.ALT_H), label: 'Home', action: 'home' },
         { key: 'd',     label: 'Defer', disabled: true },
         { key: 'b',     label: 'Block', disabled: true },
         { key: 'w',     label: 'Rebase', disabled: true },
         { key: 's',     label: 'Show pane', disabled: true },
     ],
     [ViewType.NewIssue]: [
-        { key: ik(Ink_keyofKeys_Choices.RETURN), label: 'Create' },
-        { key: ik(Ink_keyofKeys_Choices.ESCAPE), label: 'Cancel' },
+        { key: inkKey(Ink_keyofKeys_Choices.RETURN), label: 'Create' },
+        { key: inkKey(Ink_keyofKeys_Choices.ESCAPE), label: 'Cancel' },
     ],
     [ViewType.AgentStatus]: [
-        { key: ik(Ink_keyofKeys_Choices.RETURN), label: 'Focus pane' },
-        { key: 'j/k',   label: 'Navigate' },
-        { key: ik(Ink_keyofKeys_Choices.ESCAPE), label: 'Back' },
+        { key: inkKey(Ink_keyofKeys_Choices.RETURN), label: 'Focus pane' },
+        { key: comboKey(KeyCombinations.SCROLL_UP_DOWN), label: 'Navigate' },
+        { key: inkKey(Ink_keyofKeys_Choices.ESCAPE), label: 'Back' },
+        { key: 'q',     label: 'Quit' },
     ],
     [ViewType.BlockingMap]: [
-        { key: ik(Ink_keyofKeys_Choices.RETURN), label: 'View issue' },
-        { key: 'j/k',   label: 'Navigate' },
-        { key: ik(Ink_keyofKeys_Choices.ESCAPE), label: 'Back' },
+        { key: inkKey(Ink_keyofKeys_Choices.RETURN), label: 'View issue' },
+        { key: comboKey(KeyCombinations.SCROLL_UP_DOWN), label: 'Navigate' },
+        { key: inkKey(Ink_keyofKeys_Choices.ESCAPE), label: 'Back' },
+        { key: 'q',     label: 'Quit' },
     ],
     [ViewType.GroupView]: [
-        { key: ik(Ink_keyofKeys_Choices.RETURN), label: 'View issues' },
+        { key: inkKey(Ink_keyofKeys_Choices.RETURN), label: 'View issues' },
         { key: 'n',     label: 'Next issue' },
         { key: 'p',     label: 'Prev issue' },
-        { key: ik(Ink_keyofKeys_Choices.ESCAPE), label: 'Back' },
+        { key: inkKey(Ink_keyofKeys_Choices.ESCAPE), label: 'Back' },
+        { key: 'q',     label: 'Quit' },
     ],
     [ViewType.IssuePicker]: [
-        { key: 'Enter', label: 'Toggle' },
-        { key: '\u2191\u2193',    label: 'Scroll' },
-        { key: 'Esc',   label: 'Done' },
+        { key: inkKey(Ink_keyofKeys_Choices.RETURN), label: 'Toggle' },
+        { key: comboKey(KeyCombinations.SCROLL_UP_DOWN), label: 'Scroll' },
         { key: 'Ctrl v', label: 'View issue' },
+        { key: inkKey(Ink_keyofKeys_Choices.ESCAPE), label: 'Close' },
+        { key: 'q',     label: 'Quit' },
     ],
 };
 
 const THREAD_SHORTCUTS: readonly Shortcut[] = [
-    { key: ik(Ink_keyofKeys_Choices.RETURN), label: 'Send' },
-    { key: ck(KeyCombinations.SCROLL_UP_DOWN), label: 'Scroll' },
-    { key: ck(KeyCombinations.CTRL_SHIFT_RIGHT_ARROW), label: 'Sub-thread', action: 'enterThread' },
-    { key: ck(KeyCombinations.CTRL_SHIFT_LEFT_ARROW), label: 'Exit thread', action: 'exitThread' },
-    { key: ck(KeyCombinations.CTRL_R), label: 'Resolve Issue' },
-    { key: ik(Ink_keyofKeys_Choices.ESCAPE), label: 'Back', action: 'back' },
-    { key: ck(KeyCombinations.ALT_H), label: 'Home', action: 'home' },
+    { key: inkKey(Ink_keyofKeys_Choices.RETURN), label: 'Send' },
+    { key: comboKey(KeyCombinations.SCROLL_UP_DOWN), label: 'Scroll' },
+    { key: comboKey(KeyCombinations.CTRL_SHIFT_RIGHT_ARROW), label: 'Sub-thread', action: 'enterThread' },
+    { key: comboKey(KeyCombinations.CTRL_SHIFT_LEFT_ARROW), label: 'Exit thread', action: 'exitThread' },
+    { key: comboKey(KeyCombinations.CTRL_R), label: 'Resolve Issue' },
+    { key: inkKey(Ink_keyofKeys_Choices.ESCAPE), label: 'Back', action: 'back' },
+    { key: comboKey(KeyCombinations.ALT_H), label: 'Home', action: 'home' },
 ];
 
 /** Get the full shortcut list for the given view/thread state. */
-export function getFooterShortcuts(viewType: ViewType, inThread?: boolean): readonly Shortcut[] {
+export function getFooterShortcuts(viewType: ViewType, options?: FooterOptions | boolean): readonly Shortcut[] {
+    const inThread = typeof options === 'boolean' ? options : options?.inThread ?? false;
     return (viewType === ViewType.Detail && inThread) ? THREAD_SHORTCUTS : VIEW_SHORTCUTS[viewType];
 }
 
 /** Get only the shortcuts that participate in the Tab focus ring. */
-export function getFocusableShortcuts(viewType: ViewType, inThread?: boolean): Shortcut[] {
-    return getFooterShortcuts(viewType, inThread).filter(
+export function getFocusableShortcuts(viewType: ViewType, options?: FooterOptions | boolean): Shortcut[] {
+    return getFooterShortcuts(viewType, options).filter(
         s => s.action !== undefined && !s.disabled,
     );
 }
@@ -136,10 +149,11 @@ function computeRows(shortcuts: readonly Shortcut[], columns: number): Shortcut[
     return rows;
 }
 
-const FooterComponent: React.FC<FooterProps> = ({ viewType, inThread, threadResolved, focusedIndex, columns = 80 }) => {
-    const shortcuts = getFooterShortcuts(viewType, inThread);
+const FooterComponent: React.FC<FooterProps> = ({ viewType, inThread, responseSelected, hasReplies, isQuoting, focusedAction, inputFocused, threadResolved, focusedIndex, columns = 80 }) => {
+    const options: FooterOptions = { inThread, responseSelected, hasReplies, isQuoting, focusedAction, inputFocused };
+    const shortcuts = getFooterShortcuts(viewType, options);
 
-    const focusable = getFocusableShortcuts(viewType, inThread);
+    const focusable = getFocusableShortcuts(viewType, options);
     const rows = computeRows(shortcuts, columns);
 
     return (
