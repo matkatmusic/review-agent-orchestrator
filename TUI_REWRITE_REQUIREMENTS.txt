@@ -312,7 +312,7 @@ REQ-HOME-003: Status filter tabs at top:
 REQ-HOME-004: Capacity warning when active agents equal max agents.
 
 REQ-HOME-005: Keyboard shortcuts:
-             - Up/Down (j/k): move cursor
+             - Up/Down: move cursor
              - Tab/Shift+Tab: cycle status filter tabs
              - Return: open selected issue in DetailView
              - a: activate selected issue
@@ -554,7 +554,7 @@ REQ-OVR-001: GroupPicker renders as a full-content-area overlay replacing the
 REQ-OVR-002: GroupPicker features:
             - List of existing containers (groups)
             - First item: "+ Create new group" (switches to create mode)
-            - Up/Down (j/k): navigate list
+            - Up/Down: navigate list
             - Return: select group or enter create mode
             - In create mode: TextInput for new group name
             - Escape: close overlay
@@ -604,7 +604,7 @@ REQ-AGT-003: Status indicators:
             - Filled circle (green): alive
             - Empty circle (gray): dead
 
-REQ-AGT-004: Up/Down (j/k): navigate cursor.
+REQ-AGT-004: Up/Down: navigate cursor.
             Selected row: cyan highlight.
 
 REQ-AGT-005: Return: focus the selected agent's tmux pane.
@@ -639,7 +639,7 @@ REQ-BLK-005: Sections:
             - "No dependencies:" header (if isolated issues exist)
             - Flat list of isolated issues
 
-REQ-BLK-006: Up/Down (j/k): navigate cursor.
+REQ-BLK-006: Up/Down: navigate cursor.
             Selected row: bold white with triangle cursor.
 
 REQ-BLK-007: Return: navigate to selected issue's DetailView.
@@ -666,7 +666,7 @@ REQ-GRP-003: Issue display (issues mode):
             - Same selection styling
 
 REQ-GRP-004: Navigation:
-            - Up/Down (j/k): navigate within current mode
+            - Up/Down: navigate within current mode
             - n/p: alias for Down/Up in issue mode
             - Return: drill into container (list mode) or select issue
             - Escape: pop back to list mode (or exit view if in list mode)
@@ -689,7 +689,7 @@ REQ-PICK-002: Each row shows:
             - Status color coding
 
 REQ-PICK-003: Navigation:
-            - Up/Down (j/k): navigate list
+            - Up/Down: navigate list
             - Return: toggle selected state on current issue
             - Ctrl+V: navigate to view the highlighted issue in DetailView
             - Escape: close picker
