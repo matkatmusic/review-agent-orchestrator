@@ -1,0 +1,981 @@
+TUI REWRITE PLAN — Incremental Build with TDD
+===============================================
+
+Companion to: TUI_REWRITE_REQUIREMENTS.txt
+Methodology: Test-Driven Development (Red-Green-Refactor)
+Principle: Every step produces a runnable, testable app.
+
+
+================================================================================
+PHASE 0: SCAFFOLDING & TEST INFRASTRUCTURE
+================================================================================
+
+Goal: Clean slate for the rewrite. Existing src/tui/ is preserved on a branch
+for reference. New files are created alongside or replace them.
+
+Step 0.1: Preserve Current Code
+---------------------------------
+  - Create branch: tui-rewrite
+  - Tag current HEAD for reference: pre-rewrite
+
+Step 0.2: Test Harness Setup
+------------------------------
+  - Verify vitest + ink-testing-library work with a trivial component
+  - Create src/tui/__tests__/ directory (or keep colocated .test.tsx)
+  - Create test helper: renderApp(view?, props?) that wraps Ink render()
+    with mock stdout, controlled dimensions, and stdin for input simulation
+  - Create test helper: tick(ms?) for async flush
+
+  Tests to write FIRST (red):
+    - test: "renderApp returns a frame" — trivial <Text>hello</Text>
+    - test: "stdin.write sends input" — useInput receives it
+
+  Deliverable: Working test harness, 2 passing tests.
+  Req coverage: REQ-TEST-001, REQ-TEST-002, REQ-TEST-003
+
+Step 0.3: Port Stable Modules (no changes)
+--------------------------------------------
+  These files are carried forward unchanged:
+    - src/types.ts (add quoted_response_id to Response + ResponseRow)
+    - src/tui/status-color.ts
+    - src/tui/paragraph-utils.ts (+ its tests)
+    - src/tui/thread-builders.ts (+ its tests)
+    - src/tui/hotkeys.ts (add ALT_Q, CTRL_ALT_Q, CTRL_ALT_R)
+    - src/tui/views.ts
+
+  Tests: run existing tests, confirm green.
+
+
+================================================================================
+PHASE 1: APP SHELL — 3 Zones
+================================================================================
+
+Goal: A running Ink app that shows Header, empty content area, and Footer.
+The shell constrains height to terminal rows and handles resize.
+
+Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
+              REQ-HDR-001 through REQ-HDR-005,
+              REQ-FTR-001 through REQ-FTR-008,
+              REQ-ARCH-001, REQ-ARCH-007, REQ-ARCH-008,
+              REQ-INK-004, REQ-INK-005
+
+Step 1.1: Header Component
+----------------------------
+  Write tests FIRST:
+    - test: "header renders exactly 3 lines"
+    - test: "header shows centered title with view label"
+    - test: "header shows Agents count and Unread count"
+    - test: "header shows context-sensitive subtitle per view type"
+    - test: "header is memoized (React.memo)"
+    - test: "detail view label drops 'Detail' when inThread=true"
+
+  Then implement:
+    - Functional component, React.memo wrapped
+    - Props: currentView, columns, activeAgents, maxAgents, unreadCount, threadInfo
+    - 3 fixed lines: title, status bar, subtitle
+    - Export HEADER_LINES = 3 constant
+
+Step 1.2: Footer Component
+-----------------------------
+  Write tests FIRST:
+    - test: "footer renders shortcut chips as [key] label"
+    - test: "footer wraps to multiple rows at narrow width"
+    - test: "footer shows correct shortcuts for each ViewType"
+    - test: "disabled shortcuts render dimmed"
+    - test: "focused shortcut renders inverse+bold"
+    - test: "computeFooterLines returns correct height"
+    - test: "Detail footer changes based on focus context" [CHANGED]
+
+  Then implement:
+    - VIEW_SHORTCUTS data structure (all 7+ view types)
+    - Include context-sensitive Detail shortcuts [CHANGED]:
+      InputBox-focused set, Response-selected set, Thread-mode set
+    - getFooterShortcuts(viewType, options) — options includes
+      { inThread?, responseSelected?, hasReplies?, isQuoting? }
+    - getFocusableShortcuts() — filter by action + !disabled
+    - computeFooterLines() — row wrapping logic
+    - computeRows() — break into rows fitting column width
+    - Export all computation functions for use by DetailView
+
+Step 1.3: AppShell Component
+-------------------------------
+  Write tests FIRST:
+    - test: "app shell renders header, content, footer vertically"
+    - test: "app shell constrains height to rows prop"
+    - test: "content area gets remaining height after header and footer"
+    - test: "resize updates dimensions"
+
+  Then implement:
+    - Functional component
+    - Props: children, columns, rows, currentView, headerProps, footerProps
+    - Layout: <Box flexDirection="column" height={rows}>
+        <Header ... />
+        {children}
+        <Footer ... />
+      </Box>
+
+Step 1.4: Entry Point (run.tsx)
+---------------------------------
+  Write tests FIRST:
+    - test: "app renders without crashing"
+    - test: "--resetMockData flag is processed before render"
+
+  Then implement:
+    - AppWrapper that tracks terminal dimensions via useStdout()
+    - No ANSI escape codes (REQ-INK-005)
+    - Passes dimensions to AppShell
+    - Initial view: Home (change from current I-1 default)
+
+  Deliverable: Running app showing Header + empty content + Footer.
+  Can be launched with: node dist/tui/run.js
+  All 15+ tests green.
+
+
+================================================================================
+PHASE 2: NAVIGATION SYSTEM
+================================================================================
+
+Goal: View stack with push/pop/replace/home. Navigation context available
+to all components. Global keyboard shortcuts working.
+
+Req coverage: REQ-STATE-001, REQ-STATE-002, REQ-NAV-001 through REQ-NAV-008,
+              REQ-KEY-001 through REQ-KEY-003, REQ-ARCH-002
+
+Step 2.1: Navigation Reducer + Context
+-----------------------------------------
+  Write tests FIRST:
+    - test: "PUSH_VIEW adds view to stack"
+    - test: "POP_VIEW removes top view"
+    - test: "POP_VIEW is no-op when stack has 1 item"
+    - test: "REPLACE_VIEW swaps top without growing stack"
+    - test: "GO_HOME resets stack to [Home]"
+    - test: "useNavigation hook returns actions and current view"
+
+  Then implement:
+    File: src/tui/navigation.tsx (NEW)
+    - NavigationAction union type: PUSH_VIEW | POP_VIEW | REPLACE_VIEW | GO_HOME
+    - navigationReducer(state, action) — pure function
+    - NavigationContext with Provider
+    - useNavigation() custom hook
+    - Saved selection map as useRef inside provider
+
+Step 2.2: useGlobalKeys Hook
+-------------------------------
+  Write tests FIRST:
+    - test: "pressing 'q' calls exit"
+    - test: "pressing Escape calls goBack"
+    - test: "pressing 's' navigates to AgentStatus"
+    - test: "pressing 's' when already on AgentStatus is no-op"
+    - test: "pressing 'b' navigates to BlockingMap"
+    - test: "pressing 'g' navigates to GroupView"
+    - test: "pressing 'n' navigates to NewIssue"
+    - test: "returns true when key is consumed"
+
+  Then implement:
+    File: src/tui/use-global-keys.tsx (NEW)
+    - useGlobalKeys(currentViewType): uses useInput, returns consumed boolean
+    - Reads navigation actions from NavigationContext
+    - Duplicate-view prevention (REQ-KEY-002)
+
+Step 2.3: ViewRouter Component
+---------------------------------
+  Write tests FIRST:
+    - test: "renders placeholder for Home view"
+    - test: "renders placeholder for Detail view"
+    - test: "renders placeholder for each of the 7 view types"
+    - test: "navigation sequence: Home -> Detail -> back -> Home"
+    - test: "deep navigation: Home -> Detail -> NewIssue -> home -> Home"
+
+  Then implement:
+    File: src/tui/view-router.tsx (NEW)
+    - Switch on currentView.type, render stub <Text> for each view
+    - All 7 cases present (fix gap 1 from validation)
+
+Step 2.4: Wire App Together
+------------------------------
+  Update src/tui/app.tsx:
+    - Functional component
+    - NavigationProvider wrapping AppShell wrapping ViewRouter
+    - Footer receives shortcuts from navigation context
+
+  Deliverable: App with working view stack navigation.
+  Press 's' -> AgentStatus, 'b' -> BlockingMap, Esc -> back, etc.
+  All navigation tests green.
+
+
+================================================================================
+PHASE 3: MOCK DATA FOUNDATION
+================================================================================
+
+Goal: Correct mock data representing all Response relationship types.
+This data drives view development in subsequent phases.
+
+Req coverage: REQ-MOCK-001 through REQ-MOCK-010, REQ-QUO-001, REQ-QUO-002
+
+Step 3.1: Mock Data Schema
+-----------------------------
+  Define mock data that exercises every relationship type:
+
+  Issue I-1: "Simple issue" (Active)
+    - 3-message main chain: user -> agent -> user
+    - No threads, no quotes
+
+  Issue I-2: "Issue with thread" (Awaiting)
+    - 4-message main chain
+    - Message #2 has 2 replies (a thread)
+    - Thread is unresolved
+
+  Issue I-3: "Issue with nested threads" (Blocked, blocked by I-2)
+    - 3-message main chain
+    - Message #1 has a thread with 3 replies
+    - Reply #2 in that thread has its own sub-thread (2 replies)
+    - Outer thread resolved, inner thread unresolved
+
+  Issue I-4: "Issue with quotes" (Active)
+    - 5-message main chain
+    - Message #3 quotes message #1 (quoted_response_id set)
+    - Message #5 quotes message #3
+
+  Issue I-5: "Issue with continuations" (Deferred)
+    - Agent sends a long multi-paragraph response
+    - Split into 3 continuation nodes (is_continuation=true)
+    - User replies, agent replies with another 2-continuation message
+
+  Issue I-6: "Resolved issue" (Resolved)
+    - 2-message chain, simple
+
+  Issue I-7: "Blocked issue" (Blocked, blocked by I-1 and I-2)
+    - 1 message
+
+  Issue I-8: "Issue with unread" (Active)
+    - 4 messages, user_last_viewed_at set to before message #3
+    - Messages #3 and #4 are "new" (unread agent responses)
+
+Step 3.2: Mock Data Files
+----------------------------
+  Write tests FIRST:
+    - test: "loadMockData returns all issues"
+    - test: "hydrated responses have correct forward/back pointers"
+    - test: "continuation nodes have is_continuation=true"
+    - test: "quoted responses have quoted_response_id set"
+    - test: "reply chains are correctly linked"
+    - test: "flattenResponse round-trips through hydrate"
+    - test: "resetMockData restores defaults"
+    - test: "getNextResponseId increments and persists"
+
+  Then implement:
+    - Update data/mock-data.default.json with above schema
+    - Update src/tui/mock-store.ts:
+      - Add quoted_response_id to MockResponseRow
+      - Hydration handles quoted_response_id
+      - Flattening preserves quoted_response_id
+    - Update src/tui/mock-data.ts:
+      - All MOCK_* exports use immutable patterns
+      - MOCK_AGENTS consolidated here (from agent-status.tsx)
+      - MOCK_CONTAINERS with 2 groups: "Inbox" and "Sprint 1"
+      - MOCK_DEPS: I-3 blocked by I-2, I-7 blocked by I-1 and I-2
+
+Step 3.3: Thread Builders Update
+-----------------------------------
+  Update src/tui/thread-builders.ts:
+    - Add quoted_response_id support to createMessage / buildResponseChain
+    - Add buildQuotedResponse(parent, quotedId, body) helper
+
+  Deliverable: Comprehensive mock data, all hydration tests green.
+
+
+================================================================================
+PHASE 4: SIMPLE VIEWS (AgentStatus, BlockingMap, NewIssue)
+================================================================================
+
+Build the three simplest views. Each follows the pattern:
+  1. Write tests against requirements
+  2. Implement component
+  3. Wire into ViewRouter
+  4. Verify global keys work
+
+-----
+
+Step 4.1: AgentStatus View
+-----------------------------
+  Req coverage: REQ-AGT-001 through REQ-AGT-006, REQ-MOCK-008, REQ-MOCK-009
+
+  Write tests FIRST:
+    - test: "renders table with correct column headers"
+    - test: "shows alive/dead indicators"
+    - test: "up/down moves cursor"
+    - test: "j/k aliases for up/down"
+    - test: "selected row has cyan highlight"
+    - test: "Return calls onFocusPane"
+    - test: "receives data via props, not module import"
+
+  Then implement:
+    - Functional component with useInput
+    - Props: agents: AgentStatusEntry[], onFocusPane, ...navigation callbacks
+    - Define AgentStatusEntry display type
+    - Remove inline MOCK_AGENTS (moved to mock-data.ts)
+    - Wire into ViewRouter with mock data passed as props
+
+-----
+
+Step 4.2: BlockingMap View
+----------------------------
+  Req coverage: REQ-BLK-001 through REQ-BLK-008, REQ-MOCK-008
+
+  Write tests FIRST:
+    - test: "renders dependency tree with correct connectors"
+    - test: "root nodes appear at top level"
+    - test: "isolated issues appear under 'No dependencies' header"
+    - test: "status is color-coded"
+    - test: "cursor navigation works"
+    - test: "Return navigates to selected issue"
+    - test: "receives data via props"
+
+  Then implement:
+    - Functional component with useInput
+    - Props: issues, dependencies, ...navigation callbacks
+    - buildFlatRows() tree algorithm
+    - Remove direct MOCK_ISSUES/MOCK_DEPS imports
+    - Wire into ViewRouter
+
+-----
+
+Step 4.3: NewIssue View
+--------------------------
+  Req coverage: REQ-NEW-001 through REQ-NEW-006
+
+  Write tests FIRST:
+    - test: "renders 4 form fields"
+    - test: "Tab cycles between fields"
+    - test: "active field shows TextInput"
+    - test: "Return validates and submits"
+    - test: "empty title shows error"
+    - test: "Escape cancels"
+    - test: "blockedBy accepts 'I-3, I-5' format"
+    - test: "onCreated receives parsed NewIssueData with number[] blockedBy"
+
+  Then implement:
+    - Functional component (already functional, minor cleanup)
+    - Fix blockedBy to parse to number[] before calling onCreated
+    - Wire into ViewRouter
+
+  Deliverable: 3 simple views working with navigation.
+  All view-specific tests green. Global keys work from each view.
+
+
+================================================================================
+PHASE 5: MEDIUM VIEWS (GroupView, HomeView, IssuePicker)
+================================================================================
+
+Step 5.1: GroupView
+---------------------
+  Req coverage: REQ-GRP-001 through REQ-GRP-005, REQ-MOCK-008
+
+  Write tests FIRST:
+    - test: "list mode shows containers with progress bars"
+    - test: "Return drills into container"
+    - test: "Escape pops back to list mode"
+    - test: "issue mode shows issues in container"
+    - test: "n/p navigate in issue mode"
+    - test: "group mode persists across navigation away and back"
+    - test: "receives data via props"
+
+  Then implement:
+    - Functional component with useInput
+    - Props: containers, containerIssues, ...navigation callbacks
+    - Persist groupMode via useRef or context
+    - Remove direct MOCK_CONTAINERS/MOCK_CONTAINER_ISSUES imports
+
+-----
+
+Step 5.2: HomeView
+--------------------
+  Req coverage: REQ-HOME-001 through REQ-HOME-005
+
+  Write tests FIRST:
+    - test: "renders scrollable issue list"
+    - test: "each row shows cursor, unread indicator, inum, status, title"
+    - test: "status filter tabs show counts"
+    - test: "Tab cycles filter tabs"
+    - test: "selecting a tab filters the list"
+    - test: "capacity warning at max agents"
+    - test: "Return opens selected issue in DetailView"
+    - test: "a/d/r change issue status"
+    - test: "unread star indicator shown for issues with unread responses"
+
+  Then implement:
+    - Functional component (rewrite from class)
+    - useInput directly (remove bridge pattern)
+    - Props: issues, unreadInums, maxAgents, callbacks
+
+-----
+
+Step 5.3: IssueListPicker
+----------------------------
+  Req coverage: REQ-PICK-001 through REQ-PICK-005
+
+  Write tests FIRST:
+    - test: "renders bordered box with title"
+    - test: "shows checkboxes for selected/unselected"
+    - test: "unread indicator shown"
+    - test: "Return toggles selection"
+    - test: "Ctrl+V navigates to issue"
+    - test: "Escape closes"
+    - test: "cursor initializes to first selected issue"
+    - test: "current issue is filtered out"
+
+  Then implement:
+    - Functional component (rewrite from class)
+    - Props: title, issues, selected, unreadInums, callbacks
+
+  Deliverable: 6 of 7 views working. Only DetailView remains.
+  All tests green.
+
+
+================================================================================
+PHASE 6: SEPARATOR COMPONENTS [NEW]
+================================================================================
+
+Req coverage: REQ-SEP-001 through REQ-SEP-013
+
+Step 6.1: Separator + LabeledSeparator
+-----------------------------------------
+  Write tests FIRST:
+    - test: "Separator renders full-width dashes"
+    - test: "Separator width equals columns prop"
+    - test: "LabeledSeparator centers label"
+    - test: "LabeledSeparator odd remainder goes right"
+    - test: "LabeledSeparator at various column widths"
+
+  Then implement:
+    File: src/tui/separator.tsx (NEW)
+    - Extract centeredLabel() from detail.tsx
+    - Separator: <Text color={color}>{'─'.repeat(columns)}</Text>
+    - LabeledSeparator: dashes + [ text ] + dashes
+
+  Deliverable: Two reusable components, fully tested.
+
+
+================================================================================
+PHASE 7: RESPONSE RENDERING COMPONENTS
+================================================================================
+
+Goal: Build the response display pipeline bottom-up:
+ResponseContainer -> ResponseChain -> viewport hook.
+These are prerequisites for DetailView.
+
+Step 7.1: ResponseContainer
+------------------------------
+  Req coverage: REQ-RSP-010 through REQ-RSP-019, REQ-QUO-030 through REQ-QUO-032
+
+  Write tests FIRST:
+    - test: "renders bordered container with author name"
+    - test: "user messages are cyan, agent messages are green"
+    - test: "selected message is white/bold"
+    - test: "thread parent is gray/dimmed"
+    - test: "continuation message has minimal border"
+    - test: "reply badge shows count right-aligned"
+    - test: "reply badge shows '(N new)' in red when unread"
+    - test: "reply badge shows resolved checkmark"
+    - test: "bottom border: no action hint when no replies" [CHANGED]
+    - test: "bottom border: 'view replies (N)' when has replies"
+    - test: "bottom border: inverse when focused"
+    - test: "trailing hint line: blank spacer by default"
+    - test: "trailing hint line: resolve hint when viewRepliesFocused"
+    - test: "quoted response shows '> first 40 chars' line" [NEW]
+    - test: "quoted text truncated with '...' at 40 chars" [NEW]
+    - test: "computeLineCount includes quote line" [NEW]
+    - test: "computeLineCount matches actual rendered height"
+    - test: "selected header shows only author (no type/timestamp)"
+    - test: "unselected header shows author, type tag, timestamp"
+    - test: "type tag is yellow, gray for thread parents"
+    - test: "timestamp formatted without T and Z"
+
+  Then implement:
+    - Functional component, React.memo
+    - Props: response, columns, selected, hasNewReplies, threadResolved,
+      isThreadParent, viewRepliesFocused, quotedBody (string | null)
+    - Static computeLineCount(body, columns, hasQuote) function
+    - Word wrapping respects border width
+
+Step 7.2: useViewport Hook
+-----------------------------
+  Req coverage: REQ-RSP-001, REQ-RSP-003, REQ-RSP-004, REQ-RSP-005
+
+  Write tests FIRST:
+    - test: "cold start centers on selected message"
+    - test: "scroll down shifts viewport when selection leaves range"
+    - test: "scroll up shifts viewport"
+    - test: "resize triggers reflow (re-center)"
+    - test: "chain change (new root) resets anchor"
+    - test: "new replies separator inserted at correct position"
+    - test: "viewport fills available height"
+
+  Then implement:
+    File: src/tui/use-viewport.tsx (NEW)
+    - useViewport(messages, selectedIndex, height, columns, userLastViewedAt)
+    - Returns: { visibleMessages, firstVisible, lastVisible, newRepliesIndex }
+    - Tracks lastFirstVisible, lastHeight, lastRootId via useRef
+    - centerOnSelection() and deriveFirstVisible() logic
+
+Step 7.3: ResponseChain Component
+------------------------------------
+  Write tests FIRST:
+    - test: "renders visible messages within height"
+    - test: "shows new replies separator"
+    - test: "selected message is highlighted"
+    - test: "viewport scrolls with selection"
+
+  Then implement:
+    - Functional component using useViewport hook
+    - Props: rootResponse, columns, height, userLastViewedAt,
+      selectedIndex, viewRepliesFocusedIndex
+    - Maps visible messages to ResponseContainer
+
+  Deliverable: Full response rendering pipeline, tested.
+
+
+================================================================================
+PHASE 8: DETAIL VIEW
+================================================================================
+
+The most complex view. Built incrementally with sub-steps.
+
+Step 8.1: IssueHeader Component
+----------------------------------
+  Req coverage: REQ-DTL-010 through REQ-DTL-012
+
+  Write tests FIRST:
+    - test: "renders LabeledSeparator with status color" [CHANGED]
+    - test: "shows status and group"
+    - test: "group field highlighted when focused"
+    - test: "blocked by and blocks fields shown"
+    - test: "hint text matches new wording" [CHANGED]
+    - test: "height is ISSUE_HEADER_LINE_COUNT lines"
+
+  Then implement:
+    - Use LabeledSeparator from Phase 6
+    - Update hint text
+
+Step 8.2: InputBox Component
+-------------------------------
+  Req coverage: REQ-INP-001 through REQ-INP-007
+
+  Write tests FIRST:
+    - test: "renders 3 lines: separator, input, padding"
+    - test: "TextInput enabled when focused prop is true"
+    - test: "TextInput disabled when focused prop is false" [CHANGED]
+    - test: "quoting banner appears when quotedMessage provided" [NEW]
+    - test: "quoting banner shows first 40 chars" [NEW]
+    - test: "quoting banner uses author color, dimmed" [NEW]
+
+  Then implement:
+    - Add focused prop controlling TextInput enabled/focus
+    - Add quotedMessage prop (Message | null)
+    - Render quoting banner line between separator and TextInput
+
+Step 8.3: useThreadNavigation Hook
+-------------------------------------
+  Req coverage: REQ-THR-001 through REQ-THR-006
+
+  Write tests FIRST:
+    - test: "enterThread pushes onto stack"
+    - test: "enterThread marks replies seen"
+    - test: "enterThread moves cursor to last reply"
+    - test: "exitThread pops stack"
+    - test: "exitThread restores saved cursor"
+    - test: "exitThread from empty stack returns 'exit-view'"
+    - test: "nested threads: enter -> enter -> exit -> exit"
+    - test: "resolveThread toggles thread_resolved_at"
+    - test: "currentMessages returns correct chain for depth"
+
+  Then implement:
+    File: src/tui/use-thread-navigation.tsx (NEW)
+    - useThreadNavigation(rootResponse)
+    - State: threadStack via useState (immutable updates)
+    - Returns: { currentMessages, enterThread, exitThread, resolveThread,
+      isInThread, threadParent, savedSelectedIndex }
+
+Step 8.4: useFocusRing Hook
+------------------------------
+  Req coverage: REQ-FOC-001 through REQ-FOC-005
+
+  Write tests FIRST:
+    - test: "cycles forward through slots"
+    - test: "cycles backward with shift"
+    - test: "wraps around at boundaries"
+    - test: "dynamic slot count changes reset position"
+    - test: "resetFocus sets to position 0"
+    - test: "returns correct focusedIndex"
+
+  Then implement:
+    File: src/tui/use-focus-ring.tsx (NEW)
+    - useFocusRing(totalSlots)
+    - Returns: { focusedIndex, cycleFocus(direction), resetFocus() }
+
+Step 8.5: useQuote Hook [NEW]
+-------------------------------
+  Req coverage: REQ-QUO-010 through REQ-QUO-012
+
+  Write tests FIRST:
+    - test: "startQuote sets quotedResponse"
+    - test: "clearQuote clears quotedResponse"
+    - test: "isQuoting returns true when quoting"
+    - test: "startQuote moves focus to input"
+
+  Then implement:
+    File: src/tui/use-quote.tsx (NEW)
+    - useQuote()
+    - Returns: { quotedResponse, startQuote, clearQuote, isQuoting }
+
+Step 8.6: DetailView — Basic Rendering
+-----------------------------------------
+  Write tests FIRST:
+    - test: "renders issue header when not in thread"
+    - test: "renders response chain"
+    - test: "renders input box"
+    - test: "up/down scrolls conversation"
+    - test: "up/down wraps cyclically" [CHANGED]
+    - test: "InputBox focused on first load" [NEW]
+    - test: "sending message keeps InputBox focused" [CHANGED]
+
+  Then implement:
+    - Functional component with useInput
+    - Wire useThreadNavigation, useFocusRing, useQuote, useViewport
+    - Props: inum, issue, rootResponse, blockedBy, blocks, group,
+      columns, rows, containers, allIssues, unreadInums, userLastViewedAt,
+      initialSelectedMessage, callbacks
+    - Cyclical up/down wrapping between response list and InputBox
+
+Step 8.7: DetailView — Thread Navigation
+-------------------------------------------
+  Write tests FIRST:
+    - test: "Ctrl+Shift+Right enters thread"
+    - test: "Ctrl+Shift+Left exits thread"
+    - test: "Escape exits thread, then exits view"
+    - test: "thread header separator shown when in thread"
+    - test: "thread parent rendered dimmed above replies"
+    - test: "nested thread enter/exit works"
+    - test: "thread state change notifies parent"
+
+  Then implement:
+    - Wire Ctrl+Shift+Arrow keys to useThreadNavigation
+    - Render ThreadHeaderSeparator + thread parent when in thread
+    - Use LabeledSeparator for thread header [CHANGED]
+
+Step 8.8: DetailView — Focus Cycling & Overlays
+--------------------------------------------------
+  Write tests FIRST:
+    - test: "Tab cycles: input -> group -> blockedBy -> blocks -> viewReplies -> footer"
+    - test: "Shift+Tab cycles reverse"
+    - test: "in thread mode: skips header fields"
+    - test: "Return on focused group opens GroupPicker"
+    - test: "Return on focused blockedBy opens IssuePicker"
+    - test: "Return on focused viewReplies resolves thread"
+    - test: "Return on focused footer shortcut dispatches action"
+    - test: "focus resets on thread change"
+
+  Then implement:
+    - Map useFocusRing slots to header fields / viewReplies / footer items
+    - GroupPicker overlay rendering
+    - Dispatch footer actions
+
+Step 8.9: DetailView — Quote Feature [NEW]
+---------------------------------------------
+  Write tests FIRST:
+    - test: "Alt+Q starts quoting selected response"
+    - test: "quoting banner appears above InputBox"
+    - test: "sending while quoting includes quoted_response_id"
+    - test: "Escape while quoting cancels quote"
+    - test: "Ctrl+Alt+Q scrolls to quoted message"
+    - test: "Show quoted shortcut only shown when response has quote"
+
+  Then implement:
+    - Wire Alt+Q to useQuote.startQuote
+    - Wire Escape (when quoting) to useQuote.clearQuote
+    - Wire Ctrl+Alt+Q to viewport scroll-to-quoted
+    - Pass quotedBody to ResponseContainer for visual rendering
+    - Context-sensitive footer: swap shortcuts when quoting
+
+Step 8.10: DetailView — Context-Sensitive Footer [CHANGED]
+------------------------------------------------------------
+  Write tests FIRST:
+    - test: "footer shows InputBox shortcuts when InputBox focused"
+    - test: "footer shows Response shortcuts when Response selected"
+    - test: "Response shortcuts show 'Create Thread' when no replies"
+    - test: "Response shortcuts show 'View Thread' when has replies"
+    - test: "thread mode footer has reduced shortcuts"
+    - test: "Ctrl+R, Esc, Alt+H removed from thread footer display"
+
+  Then implement:
+    - DetailView tracks which footer set to show based on:
+      - Is InputBox focused? -> InputBox shortcuts
+      - Is a Response selected? -> Response-selected shortcuts
+      - Is in thread? -> Thread shortcuts
+    - Passes correct shortcut set to Footer via props or context
+
+Step 8.11: DetailView — Adjacent Issue Navigation
+----------------------------------------------------
+  Write tests FIRST:
+    - test: "Shift+Right navigates to next issue"
+    - test: "Shift+Left navigates to previous issue"
+    - test: "at last issue, Shift+Right is no-op"
+    - test: "navigation uses replaceCurrentView"
+
+  Then implement:
+    - Wire Shift+Arrow to navigateToAdjacentIssue
+
+Step 8.12: DetailView — Key Blocking
+---------------------------------------
+  Write tests FIRST:
+    - test: "Ctrl+R does not echo 'r' into text input"
+    - test: "Alt+Q does not echo 'q' into text input"
+
+  Then implement:
+    - Check for modifier keys before forwarding to TextInput
+    - Clean solution (no suppressNextInput hack)
+
+  Deliverable: Complete DetailView with all features.
+  70+ tests for DetailView alone. All green.
+
+
+================================================================================
+PHASE 9: KEYBOARD SYSTEM INTEGRATION
+================================================================================
+
+Goal: Verify all hotkeys work end-to-end across all views.
+
+Step 9.1: Hotkey Definitions
+-------------------------------
+  Req coverage: REQ-KBD-001 through REQ-KBD-005
+
+  Write tests FIRST:
+    - test: "matchesKeyCombination(ALT_Q, ...) works"
+    - test: "matchesKeyCombination(CTRL_ALT_Q, ...) works"
+    - test: "matchesKeyCombination(CTRL_ALT_R, ...) works"
+    - test: "ALT_H matches unicode \u02D9"
+    - test: "getHotKeyLabel returns readable strings"
+
+  Then implement (already partially done in Phase 0):
+    - Add ALT_Q, CTRL_ALT_Q, CTRL_ALT_R to KeyCombinations enum
+    - Add matchers and display labels
+
+Step 9.2: End-to-End Keyboard Tests
+--------------------------------------
+  Write integration tests:
+    - test: "Home -> press Return -> Detail view shown"
+    - test: "Detail -> press Escape -> back to Home"
+    - test: "Detail -> Ctrl+Shift+Right -> enters thread"
+    - test: "Detail -> Alt+Q -> quoting mode active"
+    - test: "Detail -> Shift+Right -> next issue"
+    - test: "Any view -> press 'q' -> app exits"
+    - test: "Global shortcuts don't duplicate views on stack"
+
+  Deliverable: Full keyboard coverage verified.
+
+
+================================================================================
+PHASE 10: MOCK DATA PERSISTENCE
+================================================================================
+
+Goal: Mutations to mock data (status changes, new responses, new issues)
+persist between app launches.
+
+Req coverage: REQ-MOCK-001 through REQ-MOCK-007, REQ-STATE-007
+
+Step 10.1: Immutable State Updates
+------------------------------------
+  Write tests FIRST:
+    - test: "activating an issue produces new issues array"
+    - test: "sending a response produces new response chain"
+    - test: "adding a dependency produces new deps array"
+    - test: "creating an issue produces new issues array with new item"
+    - test: "saveMockStore writes JSON to disk"
+    - test: "loadMockData reads back what was saved"
+    - test: "resetMockData restores defaults"
+
+  Then implement:
+    - State management layer between views and mock data
+    - All mutations create new objects (spread/map/filter)
+    - saveMockStore() called after each mutation
+    - Wire view callbacks to mutation functions:
+      - HomeView: onActivate, onDefer, onResolve
+      - DetailView: onSend, onGroupChange, onGroupCreate,
+        onBlockedByChange, onBlocksChange
+      - NewIssue: onCreated
+      - IssuePicker: onToggle
+
+Step 10.2: App-Level State Provider
+--------------------------------------
+  Write tests FIRST:
+    - test: "status change in HomeView reflected in Header counts"
+    - test: "new response in DetailView updates unread set"
+    - test: "new issue appears in HomeView list"
+
+  Then implement:
+    - AppStateContext providing issues, unreadInums, containers, etc.
+    - Mutation functions update state and trigger re-render
+    - saveMockStore() debounced on mutation
+
+  Deliverable: Full persistence. Launch app, make changes, quit,
+  relaunch — changes preserved.
+
+
+================================================================================
+PHASE 11: POLISH & INTEGRATION
+================================================================================
+
+Step 11.1: GroupPicker Overlay
+---------------------------------
+  Wire GroupPicker as overlay within DetailView.
+  Tests: existing from Phase 8.8.
+
+Step 11.2: Unread Tracking
+----------------------------
+  - markViewed() called when entering DetailView
+  - Unread indicators update in HomeView, Header, IssuePicker
+  - New Replies separator in ResponseChain
+
+Step 11.3: Error States
+--------------------------
+  - "Issue I-X not found" when navigating to nonexistent issue
+  - Empty state displays (no issues, no agents, etc.)
+
+Step 11.4: Visual Polish
+---------------------------
+  - Verify all colors match requirements
+  - Verify word wrapping at various terminal widths
+  - Verify footer row wrapping
+  - Test at 80, 120, 200 column widths
+
+
+================================================================================
+PHASE 12: FINAL VALIDATION
+================================================================================
+
+Step 12.1: Requirements Cross-Reference
+------------------------------------------
+  Walk through every REQ-* in TUI_REWRITE_REQUIREMENTS.txt.
+  For each requirement, verify:
+    a. There is at least one test covering it
+    b. The implementation satisfies it
+    c. [CHANGED] and [NEW] items are correctly implemented
+
+Step 12.2: Test Coverage Report
+---------------------------------
+  Run: npx vitest run --coverage
+  Target: >90% line coverage for src/tui/ files
+
+Step 12.3: Manual Smoke Test
+-------------------------------
+  Launch app in tmux. Exercise every view, every shortcut, every
+  transition. Verify visual output matches requirements.
+
+Step 12.4: Anti-Pattern Audit
+-------------------------------
+  Walk through AP-001 through AP-012 in Part 18 of requirements.
+  Confirm none of these patterns exist in the new code.
+
+
+================================================================================
+EXECUTION ORDER SUMMARY
+================================================================================
+
+Phase  Description                        Est. Tests  Deps
+-----  ---------------------------------  ----------  ----
+  0    Scaffolding & test infrastructure        5      none
+  1    App Shell (Header + Footer + Shell)     15+     P0
+  2    Navigation system                       20+     P1
+  3    Mock data foundation                    10+     P0
+  4    Simple views (Agent/Block/NewIssue)     25+     P2, P3
+  5    Medium views (Group/Home/Picker)        30+     P2, P3
+  6    Separator components                     5      P0
+  7    Response rendering pipeline             25+     P3, P6
+  8    DetailView (12 sub-steps)               70+     P5, P6, P7
+  9    Keyboard integration                    10+     P8
+  10   Mock data persistence                   10+     P8
+  11   Polish & integration                    10+     P10
+  12   Final validation                         —      P11
+
+Total estimated tests: ~235+
+
+Parallelizable:
+  - P3 (mock data) can run parallel with P1 (shell) and P2 (nav)
+  - P6 (separators) can run parallel with P4/P5
+  - P4 and P5 can partially overlap (different views)
+
+Critical path: P0 -> P1 -> P2 -> P3 -> P7 -> P8 -> P10 -> P12
+
+
+================================================================================
+TEST-FIRST DISCIPLINE
+================================================================================
+
+For EVERY step:
+
+  1. Write failing tests (RED)
+     - Tests encode the requirement
+     - Tests use mock data from Phase 3
+     - Tests use ink-testing-library for component tests
+     - Tests use plain function calls for hook/utility tests
+
+  2. Write minimal implementation (GREEN)
+     - Make tests pass with simplest possible code
+     - No over-engineering, no "future-proofing"
+
+  3. Refactor (REFACTOR)
+     - Clean up only if needed
+     - Extract hooks/utilities only when duplication appears
+     - Run all tests after every refactor
+
+  4. Verify integration
+     - Run full test suite: npx vitest run
+     - Launch app if applicable: node dist/tui/run.js
+     - Spot-check visual output in terminal
+
+
+================================================================================
+FILE INVENTORY (NEW FILES)
+================================================================================
+
+New files created during rewrite:
+  src/tui/navigation.tsx          Navigation reducer + context + hook
+  src/tui/use-global-keys.tsx     Global keyboard shortcut hook
+  src/tui/view-router.tsx         View type -> component mapping
+  src/tui/separator.tsx           Separator + LabeledSeparator
+  src/tui/use-viewport.tsx        Scroll/viewport management hook
+  src/tui/use-thread-navigation.tsx  Thread stack management hook
+  src/tui/use-focus-ring.tsx      Focus cycling hook
+  src/tui/use-quote.tsx           Quote feature hook
+
+Rewritten files (functional components replacing class components):
+  src/tui/app.tsx                 Functional, uses contexts
+  src/tui/detail.tsx              Functional, uses all custom hooks
+  src/tui/home-view.tsx           Functional, useInput directly
+  src/tui/issue-list-picker.tsx   Functional, useInput directly
+
+Modified files:
+  src/tui/hotkeys.ts              3 new key combinations
+  src/tui/footer.tsx              Context-sensitive Detail shortcuts
+  src/tui/issue-header.tsx        LabeledSeparator + hint text
+  src/tui/response-container.tsx  Remove "reply to this", add quote visual
+  src/tui/input-box.tsx           Quoting banner, focus tracking
+  src/tui/mock-data.ts            Consolidated mock data, immutable patterns
+  src/tui/mock-store.ts           quoted_response_id support
+  src/tui/run.tsx                 Simplified, use AppWrapper
+  src/types.ts                    quoted_response_id field
+
+Unchanged files:
+  src/tui/status-color.ts
+  src/tui/paragraph-utils.ts
+  src/tui/thread-builders.ts
+  src/tui/group-picker.tsx
+  src/tui/newissue.tsx
+  src/tui/agent-status.tsx        (minor: remove inline mock data)
+  src/tui/blocking-map.tsx        (minor: remove direct imports)
+  src/tui/group-view.tsx          (minor: remove direct imports)
+
+
+================================================================================
+END OF PLAN
+================================================================================
