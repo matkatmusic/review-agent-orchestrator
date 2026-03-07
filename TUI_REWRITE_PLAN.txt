@@ -51,7 +51,7 @@ Bugs
 - [ ]
 
 ================================================================================
-PHASE 1: APP SHELL — 3 Zones
+Architectural Discussion
 ================================================================================
 
 C++ key event dispatch design, using top-level key press receiver that is the only place that key events arrive at: 
@@ -135,10 +135,10 @@ React/Ink key event dispatch design (replaces the C++ imperative model above):
     - Focus is state, not routing — components read focusedSlot, not events
     - "Blocking" keys from TextInput is achieved by isActive, not filtering
 
-<Rebuttal> 
-App owns/shows a ViewBase instance.  
-All available views are instances of ViewBase.  
-in C++, ViewBase would be defined like this: 
+<Rebuttal>
+App owns/shows a ViewBase instance.
+All available views are instances of ViewBase.
+in C++, ViewBase would be defined like this:
 struct ViewBase {
   std::unique_ptr<HeaderBase> header;
   std::unique_ptr<ContentBase> content;
@@ -147,16 +147,16 @@ struct ViewBase {
   virtual InkComponent render();
 };
 
-Every visible object inherits from RenderBase, which defines a single pure virtual function that returns the Component that would be passed into ink's render() function: 
+Every visible object inherits from RenderBase, which defines a single pure virtual function that returns the Component that would be passed into ink's render() function:
 struct RenderBase {
-  virtual InkComponent getRenderContent() = 0; 
+  virtual InkComponent getRenderContent() = 0;
   virtual std::vector<TabbableComponents*> getTabbableComponents() = 0
 };
 
-HeaderBase as C++: 
-struct HeaderBase : RenderBase { 
+HeaderBase as C++:
+struct HeaderBase : RenderBase {
   virtual InkComponent getRenderContent(); - returns the <Component /> that gets passed into ink's render() function.
-  virtual std::vector<TabbableComponents*> getTabbableComponents() override; - returns the list of tabbable components for the tab focus handler. 
+  virtual std::vector<TabbableComponents*> getTabbableComponents() override; - returns the list of tabbable components for the tab focus handler.
 };
 
 ContentBase as C++:
@@ -180,8 +180,8 @@ protected:
 FooterBase as C++:
 struct FooterBase : RenderBase {
   std::vector<TabbableComponents*> getTabbableComponents() override;
-  virtual std::vector<HotKeyComponent*> getHotKeyComponents(); //gets all the hot keys for the footer. 
-  virtual int getNumLinesNeeded(); // computes the number of lines needed to show all hotkeys, uses getHotKeyComponent() to figure out if a component can fit on a line or not.     
+  virtual std::vector<HotKeyComponent*> getHotKeyComponents(); //gets all the hot keys for the footer.
+  virtual int getNumLinesNeeded(); // computes the number of lines needed to show all hotkeys, uses getHotKeyComponent() to figure out if a component can fit on a line or not.
 };
 
 //ViewBase class rendering approach:
@@ -191,7 +191,7 @@ InkComponent ViewBase::render() {
   auto contentLinesAvailable = computeLinesAvailable(headerBlock, footerBlock, windowHeight);
   content->setNumLinesToShow(contentLinesAvailable);
   auto content = content->getRenderContent();
-  return 
+  return
   {
     <Box>
       <headerBlock/>
@@ -201,20 +201,79 @@ InkComponent ViewBase::render() {
   };
 }
 
-Base keyhandling approach: 
+Base keyhandling approach:
     each ViewBase has a reference to the App.
     ViewBase.useInput() receives key input.
-      if key is a view-changing key, ViewBase.app.changeView(key, this) is called, passing the key and current view up to the app, so the app can 
+      if key is a view-changing key, ViewBase.app.changeView(key, this) is called, passing the key and current view up to the app, so the app can
 
-  App::changeView(key, ViewBase)  
+  App::changeView(key, ViewBase)
     destruct the current view, removing all listeners of key events
-    use 'key' to determine which view should be created. 
+    use 'key' to determine which view should be created.
     construct new view (passing in app as reference for view changing).
-    make new view visible. 
+    make new view visible.
 
 </Rebuttal>
 
+Architectural decision — View Configuration Pattern:
 
+  The C++ rebuttal above proposed each view owning its own Header/Content/Footer
+  via inheritance (ViewBase -> HeaderBase -> ContentBase -> FooterBase). The
+  goals were correct (each view controls its header/footer behavior) but the
+  mechanisms (inheritance, imperative render ordering, manual destruction) don't
+  translate to React. The React-idiomatic solution:
+
+  - App owns fixed Header and Footer instances (one each, always rendered)
+  - Header derives its content from NavigationContext (reads currentView)
+  - Footer derives shortcuts from viewType + footerOptions props
+  - Views configure the footer via a setFooterOptions callback from AppShell
+  - Most views don't call setFooterOptions (their shortcuts are static per type)
+  - DetailView calls setFooterOptions when focus state changes
+  - footerOptions resets to {} on view change
+  - Each view owns its own useInput for key handling
+  - useGlobalKeys at app level handles cross-view shortcuts (q/s/b/g/n)
+    with inputActive guard to suppress single-char keys during text entry
+
+  Component tree and data flow:
+
+    NavigationProvider  (provides currentView, navigateTo, goBack, etc.)
+      └── AppShell  (owns footerOptions state, owns useGlobalKeys hook)
+            │
+            ├── Header
+            │     reads currentView from NavigationContext
+            │     derives subtitle, view label — no props from AppShell needed
+            │
+            ├── ViewRouter  (receives setFooterOptions callback as prop)
+            │     │
+            │     ├── HomeView        — owns useInput, does NOT call setFooterOptions
+            │     ├── AgentStatus     — owns useInput, does NOT call setFooterOptions
+            │     ├── BlockingMap     — owns useInput, does NOT call setFooterOptions
+            │     ├── NewIssue        — owns useInput, does NOT call setFooterOptions
+            │     ├── GroupView       — owns useInput, does NOT call setFooterOptions
+            │     └── DetailView      — owns useInput, CALLS setFooterOptions
+            │           useEffect: when focus state changes, calls
+            │           setFooterOptions({ inThread, responseSelected,
+            │                              hasReplies, isQuoting })
+            │
+            └── Footer  (receives viewType + footerOptions as props)
+                  viewType comes from NavigationContext
+                  footerOptions comes from AppShell state
+                  calls getFooterShortcuts(viewType, footerOptions)
+
+  Callback flow (downward):
+    AppShell --setFooterOptions--> ViewRouter --setFooterOptions--> DetailView
+
+  Data flow (upward via state):
+    DetailView --calls setFooterOptions()--> AppShell state updates
+                                             --> Footer re-renders with new props
+
+  useGlobalKeys(currentViewType, inputActive):
+    Lives in AppShell. Handles q/s/b/g/n/Esc.
+    inputActive = true when DetailView's TextInput is focused.
+    Suppresses single-char shortcuts during text entry.
+
+================================================================================
+PHASE 1: APP SHELL — 3 Zones
+================================================================================
 
 Goal: A running Ink app that shows Header, empty content area, and Footer.
 The shell constrains height to terminal rows and handles resize.
@@ -272,14 +331,21 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
     - [ ] test: "app shell constrains height to rows prop"
     - [ ] test: "content area gets remaining height after header and footer"
     - [ ] test: "resize updates dimensions"
+    - [ ] test: "setFooterOptions updates footer shortcuts"
+    - [ ] test: "footerOptions reset to {} when view changes"
 
   Then implement:
     - [ ] Functional component
-    - [ ] Props: children, columns, rows, currentView, headerProps, footerProps
+    - [ ] Props: children, columns, rows
+    - [ ] Owns footerOptions state (useState<FooterOptions>({}))
+    - [ ] Passes setFooterOptions callback down through children
+    - [ ] Resets footerOptions to {} when currentView changes (useEffect)
+    - [ ] Header reads currentView from NavigationContext (no props needed)
+    - [ ] Footer receives viewType + footerOptions as props
     - [ ] Layout: <Box flexDirection="column" height={rows}>
         <Header ... />
-        {children}
-        <Footer ... />
+        {children(setFooterOptions)}
+        <Footer viewType={currentView.type} {...footerOptions} />
       </Box>
 
 - [ ] Step 1.4: Entry Point (run.tsx)
@@ -343,10 +409,15 @@ Req coverage: REQ-STATE-001, REQ-STATE-002, REQ-NAV-001 through REQ-NAV-008,
     - [ ] test: "pressing 'g' navigates to GroupView"
     - [ ] test: "pressing 'n' navigates to NewIssue"
     - [ ] test: "returns true when key is consumed"
+    - [ ] test: "single-char shortcuts suppressed when inputActive is true"
+    - [ ] test: "modifier shortcuts still work when inputActive is true"
 
   Then implement:
     File: src/tui/use-global-keys.tsx (NEW)
-    - [ ] useGlobalKeys(currentViewType): uses useInput, returns consumed boolean
+    - [ ] useGlobalKeys(currentViewType, inputActive): uses useInput
+    - [ ] When inputActive is true, suppresses single-char shortcuts (q/s/b/g/n)
+          so they don't conflict with text entry in TextInput
+    - [ ] Modifier shortcuts (Ctrl+*, Alt+*) still work regardless of inputActive
     - [ ] Reads navigation actions from NavigationContext
     - [ ] Duplicate-view prevention (REQ-KEY-002)
 
@@ -369,7 +440,10 @@ Req coverage: REQ-STATE-001, REQ-STATE-002, REQ-NAV-001 through REQ-NAV-008,
   Update src/tui/app.tsx:
     - [ ] Functional component
     - [ ] NavigationProvider wrapping AppShell wrapping ViewRouter
-    - [ ] Footer receives shortcuts from navigation context
+    - [ ] AppShell owns footerOptions state, passes setFooterOptions to ViewRouter
+    - [ ] ViewRouter passes setFooterOptions to views that need it (DetailView)
+    - [ ] Footer reads viewType from NavigationContext, receives footerOptions
+          as props, calls getFooterShortcuts(viewType, footerOptions)
 
   Deliverable: App with working view stack navigation.
   Press 's' -> AgentStatus, 'b' -> BlockingMap, Esc -> back, etc.
@@ -915,7 +989,11 @@ The most complex view. Built incrementally with sub-steps.
       - Is InputBox focused? -> InputBox shortcuts
       - Is a Response selected? -> Response-selected shortcuts
       - Is in thread? -> Thread shortcuts
-    - [ ] Passes correct shortcut set to Footer via props or context
+    - [ ] DetailView calls setFooterOptions({ inThread, responseSelected,
+          hasReplies, isQuoting }) in a useEffect when focus state changes
+    - [ ] AppShell passes footerOptions to Footer as props
+    - [ ] Footer calls getFooterShortcuts(viewType, footerOptions) to
+          derive the correct shortcut set
 
 - [ ] Step 8.11: DetailView — Adjacent Issue Navigation
 ----------------------------------------------------

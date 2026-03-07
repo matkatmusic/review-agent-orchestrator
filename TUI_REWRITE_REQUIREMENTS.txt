@@ -1091,8 +1091,10 @@ These are recommended new patterns for the rewrite:
 - useNavigation(): returns { navigateTo, goBack, replaceView, goHome,
   currentView, viewStack }. Backed by useReducer.
 
-- useGlobalKeys(currentViewType): handles global shortcuts (s/b/g/q/Esc/n).
-  Uses useInput internally.
+- useGlobalKeys(currentViewType, inputActive): handles global shortcuts
+  (s/b/g/q/Esc/n). Uses useInput internally. When inputActive is true,
+  single-char shortcuts (q, s, b, g, n) are suppressed so they don't
+  conflict with text entry. Modifier shortcuts (Ctrl+*, Alt+*) still work.
 
 - useViewport(messages, selectedIndex, height, columns): manages scroll
   position, returns { firstVisible, lastVisible, visibleMessages }.
@@ -1117,12 +1119,25 @@ These are recommended new patterns for the rewrite:
 - AppStateContext: provides unreadCount, activeAgentCount, maxAgents,
   threadInfo for Header/Footer consumption without prop drilling.
 
-20.3 COMPONENT COMPOSITION
----------------------------
+20.3 COMPONENT COMPOSITION (View Configuration Pattern)
+--------------------------------------------------------
 - AppShell: wraps Header + children + Footer. Manages terminal dimensions.
+  Owns footerOptions state and passes setFooterOptions callback down through
+  ViewRouter to views. Header reads currentView from NavigationContext and
+  derives its own subtitle — no view configuration needed for Header.
+  Footer receives viewType (from NavigationContext) + footerOptions (from
+  AppShell state) and calls getFooterShortcuts(viewType, options) to derive
+  the correct shortcut set. footerOptions resets to {} on view change.
 
 - ViewRouter: renders the correct view component based on currentView.type.
-  A simple switch/map, extracted from App.render().
+  A simple switch/map, extracted from App.render(). Passes setFooterOptions
+  to views that need it (currently only DetailView).
+
+- Views communicate footer configuration upward via the setFooterOptions
+  callback. Most views don't call it (their shortcuts are static per
+  ViewType). DetailView calls setFooterOptions({ inThread, responseSelected,
+  hasReplies, isQuoting }) in a useEffect when its internal focus state
+  changes. Each view owns its own useInput for key handling.
 
 
 ================================================================================
