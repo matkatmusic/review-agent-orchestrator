@@ -35,15 +35,23 @@ for reference. New files are created alongside or replace them.
 
 - [x] Step 0.3: Port Stable Modules (no changes)
 --------------------------------------------
-  These files are carried forward unchanged:
+  These files are carried forward (some with additions):
     - [x] src/types.ts (add quoted_response_id to Response + ResponseRow)
     - [x] src/tui/status-color.ts
     - [x] src/tui/paragraph-utils.ts (+ its tests)
-    - [x] src/tui/thread-builders.ts (+ its tests)
-    - [x] src/tui/hotkeys.ts (add ALT_Q, CTRL_ALT_Q, CTRL_ALT_R)
+    - [x] src/tui/thread-builders.ts (+ its tests; modified in Step 3.3)
+    - [x] src/tui/hotkeys.ts (add ALT_Q, CTRL_ALT_Q, CTRL_ALT_R —
+          enum values, matchers, and display labels)
     - [x] src/tui/views.ts
 
-  - [x] Tests: run existing tests, confirm green.
+  Hotkey tests (must pass before Phase 1):
+    - [x] test: "matchesKeyCombination(ALT_Q, ...) works"
+    - [x] test: "matchesKeyCombination(CTRL_ALT_Q, ...) works"
+    - [x] test: "matchesKeyCombination(CTRL_ALT_R, ...) works"
+    - [x] test: "ALT_H matches unicode \u02D9"
+    - [x] test: "getHotKeyLabel returns readable strings"
+
+  - [x] Tests: run existing tests + hotkey matcher tests, confirm green.
 
 Bugs
 - [ ]
@@ -311,18 +319,24 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
 
   Then implement:
     - [ ] VIEW_SHORTCUTS data structure (all 7+ view types)
-    - [ ] Include context-sensitive Detail shortcuts [CHANGED]:
-      InputBox-focused set, Response-selected set, Thread-mode set
-    - [ ] getFooterShortcuts(viewType, options) — options includes
-      { inThread?, responseSelected?, hasReplies?, isQuoting? }
+    - [ ] Define FooterOptions interface: { inThread?, responseSelected?,
+          hasReplies?, isQuoting? }
+    - [ ] getFooterShortcuts(viewType, options?) — accepts optional FooterOptions,
+          returns VIEW_SHORTCUTS[viewType] when no options provided
+    - [ ] FooterProps accepts FooterOptions fields as optional props
     - [x] getFocusableShortcuts() — filter by action + !disabled
     - [x] computeFooterLines() — row wrapping logic
     - [x] computeRows() — break into rows fitting column width
     - [x] Export all computation functions for use by DetailView
 
   Then write test:
-    - [ ] test: "Detail footer changes based on focus context" [CHANGED]
     - [ ] test: "footer shows correct shortcuts for each ViewType"
+
+  Deferred to Step 8.10 (requires Detail shortcut sets and focus state):
+    - [ ] Define context-sensitive Detail shortcut sets [CHANGED]:
+          InputBox-focused set, Response-selected set, Thread-mode set
+    - [ ] getFooterShortcuts returns different sets based on FooterOptions
+    - [ ] test: "Detail footer changes based on focus context" [CHANGED]
 
 - [ ] Step 1.3: AppShell Component
 -------------------------------
@@ -332,21 +346,25 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
     - [ ] test: "content area gets remaining height after header and footer"
     - [ ] test: "resize updates dimensions"
     - [ ] test: "setFooterOptions updates footer shortcuts"
-    - [ ] test: "footerOptions reset to {} when view changes"
 
   Then implement:
     - [ ] Functional component
-    - [ ] Props: children, columns, rows
+    - [ ] Props: currentView, children, columns, rows
+          (currentView is a prop in Phase 1; in Phase 2, the parent App
+          reads from NavigationContext and passes it down)
     - [ ] Owns footerOptions state (useState<FooterOptions>({}))
     - [ ] Passes setFooterOptions callback down through children
-    - [ ] Resets footerOptions to {} when currentView changes (useEffect)
-    - [ ] Header reads currentView from NavigationContext (no props needed)
+    - [ ] Header receives currentView as prop
     - [ ] Footer receives viewType + footerOptions as props
     - [ ] Layout: <Box flexDirection="column" height={rows}>
-        <Header ... />
+        <Header currentView={currentView} ... />
         {children(setFooterOptions)}
         <Footer viewType={currentView.type} {...footerOptions} />
       </Box>
+
+  Deferred to Phase 2 (requires NavigationContext):
+    - [ ] test: "footerOptions reset to {} when view changes"
+    - [ ] Resets footerOptions to {} when currentView changes (useEffect)
 
 - [ ] Step 1.4: Entry Point (run.tsx)
 ---------------------------------
@@ -358,7 +376,8 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
     - [ ] AppWrapper that tracks terminal dimensions via useStdout()
     - [ ] No ANSI escape codes (REQ-INK-005)
     - [ ] Passes dimensions to AppShell
-    - [ ] Initial view: Home (change from current I-1 default)
+    - [ ] Passes currentView: { type: ViewType.Home } to AppShell
+          (hardcoded in Phase 1; replaced by NavigationContext in Phase 2)
 
   Deliverable: Running app showing Header + empty content + Footer.
   Can be launched with: node dist/tui/run.js
@@ -434,16 +453,22 @@ Req coverage: REQ-STATE-001, REQ-STATE-002, REQ-NAV-001 through REQ-NAV-008,
     File: src/tui/view-router.tsx (NEW)
     - [ ] Switch on currentView.type, render stub <Text> for each view
     - [ ] All 7 cases present (fix gap 1 from validation)
+    Note: ViewRouter imports mock data directly from mock-data.ts and passes
+    as props to views. In Phase 10, imports replaced by AppStateContext reads.
 
 - [ ] Step 2.4: Wire App Together
 ------------------------------
+  Write tests FIRST (deferred from Step 1.3):
+    - [ ] test: "footerOptions reset to {} when view changes"
+
   Update src/tui/app.tsx:
     - [ ] Functional component
     - [ ] NavigationProvider wrapping AppShell wrapping ViewRouter
-    - [ ] AppShell owns footerOptions state, passes setFooterOptions to ViewRouter
+    - [ ] App reads currentView from NavigationContext, passes to AppShell
+          (AppShell no longer receives hardcoded view from Step 1.4)
+    - [ ] AppShell resets footerOptions to {} when currentView changes (useEffect)
     - [ ] ViewRouter passes setFooterOptions to views that need it (DetailView)
-    - [ ] Footer reads viewType from NavigationContext, receives footerOptions
-          as props, calls getFooterShortcuts(viewType, footerOptions)
+    - [ ] Footer receives viewType + footerOptions as props from AppShell
 
   Deliverable: App with working view stack navigation.
   Press 's' -> AgentStatus, 'b' -> BlockingMap, Esc -> back, etc.
@@ -466,6 +491,8 @@ Req coverage: REQ-MOCK-001 through REQ-MOCK-010, REQ-QUO-001, REQ-QUO-002
 
 - [ ] Step 3.1: Mock Data Schema
 -----------------------------
+  Gate: Step 3.2 tests validate this schema. No separate gate test needed.
+
   Define mock data that exercises every relationship type:
 
   Issue I-1: "Simple issue" (Active)
@@ -529,7 +556,13 @@ Req coverage: REQ-MOCK-001 through REQ-MOCK-010, REQ-QUO-001, REQ-QUO-002
 
 - [ ] Step 3.3: Thread Builders Update
 -----------------------------------
-  Update src/tui/thread-builders.ts:
+  Write tests FIRST:
+    - [ ] test: "buildQuotedResponse sets quoted_response_id on child"
+    - [ ] test: "buildQuotedResponse links to parent chain"
+    - [ ] test: "createMessage with quoted_response_id round-trips through flatten/hydrate"
+
+  Then implement:
+    Update src/tui/thread-builders.ts:
     - [ ] Add quoted_response_id support to createMessage / buildResponseChain
     - [ ] Add buildQuotedResponse(parent, quotedId, body) helper
 
@@ -669,6 +702,8 @@ PHASE 5: MEDIUM VIEWS (GroupView, HomeView, IssuePicker)
     - [ ] Functional component (rewrite from class)
     - [ ] useInput directly (remove bridge pattern)
     - [ ] Props: issues, unreadInums, maxAgents, callbacks
+    Note: HomeView has no focus ring. Tab is repurposed for filter tab cycling.
+    Only views with tabbable fields (DetailView, NewIssue) use useFocusRing.
 
 -----
 
@@ -898,12 +933,12 @@ The most complex view. Built incrementally with sub-steps.
     - [ ] test: "startQuote sets quotedResponse"
     - [ ] test: "clearQuote clears quotedResponse"
     - [ ] test: "isQuoting returns true when quoting"
-    - [ ] test: "startQuote moves focus to input"
 
   Then implement:
     File: src/tui/use-quote.tsx (NEW)
     - [ ] useQuote()
     - [ ] Returns: { quotedResponse, startQuote, clearQuote, isQuoting }
+    Note: "startQuote moves focus to input" tested in Step 8.9 (DetailView integration)
 
 - [ ] Step 8.6: DetailView — Basic Rendering
 -----------------------------------------
@@ -954,6 +989,7 @@ The most complex view. Built incrementally with sub-steps.
 
   Then implement:
     - [ ] Map useFocusRing slots to header fields / viewReplies / footer items
+    - [ ] Wire GroupPicker (group-picker.tsx) as overlay within DetailView
     - [ ] GroupPicker overlay rendering
     - [ ] Dispatch footer actions
 
@@ -961,6 +997,7 @@ The most complex view. Built incrementally with sub-steps.
 ---------------------------------------------
   Write tests FIRST:
     - [ ] test: "Alt+Q starts quoting selected response"
+    - [ ] test: "startQuote moves focus to input" (deferred from Step 8.5)
     - [ ] test: "quoting banner appears above InputBox"
     - [ ] test: "sending while quoting includes quoted_response_id"
     - [ ] test: "Escape while quoting cancels quote"
@@ -1031,23 +1068,14 @@ PHASE 9: KEYBOARD SYSTEM INTEGRATION
 
 Goal: Verify all hotkeys work end-to-end across all views.
 
-- [ ] Step 9.1: Hotkey Definitions
--------------------------------
+- [ ] Step 9.1: End-to-End Keyboard Tests
+--------------------------------------
   Req coverage: REQ-KBD-001 through REQ-KBD-005
 
-  Write tests FIRST:
-    - [ ] test: "matchesKeyCombination(ALT_Q, ...) works"
-    - [ ] test: "matchesKeyCombination(CTRL_ALT_Q, ...) works"
-    - [ ] test: "matchesKeyCombination(CTRL_ALT_R, ...) works"
-    - [ ] test: "ALT_H matches unicode \u02D9"
-    - [ ] test: "getHotKeyLabel returns readable strings"
+  Note: Hotkey definitions (ALT_Q, CTRL_ALT_Q, CTRL_ALT_R enum values,
+  matchers, and display labels) were added in Step 0.3. This step verifies
+  they work end-to-end across the full app.
 
-  Then implement (already partially done in Phase 0):
-    - [ ] Add ALT_Q, CTRL_ALT_Q, CTRL_ALT_R to KeyCombinations enum
-    - [ ] Add matchers and display labels
-
-- [ ] Step 9.2: End-to-End Keyboard Tests
---------------------------------------
   Write integration tests:
     - [ ] test: "Home -> press Return -> Detail view shown"
     - [ ] test: "Detail -> press Escape -> back to Home"
@@ -1082,8 +1110,8 @@ Req coverage: REQ-MOCK-001 through REQ-MOCK-007, REQ-STATE-007
     - [ ] test: "adding a dependency produces new deps array"
     - [ ] test: "creating an issue produces new issues array with new item"
     - [ ] test: "saveMockStore writes JSON to disk"
-    - [ ] test: "loadMockData reads back what was saved"
-    - [ ] test: "resetMockData restores defaults"
+    Note: "loadMockData reads back what was saved" and "resetMockData restores
+    defaults" are covered in Step 3.2. Not duplicated here.
 
   Then implement:
     - [ ] State management layer between views and mock data
@@ -1121,28 +1149,42 @@ Bugs
 PHASE 11: POLISH & INTEGRATION
 ================================================================================
 
-- [ ] Step 11.1: GroupPicker Overlay
----------------------------------
-  - [ ] Wire GroupPicker as overlay within DetailView.
-  - [ ] Tests: existing from Phase 8.8.
-
-- [ ] Step 11.2: Unread Tracking
+- [ ] Step 11.1: Unread Tracking
 ----------------------------
-  - [ ] markViewed() called when entering DetailView
-  - [ ] Unread indicators update in HomeView, Header, IssuePicker
-  - [ ] New Replies separator in ResponseChain
+  Write tests FIRST:
+    - [ ] test: "entering DetailView calls markViewed for that issue"
+    - [ ] test: "unread indicator disappears after viewing issue"
+    - [ ] test: "Header unread count decrements after viewing"
+    - [ ] test: "New Replies separator visible for unread responses"
 
-- [ ] Step 11.3: Error States
+  Then implement:
+    - [ ] markViewed() called when entering DetailView
+    - [ ] Unread indicators update in HomeView, Header, IssuePicker
+    - [ ] New Replies separator in ResponseChain
+
+- [ ] Step 11.2: Error States
 --------------------------
-  - [ ] "Issue I-X not found" when navigating to nonexistent issue
-  - [ ] Empty state displays (no issues, no agents, etc.)
+  Write tests FIRST:
+    - [ ] test: "navigating to nonexistent issue shows error message"
+    - [ ] test: "empty issue list shows 'No issues' message"
+    - [ ] test: "empty agent list shows 'No agents' message"
 
-- [ ] Step 11.4: Visual Polish
+  Then implement:
+    - [ ] "Issue I-X not found" when navigating to nonexistent issue
+    - [ ] Empty state displays (no issues, no agents, etc.)
+
+- [ ] Step 11.3: Visual Polish
 ---------------------------
-  - [ ] Verify all colors match requirements
-  - [ ] Verify word wrapping at various terminal widths
-  - [ ] Verify footer row wrapping
-  - [ ] Test at 80, 120, 200 column widths
+  Write tests FIRST:
+    - [ ] test: "footer wraps correctly at 80 columns"
+    - [ ] test: "footer wraps correctly at 120 columns"
+    - [ ] test: "word wrapping respects border width at narrow terminal"
+
+  Then implement:
+    - [ ] Verify all colors match requirements
+    - [ ] Verify word wrapping at various terminal widths
+    - [ ] Verify footer row wrapping
+    - [ ] Test at 80, 120, 200 column widths
 
 
 Bugs
@@ -1189,28 +1231,29 @@ EXECUTION ORDER SUMMARY
 
 Phase  Description                        Est. Tests  Deps
 -----  ---------------------------------  ----------  ----
-  0    Scaffolding & test infrastructure        5      none
+  0    Scaffolding & test infrastructure       10      none
   1    App Shell (Header + Footer + Shell)     15+     P0
   2    Navigation system                       20+     P1
-  3    Mock data foundation                    10+     P0
+  3    Mock data foundation                    13+     P0
   4    Simple views (Agent/Block/NewIssue)     25+     P2, P3
   5    Medium views (Group/Home/Picker)        30+     P2, P3
   6    Separator components                     5      P0
   7    Response rendering pipeline             25+     P3, P6
-  8    DetailView (12 sub-steps)               70+     P5, P6, P7
-  9    Keyboard integration                    10+     P8
-  10   Mock data persistence                   10+     P8
+  8    DetailView (12 sub-steps)               72+     P5, P6, P7
+  9    Keyboard integration                     7+     P8
+  10   Mock data persistence                    8+     P8
   11   Polish & integration                    10+     P10
   12   Final validation                         —      P11
 
-Total estimated tests: ~235+
+Total estimated tests: ~240+
 
 Parallelizable:
   - P3 (mock data) can run parallel with P1 (shell) and P2 (nav)
   - P6 (separators) can run parallel with P4/P5
   - P4 and P5 can partially overlap (different views)
 
-Critical path: P0 -> P1 -> P2 -> P3 -> P7 -> P8 -> P10 -> P12
+Critical path: P0 -> P1 -> P2 -> P5 -> P8 -> P10 -> P11 -> P12
+               (P3, P6, P7 must also complete before P8)
 
 
 ================================================================================
@@ -1241,6 +1284,23 @@ For EVERY step:
 
 
 ================================================================================
+GATE TEST RULE
+================================================================================
+
+Every step and substep must have at least one explicit test that validates
+the step's deliverable. ALL tests for a step must pass before the next step
+begins. No step may be marked complete with failing tests.
+
+  - Implementation steps: at least one test per step (required by TDD above).
+  - Schema/design steps: gate = downstream tests compile against the schema.
+  - Integration/wiring steps: at least one integration test verifying the wiring.
+  - Polish steps: at least one visual/behavioral regression test.
+
+Enforcement: Run `npx vitest run` after completing each step. Zero failures
+required before proceeding. Record pass count in the step's checkbox line.
+
+
+================================================================================
 FILE INVENTORY (NEW FILES)
 ================================================================================
 
@@ -1261,20 +1321,20 @@ Rewritten files (functional components replacing class components):
   src/tui/issue-list-picker.tsx   Functional, useInput directly
 
 Modified files:
-  src/tui/hotkeys.ts              3 new key combinations
+  src/tui/hotkeys.ts              3 new key combinations + matchers + labels
   src/tui/footer.tsx              Context-sensitive Detail shortcuts
   src/tui/issue-header.tsx        LabeledSeparator + hint text
   src/tui/response-container.tsx  Remove "reply to this", add quote visual
   src/tui/input-box.tsx           Quoting banner, focus tracking
   src/tui/mock-data.ts            Consolidated mock data, immutable patterns
   src/tui/mock-store.ts           quoted_response_id support
+  src/tui/thread-builders.ts      quoted_response_id support, buildQuotedResponse
   src/tui/run.tsx                 Simplified, use AppWrapper
   src/types.ts                    quoted_response_id field
 
 Unchanged files:
   src/tui/status-color.ts
   src/tui/paragraph-utils.ts
-  src/tui/thread-builders.ts
   src/tui/group-picker.tsx
   src/tui/newissue.tsx
   src/tui/agent-status.tsx        (minor: remove inline mock data)
