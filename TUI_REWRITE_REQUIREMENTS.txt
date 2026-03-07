@@ -1,0 +1,1154 @@
+TUI REWRITE REQUIREMENTS
+========================
+Comprehensive functional requirements for a complete rewrite of the
+review-agent-orchestrator TUI using correct React patterns and Ink library
+best practices.
+
+Generated from a full codebase audit of the current implementation.
+Date: 2025-03-06
+
+
+================================================================================
+PART 1: ARCHITECTURE & PATTERNS
+================================================================================
+
+1.1  COMPONENT MODEL
+---------------------
+REQ-ARCH-001: All components MUST be functional components using hooks.
+             No class components. The current codebase uses class components
+             for App, DetailView, HomeView, and IssueListPicker — all must be
+             rewritten as functional components.
+
+REQ-ARCH-002: State MUST be managed via useState/useReducer hooks, never via
+             instance variables with forceUpdate(). The current codebase stores
+             state as class instance fields (e.g., DetailView.inputValue,
+             DetailView.threadStack, DetailView.selectedMessage) and calls
+             this.forceUpdate() — this is an anti-pattern.
+
+REQ-ARCH-003: Side effects MUST use useEffect with proper dependency arrays.
+             The current codebase has no useEffect usage; lifecycle logic is
+             in componentDidMount or inline in event handlers.
+
+REQ-ARCH-004: Memoization MUST be applied where appropriate using useMemo and
+             useCallback. The current codebase creates new arrow functions in
+             render props on every render cycle (e.g., onSelect={() => ...} in
+             App.render()).
+
+REQ-ARCH-005: Input handling MUST use Ink's useInput hook directly in the
+             component that owns the behavior, not via bridge components. The
+             current codebase uses a DetailInputBridge wrapper component solely
+             to call useInput and forward to a class method — this is
+             unnecessary with functional components.
+
+REQ-ARCH-006: Focus management SHOULD use Ink's useFocus and useFocusManager
+             hooks where possible, instead of the current manual focus ring
+             implementation (DetailView.cycleFocus with manual index math).
+
+REQ-ARCH-007: All text content MUST be wrapped in <Text> components. No raw
+             strings outside <Text>. No <Box> inside <Text>.
+
+REQ-ARCH-008: Layout MUST use Ink's <Box> component with flexbox properties.
+             No manual string padding or space calculation where flexbox can
+             achieve the same result.
+
+
+1.2  STATE MANAGEMENT
+---------------------
+REQ-STATE-001: Navigation state (view stack) MUST be managed via useReducer
+              with a well-defined action type union. Actions: PUSH_VIEW,
+              POP_VIEW, REPLACE_VIEW, GO_HOME.
+
+REQ-STATE-002: A React Context MUST provide navigation actions to all views,
+              eliminating prop drilling of onBack/onHome/onNavigate/onQuit
+              through every component.
+
+REQ-STATE-003: Thread navigation state (threadStack) MUST be managed via
+              useState or useReducer within the DetailView component, not as
+              a mutable instance array.
+
+REQ-STATE-004: Selected message index MUST be managed via useState within
+              DetailView, not as a class instance variable.
+
+REQ-STATE-005: The "saved selected message" map (persists cursor position when
+              navigating away from a Detail view) MUST be managed via useRef
+              or lifted into the navigation context.
+
+REQ-STATE-006: Global application state (unread counts, active agent count,
+              thread info for header/footer) SHOULD use a shared context
+              rather than prop threading from App to Header/Footer.
+
+REQ-STATE-007: Mock data references MUST NOT be mutated in place. State updates
+              MUST produce new objects/arrays (immutable updates). The current
+              codebase mutates MOCK_ISSUES, MOCK_DETAIL_DATA arrays directly
+              and relies on forceUpdate to re-render.
+
+
+1.3  INK BEST PRACTICES
+------------------------
+REQ-INK-001: Use incremental rendering (incrementalRendering option) to avoid
+            full terminal rewrites on every frame.
+
+REQ-INK-002: Respect maxFps throttling (default 30). Do not trigger unnecessary
+            re-renders.
+
+REQ-INK-003: Use useApp() hook for exit handling instead of process.exit().
+
+REQ-INK-004: Use useStdout() for terminal dimension access instead of
+            process.stdout directly.
+
+REQ-INK-005: Screen clearing MUST NOT use raw ANSI escape sequences
+            (process.stdout.write('\x1B[2J\x1B[H')). Use Ink's built-in
+            clear mechanisms or component remounting.
+
+REQ-INK-006: Use <Static> component for any persistent output that should
+            remain visible above dynamic content (e.g., completed operation
+            logs).
+
+REQ-INK-007: Use <Spacer> for flexible spacing instead of manual dash/space
+            string construction where applicable.
+
+
+================================================================================
+PART 2: VIEW SYSTEM & NAVIGATION
+================================================================================
+
+2.1  VIEW TYPES
+---------------
+REQ-VIEW-001: The application MUST support the following view types:
+             - Home (issue dashboard)
+             - Detail (issue detail with conversation)
+             - NewIssue (issue creation form)
+             - AgentStatus (agent monitoring table)
+             - BlockingMap (dependency graph visualization)
+             - GroupView (container/group browser)
+             - IssuePicker (issue selection overlay for blockedBy/blocks)
+
+REQ-VIEW-002: Views MUST be defined as a discriminated union type:
+
+             type View =
+               | { type: 'Home' }
+               | { type: 'Detail'; inum: number }
+               | { type: 'NewIssue' }
+               | { type: 'AgentStatus' }
+               | { type: 'BlockingMap' }
+               | { type: 'GroupView' }
+               | { type: 'IssuePicker'; mode: 'blockedBy' | 'blocks'; inum: number }
+
+
+2.2  NAVIGATION STACK
+---------------------
+REQ-NAV-001: The app MUST maintain a view stack for back-navigation.
+
+REQ-NAV-002: Push: navigateToView(view) pushes a new view onto the stack.
+
+REQ-NAV-003: Pop: goBack() pops the top view. MUST NOT pop past the root view.
+
+REQ-NAV-004: Replace: replaceCurrentView(view) replaces the top of the stack
+            without adding history. Used for adjacent issue navigation
+            (Shift+Left/Right).
+
+REQ-NAV-005: Home: goHome() resets the stack to [{ type: 'Home' }].
+
+REQ-NAV-006: Screen MUST clear on every navigation transition.
+
+REQ-NAV-007: Footer focus index MUST reset to null on every navigation.
+
+REQ-NAV-008: When navigating away from DetailView, the current selectedMessage
+            index MUST be saved (keyed by inum) and restored when returning.
+
+
+2.3  GLOBAL KEYBOARD SHORTCUTS
+-------------------------------
+REQ-KEY-001: The following global shortcuts MUST be available from all views:
+            - Escape: go back (pop view stack)
+            - q: quit the application
+            - s: navigate to AgentStatus (unless already there)
+            - b: navigate to BlockingMap (unless already there)
+            - g: navigate to GroupView (unless already there)
+            - n: navigate to NewIssue
+
+REQ-KEY-002: Global shortcuts MUST NOT push duplicate views onto the stack.
+            If the current view matches the target, the shortcut is a no-op.
+
+REQ-KEY-003: Global shortcut handling MUST be a reusable hook or utility
+            consumed by each view, not duplicated logic.
+
+
+================================================================================
+PART 3: LAYOUT COMPONENTS
+================================================================================
+
+3.1  APP SHELL
+--------------
+REQ-SHELL-001: The app shell MUST render three zones vertically:
+              1. Header (fixed height)
+              2. Content area (flexible, fills remaining space)
+              3. Footer (variable height based on shortcuts)
+
+REQ-SHELL-002: The shell MUST constrain total height to terminal rows.
+
+REQ-SHELL-003: Terminal resize events MUST trigger re-render with new
+              dimensions.
+
+
+3.2  HEADER
+-----------
+REQ-HDR-001: Header height is exactly 3 lines.
+
+REQ-HDR-002: Line 1: Centered title with horizontal rule characters.
+            Format: "--- Review Agent Orchestrator - <ViewLabel> ---"
+            The view label changes per active view:
+            - Home: "Dashboard"
+            - Detail: "I-<inum> Detail"
+            - NewIssue: "New Issue"
+            - AgentStatus: "Agent Status"
+            - BlockingMap: "Blocking Map"
+            - GroupView: "Groups"
+            - IssuePicker: "Issue Picker"
+
+REQ-HDR-003: Line 2: Status bar showing:
+            - "Agents: <active>/<max>" (colored green if any active)
+            - "Unread: <count>" (colored yellow if > 0)
+
+REQ-HDR-004: Line 3: Context-sensitive subtitle (dimmed):
+            - Home: "All issues and orchestration state"
+            - Detail (not in thread): empty or hint text
+            - Detail (in thread): "(add a response, ^R to resolve)"
+            - NewIssue: "Create a new issue"
+            - AgentStatus: "Active agent sessions"
+            - BlockingMap: "Issue dependency graph"
+            - GroupView: "Issue groups and sprints"
+
+REQ-HDR-005: Header MUST be memoized — re-render only when its props change.
+
+
+3.3  FOOTER
+-----------
+REQ-FTR-001: Footer displays keyboard shortcuts applicable to the current view.
+
+REQ-FTR-002: Shortcuts are rendered as "[key] label" chips.
+
+REQ-FTR-003: Shortcuts MUST wrap into multiple rows if they exceed terminal
+            width. Row computation MUST account for chip width + spacing.
+
+REQ-FTR-004: Each view type defines its own shortcut set:
+
+            Home (9 shortcuts):
+              [Return] Select, [n] New, [a] Activate, [d] Defer, [r] Resolve,
+              [s] Agents, [b] Blocking, [g] Groups, [q] Quit
+
+            Detail - Issue mode (10+ shortcuts):
+              [Up/Dn] Scroll, [Shift+L/R] Prev/Next Issue, [Tab] Cycle Focus,
+              [Return] Send/Open, [Ctrl+R] Resolve Issue, [Esc] Back,
+              [Alt+H] Home, [s] Agents, [b] Blocking, [g] Groups
+
+            Detail - Thread mode (7+ shortcuts):
+              [Up/Dn] Scroll, [Ctrl+Shift+L] Exit Thread,
+              [Ctrl+Shift+R] Enter Sub-thread, [Tab] Cycle Focus,
+              [Return] Send, [Esc] Exit Thread
+
+            NewIssue (2 shortcuts):
+              [Return] Create, [Esc] Cancel
+
+            AgentStatus (3 shortcuts):
+              [Return] Focus Pane, [Esc] Back, [q] Quit
+
+            BlockingMap (3 shortcuts):
+              [Return] View Issue, [Esc] Back, [q] Quit
+
+            GroupView (4 shortcuts):
+              [Return] Select, [Esc] Back, [g] Toggle, [q] Quit
+
+            IssuePicker (4 shortcuts):
+              [Return] Toggle, [Ctrl+V] View, [Esc] Close, [q] Quit
+
+REQ-FTR-005: Shortcuts with an "action" property are tabbable/focusable.
+            The focused shortcut MUST render with inverse+bold styling.
+
+REQ-FTR-006: Disabled shortcuts MUST render with dimmed color.
+
+REQ-FTR-007: Pressing Return while a focusable footer shortcut has focus
+            MUST dispatch that shortcut's action.
+
+REQ-FTR-008: Footer height MUST be dynamically computed and communicated
+            to the content area for correct space allocation.
+
+
+================================================================================
+PART 4: HOME VIEW
+================================================================================
+
+REQ-HOME-001: Display a scrollable list of all issues.
+
+REQ-HOME-002: Each issue row shows:
+             - Visual cursor indicator (filled triangle) on selected row
+             - Unread indicator (star symbol, yellow) if issue has unread
+               agent responses
+             - Issue number (I-<inum>)
+             - Status (colored by status: green=Active, blue=Awaiting,
+               red=Blocked, yellow=Deferred, gray=Resolved)
+             - Title (truncated to fit width)
+
+REQ-HOME-003: Status filter tabs at top:
+             - "All" tab + one tab per status
+             - Each tab shows count in parentheses
+             - Tab/Shift+Tab cycles between filter tabs
+             - Selecting a tab filters the issue list
+
+REQ-HOME-004: Capacity warning when active agents equal max agents.
+
+REQ-HOME-005: Keyboard shortcuts:
+             - Up/Down (j/k): move cursor
+             - Tab/Shift+Tab: cycle status filter tabs
+             - Return: open selected issue in DetailView
+             - a: activate selected issue
+             - d: defer selected issue
+             - r: resolve selected issue
+             - n: create new issue
+             - Global shortcuts (s/b/g/q/Esc)
+
+
+================================================================================
+PART 5: DETAIL VIEW
+================================================================================
+
+5.1  LAYOUT
+-----------
+REQ-DTL-001: DetailView has 3 vertical zones within the content area:
+            1. Context header (issue metadata or thread parent)
+            2. Conversation (scrollable response chain)
+            3. Input box (text entry)
+
+REQ-DTL-002: Conversation height = rows - header(3) - contextHeader - input(3)
+            - footer. Must be at least 1 line.
+
+
+5.2  ISSUE CONTEXT HEADER
+--------------------------
+REQ-DTL-010: When NOT in a thread, display the Issue Header (5 lines):
+            Line 1: Title (bold)
+            Line 2: "Status: <status>  Group: <group>"
+              - Group field is tabbable (inverse+bold when focused)
+            Line 3: "Blocked by: I-1, I-3  Blocks: I-7"
+              - Both fields are tabbable (inverse+bold when focused)
+            Line 4: Hint text (dimmed)
+            Line 5: Separator line
+
+REQ-DTL-011: Pressing Return while a header field (Group/BlockedBy/Blocks)
+            is focused MUST open the corresponding overlay/picker.
+
+REQ-DTL-012: Group field opens GroupPicker overlay (inline).
+            BlockedBy/Blocks fields navigate to IssuePicker view.
+
+
+5.3  THREAD CONTEXT HEADER
+---------------------------
+REQ-DTL-020: When IN a thread, display:
+            Line 1: ThreadHeaderSeparator ("[ Thread ]" or "[ Thread -- Resolved ]")
+            Lines 2-N: Thread parent ResponseContainer (dimmed, not selectable)
+            Final line: Replies separator ("[ Replies ]")
+
+REQ-DTL-021: Thread parent MUST be rendered with isThreadParent=true styling
+            (gray/dimmed colors).
+
+REQ-DTL-022: The resolved label MUST show "Resolved" in white within gray
+            separator text.
+
+
+5.4  RESPONSE CHAIN (CONVERSATION)
+-----------------------------------
+REQ-RSP-001: The conversation area renders a vertical chain of
+            ResponseContainer components within a fixed-height viewport.
+
+REQ-RSP-002: The chain is derived from a linked list (Response.response
+            pointers). A flattenToArray() utility converts this to an indexed
+            array for rendering.
+
+REQ-RSP-003: Viewport management with smart scrolling:
+            - On cold start or resize: center the selected message
+            - On cursor movement: stable anchor scrolling — only shift the
+              viewport when the selection leaves the visible range
+            - Track lastFirstVisible and lastHeight to detect reflows
+
+REQ-RSP-004: The viewport MUST detect chain changes (thread enter/exit) and
+            reset the scroll anchor.
+
+REQ-RSP-005: A "[ New Replies ]" separator MUST appear before the first
+            message with a timestamp after userLastViewedAt.
+
+REQ-RSP-006: Up/Down arrow keys scroll the selected message index.
+            Selection MUST NOT exceed array bounds.
+
+
+5.5  RESPONSE CONTAINER
+------------------------
+REQ-RSP-010: Each message renders inside a bordered container with:
+            - Top border with author name
+            - Word-wrapped body with side borders
+            - Bottom border with contextual action hint
+
+REQ-RSP-011: Color coding by author:
+            - User messages: cyan borders/author
+            - Agent messages: green borders/author
+            - Thread parents: gray (dimmed) borders/author
+            - Selected messages: white/bold
+
+REQ-RSP-012: Continuation messages (is_continuation=true) render with
+            minimal borders — no author header, just the continued body
+            text within the existing container visual.
+
+REQ-RSP-013: Reply badge on top border (right-aligned):
+            - "[N replies]" if has replies, no new ones
+            - "[N replies (M new)]" in red+bold if has new unread replies
+            - "[N replies (resolved checkmark)]" if thread is resolved
+
+REQ-RSP-014: Bottom border action hints:
+            - No replies: "reply to this"
+            - Has replies, not focused: "view replies (N)" or "(N new)"
+            - Has replies, focused: inverse+bold "view replies" label
+
+REQ-RSP-015: ResponseContainer MUST expose a static/pure function to
+            compute its rendered line count given body text and column width.
+            This is needed by the viewport manager.
+
+REQ-RSP-016: Word wrapping MUST respect terminal width minus border characters.
+
+
+5.6  INPUT BOX
+--------------
+REQ-INP-001: Input box is 3 lines tall:
+            Line 1: Separator (dashes)
+            Line 2: Text input with prompt "Enter response: > "
+            Line 3: (padding)
+
+REQ-INP-002: Uses ink-text-input for text entry.
+
+REQ-INP-003: The input receives keyboard focus when no header field,
+            view-replies button, or footer shortcut is focused.
+
+REQ-INP-004: Pressing Return with non-empty text calls onSend(text) and
+            clears the input.
+
+REQ-INP-005: Pressing Return with empty text and a focused header field
+            opens the corresponding overlay.
+
+
+5.7  THREAD NAVIGATION
+-----------------------
+REQ-THR-001: Any response with replies can be entered as a thread.
+
+REQ-THR-002: Enter thread: Ctrl+Shift+Right arrow (or Return on focused
+            "view replies" button).
+            - Pushes current {parent, savedSelectedIndex} onto threadStack
+            - Displays the reply chain of the selected message
+            - Moves cursor to last message in reply chain
+            - Marks all replies as seen
+
+REQ-THR-003: Exit thread: Ctrl+Shift+Left arrow, or Escape.
+            - Pops threadStack
+            - Restores savedSelectedIndex
+            - Marks replies as seen
+            - If threadStack is empty, exits the DetailView entirely
+
+REQ-THR-004: Thread nesting is unlimited. Each enter pushes, each exit pops.
+
+REQ-THR-005: Thread state changes MUST notify the parent App (for
+            header subtitle and footer shortcut updates).
+
+REQ-THR-006: Thread resolution:
+            - Ctrl+R toggles thread_resolved_at on the thread parent
+            - When in a thread: resolves current thread's parent
+            - When on main chain: resolves selected message's thread
+              (only if selected message has replies)
+
+REQ-THR-007: Issue resolution (separate from thread resolution):
+            - Ctrl+R when NOT on a message with replies toggles issue status
+              between Resolved and Active
+
+
+5.8  FOCUS CYCLING
+------------------
+REQ-FOC-001: Tab cycles focus through a ring of interactive elements:
+            1. Input box (text entry)
+            2. Group field (issue header, not in thread)
+            3. BlockedBy field (issue header, not in thread)
+            4. Blocks field (issue header, not in thread)
+            5. "View replies" button (only if selected message has replies)
+            6. Focusable footer shortcuts
+
+REQ-FOC-002: Shift+Tab cycles in reverse.
+
+REQ-FOC-003: The focus ring dynamically adjusts:
+            - In thread mode: skip header fields (Group/BlockedBy/Blocks)
+            - No replies on selected: skip "view replies"
+            - Different footer shortcuts per view mode
+
+REQ-FOC-004: Focus state MUST reset on thread enter/exit.
+
+REQ-FOC-005: The currently focused element MUST have a clear visual
+            indicator (inverse+bold or equivalent).
+
+
+5.9  ADJACENT ISSUE NAVIGATION
+-------------------------------
+REQ-ADJ-001: Shift+Left: navigate to previous issue in the list.
+REQ-ADJ-002: Shift+Right: navigate to next issue in the list.
+REQ-ADJ-003: Uses replaceCurrentView (no stack push).
+REQ-ADJ-004: Bounds-checked — no-op at first/last issue.
+
+
+5.10 KEY BLOCKING
+-----------------
+REQ-BLK-001: Ctrl+R MUST NOT echo the 'r' character into the text input.
+            The current implementation uses a suppressNextInput flag. The
+            rewrite should handle this cleanly, possibly by checking for
+            modifier keys before passing input to TextInput.
+
+
+5.11 OVERLAYS
+-------------
+REQ-OVR-001: GroupPicker renders as a full-content-area overlay replacing the
+            normal DetailView content.
+
+REQ-OVR-002: GroupPicker features:
+            - List of existing containers (groups)
+            - First item: "+ Create new group" (switches to create mode)
+            - Up/Down (j/k): navigate list
+            - Return: select group or enter create mode
+            - In create mode: TextInput for new group name
+            - Escape: close overlay
+            - Selection calls onGroupChange(containerId) or onGroupCreate(name)
+
+
+================================================================================
+PART 6: NEW ISSUE FORM
+================================================================================
+
+REQ-NEW-001: Form with 4 fields:
+            1. Title (required)
+            2. Description (required)
+            3. Group (optional, text)
+            4. Blocked by (optional, comma-separated issue numbers)
+
+REQ-NEW-002: Tab/Shift+Tab cycles between fields.
+
+REQ-NEW-003: Active field has a text input; inactive fields show their current
+            value as static text.
+
+REQ-NEW-004: Return: validate and submit.
+            Validation: title and description are required.
+            Blocked by: parse as comma-separated integers.
+            Error message displayed on validation failure.
+
+REQ-NEW-005: Escape: cancel and go back.
+
+REQ-NEW-006: On successful creation, calls onCreated(NewIssueData) where:
+            NewIssueData = { title, description, group?, blockedBy?: number[] }
+
+
+================================================================================
+PART 7: AGENT STATUS VIEW
+================================================================================
+
+REQ-AGT-001: Display a table of active agent sessions.
+
+REQ-AGT-002: Columns:
+            - Inum (issue number)
+            - Title
+            - Pane (tmux pane ID)
+            - Status (alive/dead indicator icon)
+            - Last Activity (time portion HH:MM)
+
+REQ-AGT-003: Status indicators:
+            - Filled circle (green): alive
+            - Empty circle (gray): dead
+
+REQ-AGT-004: Up/Down (j/k): navigate cursor.
+            Selected row: cyan highlight.
+
+REQ-AGT-005: Return: focus the selected agent's tmux pane.
+
+REQ-AGT-006: Global shortcuts available (Esc/q for back/quit).
+
+
+================================================================================
+PART 8: BLOCKING MAP VIEW
+================================================================================
+
+REQ-BLK-001: Display issue dependency graph as an ASCII tree.
+
+REQ-BLK-002: Tree construction algorithm:
+            1. Build adjacency map from dependencies
+            2. Find root nodes (in graph but not blocked by anything)
+            3. DFS walk with tree connector prefixes
+            4. Append isolated issues (no dependencies) at bottom
+
+REQ-BLK-003: Tree connector characters:
+            - Branch: "--- " (with unicode box-drawing)
+            - Last branch: "--- " (corner)
+            - Continuation: "|   "
+            - Leaf: "    "
+
+REQ-BLK-004: Each node displays: I-<inum> <title> (<status>)
+            Status is color-coded per standard mapping.
+
+REQ-BLK-005: Sections:
+            - "Dependency Graph" header
+            - Tree of connected issues
+            - "No dependencies:" header (if isolated issues exist)
+            - Flat list of isolated issues
+
+REQ-BLK-006: Up/Down (j/k): navigate cursor.
+            Selected row: bold white with triangle cursor.
+
+REQ-BLK-007: Return: navigate to selected issue's DetailView.
+
+REQ-BLK-008: Global shortcuts available (Esc/q).
+
+
+================================================================================
+PART 9: GROUP VIEW
+================================================================================
+
+REQ-GRP-001: Dual-mode navigation:
+            Mode 1 (List): Show all containers with progress bars
+            Mode 2 (Issues): Drill into a container, show its issues
+
+REQ-GRP-002: Container display (list mode):
+            - Name, type
+            - Progress bar: Unicode full-block (filled) + light-shade (empty)
+            - Resolved/Total count
+            - Selected: cyan, bold, triangle cursor
+
+REQ-GRP-003: Issue display (issues mode):
+            - I-<inum>, status (colored), title
+            - Same selection styling
+
+REQ-GRP-004: Navigation:
+            - Up/Down (j/k): navigate within current mode
+            - n/p: alias for Down/Up in issue mode
+            - Return: drill into container (list mode) or select issue
+            - Escape: pop back to list mode (or exit view if in list mode)
+
+REQ-GRP-005: Group mode state MUST survive navigation away and back.
+            The current implementation lifts groupMode to App. The rewrite
+            should use a ref or context to persist this.
+
+
+================================================================================
+PART 10: ISSUE LIST PICKER
+================================================================================
+
+REQ-PICK-001: Bordered box with title ("Blocked by" or "Blocks").
+
+REQ-PICK-002: Each row shows:
+            - Checkbox: [x] if selected, [ ] if not
+            - Unread indicator (*) if issue has unread responses
+            - I-<inum> and title (truncated to fit)
+            - Status color coding
+
+REQ-PICK-003: Navigation:
+            - Up/Down (j/k): navigate list
+            - Return: toggle selected state on current issue
+            - Ctrl+V: navigate to view the highlighted issue in DetailView
+            - Escape: close picker
+
+REQ-PICK-004: The picker filters out the current issue (cannot block self).
+
+
+================================================================================
+PART 11: KEYBOARD SYSTEM
+================================================================================
+
+REQ-KBD-001: Two-level key abstraction:
+            Level 1: Individual keys mapped to Ink's Key object properties
+            Level 2: Key combinations (Ctrl+R, Alt+H, Ctrl+Shift+Arrows, etc.)
+
+REQ-KBD-002: Key matching functions:
+            - matchesKey(key, choice): check single key
+            - matchesKeyCombination(combo, input, key): check key combo
+
+REQ-KBD-003: Key label generation:
+            - getHotKeyLabel(combo): returns human-readable string for display
+              (e.g., "Ctrl+Shift+Right")
+
+REQ-KBD-004: Complete key combination definitions:
+            - CTRL_SHIFT_LEFT_ARROW: exit thread
+            - CTRL_SHIFT_RIGHT_ARROW: enter thread
+            - CTRL_R: resolve/unresolve
+            - ALT_H: go home
+            - SCROLL_UP_DOWN: scroll conversation
+
+REQ-KBD-005: Key display string map for terminal-friendly labels
+            (e.g., UP_ARROW -> "Up", RETURN -> "Return", etc.)
+
+
+================================================================================
+PART 12: DATA LAYER (UNCHANGED IN REWRITE)
+================================================================================
+
+The following modules are NOT being rewritten. They form the stable data layer
+that the new TUI will consume. Documented here for interface reference.
+
+12.1 TYPES (src/types.ts)
+--------------------------
+The rewrite MUST use these exact types:
+
+Enums:
+  IssueStatus { Active, Awaiting, Blocked, Deferred, Resolved }
+  ResponseType { Question, Implementation, Clarification, Analysis, Fix, Other, None }
+  AuthorType { User, Agent }
+
+Interfaces:
+  Issue { inum, title, description, status, created_at, resolved_at,
+          issue_revision, agent_last_read_at, user_last_viewed_at }
+  Message { author, type, body, timestamp, seen }
+  Response { id, content: Message, responding_to, response, replying_to, reply,
+             is_continuation, thread_resolved_at }
+  ResponseRow { id, inum, author, type, body, created_at, responding_to_id,
+                replying_to_id, is_continuation, thread_resolved_at }
+  Container { id, name, type, parent_id, description, status, created_at, closed_at }
+  Dependency { blocker_inum, blocked_inum }
+  AgentSession { inum, pane_id, head_commit, created_at }
+  Config { maxAgents, tmuxSession, scanInterval, terminalApp, agentPrompt,
+           codeRoot, teardownTimeout }
+
+String Maps:
+  IssueStatusStringsMap, ResponseTypeStringsMap, AuthorTypeStringsMap
+
+12.2 DATABASE OPERATIONS
+--------------------------
+Issues: createIssue, getByInum, list, updateStatus, updateDescription,
+        incrementRevision, markViewed, getActiveCount, getStatusCounts
+
+Responses: create, listByInum, getLatestByInum, hasUnread, getUnreadInums
+
+Dependencies: addBlock, removeBlock, getBlockersFor, getBlockedBy, isBlocked
+
+Containers: createContainer, listContainers, getContainer, addIssueToContainer,
+            removeIssueFromContainer, getIssuesInContainer, updateSortOrder,
+            updateContainerStatus
+
+Agent Sessions: create, getByInum, remove, listActive
+
+12.3 MOCK DATA SYSTEM
+-----------------------
+REQ-MOCK-001: Mock data MUST be loadable from JSON (data/mock-data.json).
+
+REQ-MOCK-002: Mock data MUST support reset to defaults (data/mock-data.default.json).
+
+REQ-MOCK-003: Response hydration: Two-pass algorithm.
+             Pass 1: Create all Response nodes from flat ResponseRow records.
+             Pass 2: Link pointers (responding_to/response, replying_to/reply).
+
+REQ-MOCK-004: Response flattening: Recursively flatten linked Response trees
+             back to ResponseRow arrays for JSON serialization.
+
+REQ-MOCK-005: The --resetMockData CLI flag MUST reset mock data before app init.
+
+REQ-MOCK-006: saveMockStore() persists current state to disk.
+             reloadMockStore() resets in-memory state from defaults.
+
+REQ-MOCK-007: getNextResponseId() MUST be persisted across saves to prevent
+             ID collisions.
+
+
+================================================================================
+PART 13: UTILITIES
+================================================================================
+
+13.1 STATUS COLOR MAPPING
+--------------------------
+REQ-UTIL-001: statusToColor(status) returns:
+             Active -> "green"
+             Awaiting -> "blue"
+             Blocked -> "red"
+             Deferred -> "yellow"
+             Resolved -> "gray"
+
+13.2 PARAGRAPH SPLITTING
+--------------------------
+REQ-UTIL-002: splitIntoParagraphs(body) splits text on blank lines while
+             respecting code fences (``` blocks). Blank lines inside code
+             fences do NOT cause splits.
+
+REQ-UTIL-003: Language tags on code fences (e.g., ```typescript) MUST be
+             handled correctly.
+
+REQ-UTIL-004: Multiple consecutive blank lines collapse to a single split.
+
+REQ-UTIL-005: Empty/whitespace-only input returns an empty array.
+
+13.3 THREAD BUILDERS (TEST HELPERS)
+-------------------------------------
+REQ-UTIL-010: resetIdCounter(start): reset global ID generator.
+
+REQ-UTIL-011: createMessage(author, body, opts?): create Message object.
+
+REQ-UTIL-012: buildResponseChain(messages): create main chain from Message[].
+
+REQ-UTIL-013: buildReplyChain(parent, messages): attach reply chain to parent.
+
+REQ-UTIL-014: splitAgentMessage(body, columns?): split multi-paragraph agent
+             message into continuation nodes.
+
+REQ-UTIL-015: buildMixedChain(items): build chain from mix of Messages and
+             pre-built Response arrays.
+
+
+================================================================================
+PART 14: ENTRY POINT & INITIALIZATION
+================================================================================
+
+REQ-INIT-001: Entry point: src/tui/run.tsx
+
+REQ-INIT-002: Process --resetMockData flag BEFORE any dynamic imports.
+
+REQ-INIT-003: Create an AppWrapper component that:
+             - Tracks terminal dimensions via useStdout or stdout resize events
+             - Passes columns/rows to the app
+
+REQ-INIT-004: Initial view: DetailView for issue I-1 (development default).
+
+REQ-INIT-005: The Ink render() call MUST configure:
+             - exitOnCtrlC: true (or handle via useApp)
+
+
+================================================================================
+PART 15: TMUX INTEGRATION (UNCHANGED IN REWRITE)
+================================================================================
+
+The tmux layer is NOT being rewritten. Reference for completeness:
+
+- exec.ts: Shell execution abstraction with injectable executor
+- tmux.ts: Session/pane lifecycle (create, split, list, kill)
+- terminal.ts: macOS terminal window opening via AppleScript
+- bootstrap.ts: Re-exec guard, session creation, layout enforcement
+- testing.ts: Mock executor factory for tests
+
+
+================================================================================
+PART 16: CLI INTERFACE (UNCHANGED IN REWRITE)
+================================================================================
+
+The aidi CLI is NOT being rewritten. Reference for completeness:
+
+Commands: respond, read, block, create, status, ack
+
+
+================================================================================
+PART 17: TESTING REQUIREMENTS
+================================================================================
+
+REQ-TEST-001: All TUI components MUST have tests using ink-testing-library.
+
+REQ-TEST-002: Test framework: Vitest.
+
+REQ-TEST-003: Input simulation via lastFrame() and stdin.write().
+
+REQ-TEST-004: Tests MUST cover:
+             - View routing (push, pop, back, home)
+             - Deep navigation sequences
+             - Stack boundary (cannot pop past root)
+             - Per-view keyboard shortcuts
+             - Focus cycling
+             - Thread enter/exit
+             - Footer shortcut rendering and wrapping
+             - Paragraph splitting edge cases
+             - Response container line count computation
+
+REQ-TEST-005: Mock data helpers (thread-builders.ts) MUST be used for
+             creating test fixtures.
+
+REQ-TEST-006: Tests MUST NOT depend on real tmux or database.
+
+
+================================================================================
+PART 18: ANTI-PATTERNS TO ELIMINATE IN REWRITE
+================================================================================
+
+The following patterns exist in the current codebase and MUST NOT appear in
+the rewrite:
+
+AP-001: Class components with forceUpdate()
+        -> Replace with functional components + useState/useReducer
+
+AP-002: State stored as class instance variables
+        -> Replace with React state hooks
+
+AP-003: DetailInputBridge wrapper component
+        -> Use useInput directly in functional DetailView
+
+AP-004: Manual focus ring index math (cycleFocus)
+        -> Use Ink's useFocus/useFocusManager or a cleaner custom hook
+
+AP-005: Raw ANSI escape codes for screen clearing
+        -> Use Ink's rendering system
+
+AP-006: Inline arrow functions in render props (onSelect={() => ...})
+        -> Use useCallback for stable references
+
+AP-007: Mutable mock data (direct array/object mutation)
+        -> Immutable state updates
+
+AP-008: pushViewOntoStack/popViewFromStack manual array copying
+        -> Use spread syntax or immer, managed by useReducer
+
+AP-009: process.stdout.write() for terminal control
+        -> Use Ink APIs
+
+AP-010: Map<number, number> for saved selections as class field
+        -> useRef<Map<number, number>> or navigation context
+
+AP-011: threadStack as mutable instance array with .push()/.pop()
+        -> useState with immutable updates
+
+AP-012: No-op callbacks (onActivate={() => {}})
+        -> Wire to actual actions or make props optional
+
+
+================================================================================
+PART 19: COMPONENT DEPENDENCY MAP (CURRENT -> REWRITE)
+================================================================================
+
+Current file                      Rewrite notes
+----------------------------      -----------------------------------------
+src/tui/run.tsx                   Keep as entry point, simplify
+src/tui/app.tsx                   Rewrite as functional, useReducer for nav
+src/tui/views.ts                  Keep type definitions, possibly simplify
+src/tui/hotkeys.ts                Keep, clean up enum naming
+src/tui/global-keys.tsx           Convert to custom hook: useGlobalKeys()
+src/tui/header.tsx                Already functional, keep memo'd
+src/tui/footer.tsx                Already functional, keep data-driven
+src/tui/home-view.tsx             Rewrite as functional
+src/tui/detail.tsx                Rewrite as functional (biggest change)
+src/tui/issue-header.tsx          Already functional, keep
+src/tui/response-container.tsx    Keep, ensure pure/memo'd
+src/tui/response-chain.tsx        Rewrite viewport logic as custom hook
+src/tui/input-box.tsx             Already functional, keep
+src/tui/newissue.tsx              Already functional, keep
+src/tui/agent-status.tsx          Already functional, keep
+src/tui/blocking-map.tsx          Already functional, keep
+src/tui/group-view.tsx            Already functional, keep
+src/tui/group-picker.tsx          Already functional, keep
+src/tui/issue-list-picker.tsx     Rewrite as functional
+src/tui/status-color.ts           Keep utility
+src/tui/paragraph-utils.ts        Keep utility
+src/tui/mock-data.ts              Refactor for immutable updates
+src/tui/mock-store.ts             Keep hydration/serialization logic
+src/tui/thread-builders.ts        Keep test helper
+
+
+================================================================================
+PART 20: SUGGESTED NEW ABSTRACTIONS
+================================================================================
+
+These are recommended new patterns for the rewrite:
+
+20.1 CUSTOM HOOKS
+-----------------
+- useNavigation(): returns { navigateTo, goBack, replaceView, goHome,
+  currentView, viewStack }. Backed by useReducer.
+
+- useGlobalKeys(currentViewType): handles global shortcuts (s/b/g/q/Esc/n).
+  Uses useInput internally.
+
+- useViewport(messages, selectedIndex, height, columns): manages scroll
+  position, returns { firstVisible, lastVisible, visibleMessages }.
+  Encapsulates the current ResponseChain viewport logic.
+
+- useThreadNavigation(rootResponse): manages threadStack, currentMessages,
+  enterThread, exitThread, resolveThread. Returns current chain and state.
+
+- useFocusRing(slots): manages circular focus cycling with dynamic slot count.
+  Returns { focusedIndex, cycleFocus, resetFocus }.
+
+- useSavedSelection(): persists selected message per inum across navigations.
+
+20.2 CONTEXTS
+-------------
+- NavigationContext: provides useNavigation() values to all descendants.
+
+- AppStateContext: provides unreadCount, activeAgentCount, maxAgents,
+  threadInfo for Header/Footer consumption without prop drilling.
+
+20.3 COMPONENT COMPOSITION
+---------------------------
+- AppShell: wraps Header + children + Footer. Manages terminal dimensions.
+
+- ViewRouter: renders the correct view component based on currentView.type.
+  A simple switch/map, extracted from App.render().
+
+
+================================================================================
+PART 21: VALIDATION ERRATA — GAPS & CORRECTIONS
+================================================================================
+
+The following gaps were identified by cross-referencing the requirements against
+the actual source code. These corrections are authoritative.
+
+21.1 INCOMPLETE VIEW ROUTING IN CURRENT APP (gap 1)
+----------------------------------------------------
+NOTE: The current App.render() switch statement only handles Home, Detail, and
+IssuePicker. NewIssue, AgentStatus, BlockingMap, and GroupView cases are missing.
+The rewrite MUST implement routing for ALL seven view types (REQ-VIEW-001).
+This is a known Phase 1.5 gap, not an oversight in the requirements.
+
+21.2 Ctrl+R BEHAVIOR CORRECTION (gaps 3, 16)
+----------------------------------------------
+CORRECTION to REQ-THR-006 and REQ-THR-007:
+
+REQ-THR-006-CORRECTED: Ctrl+R always calls resolveIssue(), which toggles the
+  issue status between Resolved and Active. It does NOT call resolveThread().
+
+REQ-THR-006a: Thread resolution is triggered ONLY by pressing Return while the
+  "view replies" button is focused (focusedViewReplies=true). This calls
+  resolveThread(), which toggles thread_resolved_at on the selected message
+  (if in main chain) or the current thread parent (if in a thread).
+
+REQ-THR-007-REMOVED: The previous REQ-THR-007 is merged into REQ-THR-006-CORRECTED.
+
+21.3 RESPONSE CONTAINER TRAILING HINT LINE (gap 4)
+----------------------------------------------------
+REQ-RSP-010-ADDENDUM: Each ResponseContainer renders an additional line below
+  the bottom border:
+  - Default: blank spacer line (1 line of vertical spacing between messages)
+  - When viewRepliesFocused=true: "Press Enter to resolve" or
+    "Press Enter to unresolve" hint text
+  This trailing line MUST be included in line count computations.
+
+21.4 ISSUE HEADER IN COMPONENT MAP (gap 5)
+--------------------------------------------
+CORRECTION to Part 19: issue-header.tsx was missing from the component map.
+
+  src/tui/issue-header.tsx          Already functional, keep (memo'd)
+
+21.5 HEADER DISPLAY CORRECTIONS (gaps 6-10)
+---------------------------------------------
+CORRECTION to REQ-HDR-003: The current code renders "Agents: <active>" without
+  a denominator. The rewrite should include the max: "Agents: <active>/<max>".
+  Colors are not applied in current code but SHOULD be in the rewrite.
+
+CORRECTION to REQ-HDR-002: View labels come from ViewTypeStringsMap in views.ts.
+  Actual current labels:
+    - GroupView -> "Group View" (not "Groups")
+  The rewrite MAY use either mapping. The canonical source is ViewTypeStringsMap.
+
+REQ-HDR-002-ADDENDUM: When threadInfo.inThread is true, the Detail view label
+  changes from "I-<inum> Detail" to "I-<inum>" (without "Detail").
+
+CORRECTION to REQ-HDR-004: Actual subtitle strings in code differ from what
+  was specified. Correct values from code:
+    - AgentStatus: "Active agent sessions and pane status"
+    - BlockingMap: "Dependency and blocking relationships"
+    - GroupView: "Issues grouped by container"
+    - IssuePicker: mode-dependent — "Select blocking issues" or "Select blocked issues"
+  The rewrite MAY use either set. The above are what the code currently uses.
+
+21.6 FOOTER SHORTCUT CORRECTIONS (gaps 11-15)
+-----------------------------------------------
+CORRECTION to REQ-FTR-004: The actual Detail view shortcuts in code include
+  disabled shortcuts not listed in the original requirements:
+    - [d] Defer (disabled)
+    - [b] Block (disabled)
+    - [w] Rebase (disabled)
+    - [s] Show pane (disabled)
+  These represent future functionality and should be preserved as disabled.
+
+  The code does NOT include [Shift+L/R] or [Tab] in the footer shortcuts
+  for Detail view — those key bindings work but are not shown in the footer.
+
+  GroupView code has [n] Next issue, [p] Prev issue — NOT [g] Toggle as
+  originally stated.
+
+  Thread mode includes [Ctrl+R] Resolve Issue (not Ctrl+Shift+R).
+
+21.7 handleGlobalKey RETURN VALUE (gap 2)
+------------------------------------------
+REQ-KEY-003-ADDENDUM: The global key handler (hook or utility) MUST return a
+  boolean indicating whether the key was consumed. Callers use this to decide
+  whether to continue processing.
+
+21.8 HELPER FUNCTIONS (gaps 17-18)
+-----------------------------------
+REQ-UTIL-020: markRepliesSeen(node: Response): void — walks the .reply chain
+  setting content.seen to current timestamp. Used on thread enter and exit.
+
+REQ-UTIL-021: findResponseById(root: Response | null, id: number): Response | null
+  — searches linked list chain and nested reply chains by ID.
+
+21.9 ALT_H ALTERNATE INPUT (gap 19)
+-------------------------------------
+REQ-KBD-004-ADDENDUM: The ALT_H combination matcher MUST also match the raw
+  input character '\u02D9' (Unicode modifier letter dot above), which is how
+  some terminals encode Alt+H.
+
+21.10 UNUSED KEY DEFINITIONS (gap 20)
+---------------------------------------
+NOTE: The hotkeys module defines PAGE_UP, PAGE_DOWN, BACKSPACE, DELETE keys
+  that are not currently used by any view. These MAY be retained for future use
+  or removed. Not required for the rewrite.
+
+21.11 MOCK DATA COUPLING (gaps 22-24)
+---------------------------------------
+REQ-MOCK-008: GroupView, BlockingMap, and AgentStatus currently import mock data
+  directly at module level instead of receiving data via props. The rewrite MUST
+  pass all data via props for testability and eventual DB wiring.
+
+REQ-MOCK-009: AgentStatus defines its own AgentStatusEntry interface
+  (inum, title, paneId, alive, lastActivity) which differs from the AgentSession
+  type in types.ts. The rewrite should define a clear mapping/adapter between
+  AgentSession (DB) and the display model.
+
+REQ-MOCK-010: MOCK_AGENTS is defined inline in agent-status.tsx rather than in
+  mock-data.ts. The rewrite should consolidate all mock data in mock-data.ts.
+
+21.12 NewIssue TYPE CORRECTION (gaps 26-27)
+---------------------------------------------
+CORRECTION to REQ-NEW-006: The current code passes blockedBy as a raw string,
+  not number[]. The rewrite SHOULD parse it to number[] before calling onCreated.
+
+REQ-NEW-004-ADDENDUM: The blocked-by validator accepts "I-3, I-5" format,
+  stripping the "I" or "i" prefix from each value. This input format MUST be
+  preserved.
+
+21.13 IssueListPicker INITIAL CURSOR (gap 28)
+-----------------------------------------------
+REQ-PICK-005: The cursor MUST initialize to the index of the first
+  already-selected issue in the list, falling back to 0 if none are selected.
+
+21.14 ResponseContainer DETAIL CORRECTIONS (gaps 29-33)
+---------------------------------------------------------
+REQ-RSP-012-ADDENDUM: Continuation messages still render reply badges on their
+  top border when they have replies and are not selected.
+
+REQ-RSP-010-ADDENDUM-2: When a message is selected, the header shows only the
+  author name (no type tag, no timestamp). Unselected messages show author name,
+  type tag (yellow or gray), and formatted timestamp.
+
+REQ-RSP-017: Response type tag color: yellow for normal messages, gray for
+  thread parents.
+
+REQ-RSP-018: Thread parent body text uses hex color '#aaaaaa' (not the keyword
+  'gray' used for borders).
+
+REQ-RSP-019: Timestamp display format: ISO 8601 with 'T' replaced by space and
+  'Z' suffix removed (e.g., "2025-03-06 14:30:00").
+
+21.15 ResponseChain CHAIN-CHANGE DETECTION (gap 34)
+-----------------------------------------------------
+REQ-RSP-003-ADDENDUM: The viewport manager MUST track the previous root response
+  reference (lastRootResponse). When it changes (thread enter/exit, issue
+  navigation), the viewport anchor resets and re-centers on the selected message.
+
+21.16 UNUSED threadResolved PROP (gap 35)
+------------------------------------------
+NOTE: The Footer component accepts a threadResolved prop but does not use it in
+  rendering. The App passes it from threadInfo. The rewrite SHOULD either remove
+  this unused prop or implement thread-resolved-specific footer behavior if
+  intended.
+
+
+================================================================================
+END OF REQUIREMENTS
+================================================================================
