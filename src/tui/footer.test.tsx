@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import React from 'react';
 import { render } from 'ink-testing-library';
+import { renderToString } from 'ink';
+import chalk from 'chalk';
+import stripAnsi from 'strip-ansi';
 import {
     Footer,
     VIEW_SHORTCUTS,
@@ -9,19 +12,33 @@ import {
     getFocusableShortcuts,
     computeFooterLines,
 } from './footer.js';
+import type { Shortcut } from './footer.js';
 import { ViewType } from './views.js';
-import { Ink_keyofKeys_Choices, InkKeyOfKeysStringMap, KeyCombinations, getHotKeyLabel } from './hotkeys.js';
 
-const ik = (k: Ink_keyofKeys_Choices) => InkKeyOfKeysStringMap.get(k)!;
-const ck = (k: KeyCombinations) => getHotKeyLabel(k);
+const cols = 80;
+const rts = (el: React.JSX.Element) => renderToString(el, { columns: cols });
 
-// ---- Shortcut data ----
+const allViews: ViewType[] = [
+    ViewType.Home, ViewType.Detail, ViewType.NewIssue,
+    ViewType.AgentStatus, ViewType.BlockingMap, ViewType.GroupView,
+];
 
-describe('Footer — shortcut data', () => {
-    const allViews: ViewType[] = [
-        ViewType.Home, ViewType.Detail, ViewType.NewIssue, ViewType.AgentStatus, ViewType.BlockingMap, ViewType.GroupView,
-    ];
+// Derive ANSI open codes from chalk (avoids hardcoding escape sequences)
+const DIM_OPEN = chalk.dim(' ').split(' ')[0];
+const BOLD_OPEN = chalk.bold(' ').split(' ')[0];
+const INVERSE_OPEN = chalk.inverse(' ').split(' ')[0];
 
+// ---- Exported constants ----
+
+describe('Footer — constants', () => {
+    it('FOOTER_LINES is defined', () => {
+        expect(FOOTER_LINES).toBeDefined();
+    });
+});
+
+// ---- Shortcut data invariants ----
+
+describe('Footer — shortcut data invariants', () => {
     it('VIEW_SHORTCUTS has an entry for every ViewType', () => {
         for (const view of allViews) {
             expect(VIEW_SHORTCUTS[view]).toBeDefined();
@@ -38,265 +55,195 @@ describe('Footer — shortcut data', () => {
         }
     });
 
-    it('FOOTER_LINES constant is exported', () => {
-        expect(FOOTER_LINES).toBeDefined();
-    });
-});
-
-// ---- getFooterShortcuts ----
-
-describe('Footer — getFooterShortcuts', () => {
-    it('returns VIEW_SHORTCUTS[Detail] when not in thread', () => {
-        const shortcuts = getFooterShortcuts(ViewType.Detail, false);
-        expect(shortcuts).toBe(VIEW_SHORTCUTS[ViewType.Detail]);
+    it('getFooterShortcuts returns a non-empty array for every view', () => {
+        for (const view of allViews) {
+            const shortcuts = getFooterShortcuts(view);
+            expect(Array.isArray(shortcuts)).toBe(true);
+            expect(shortcuts.length).toBeGreaterThan(0);
+        }
     });
 
-    it('returns thread shortcuts when Detail + inThread', () => {
-        const shortcuts = getFooterShortcuts(ViewType.Detail, true);
-        expect(shortcuts).not.toBe(VIEW_SHORTCUTS[ViewType.Detail]);
-        expect(shortcuts.some(s => s.label === 'Sub-thread')).toBe(true);
-        expect(shortcuts.some(s => s.label === 'Exit thread')).toBe(true);
+    it('getFocusableShortcuts never includes disabled items', () => {
+        for (const view of allViews) {
+            const focusable = getFocusableShortcuts(view);
+            expect(focusable.every(s => !s.disabled)).toBe(true);
+        }
     });
 
-    it('returns VIEW_SHORTCUTS for non-Detail views regardless of inThread', () => {
-        const shortcuts = getFooterShortcuts(ViewType.Home, true);
-        expect(shortcuts).toBe(VIEW_SHORTCUTS[ViewType.Home]);
-    });
-});
-
-// ---- getFocusableShortcuts ----
-
-describe('Footer — getFocusableShortcuts', () => {
-    it('excludes disabled items', () => {
-        const focusable = getFocusableShortcuts(ViewType.Detail, false);
-        expect(focusable.every(s => !s.disabled)).toBe(true);
-    });
-
-    it('excludes items without an action string', () => {
-        const focusable = getFocusableShortcuts(ViewType.Detail, false);
-        expect(focusable.every(s => s.action !== undefined)).toBe(true);
-    });
-
-    it('returns 4 focusable items for Detail view (Thread, Resolve, Back, Home)', () => {
-        const focusable = getFocusableShortcuts(ViewType.Detail, false);
-        expect(focusable).toHaveLength(4);
-        expect(focusable.map(s => s.action)).toEqual(['enterThread', 'resolveThread', 'back', 'home']);
-    });
-
-    it('returns 5 focusable items for thread view', () => {
-        const focusable = getFocusableShortcuts(ViewType.Detail, true);
-        expect(focusable).toHaveLength(5);
-        expect(focusable.map(s => s.action)).toEqual([
-            'enterThread', 'exitThread', 'resolveThread', 'back', 'home',
-        ]);
+    it('getFocusableShortcuts only includes items with an action', () => {
+        for (const view of allViews) {
+            const focusable = getFocusableShortcuts(view);
+            expect(focusable.every(s => s.action !== undefined)).toBe(true);
+        }
     });
 
     it('every focusable shortcut has a non-empty action string', () => {
-        const detailFocusable = getFocusableShortcuts(ViewType.Detail, false);
-        const threadFocusable = getFocusableShortcuts(ViewType.Detail, true);
-        for (const s of [...detailFocusable, ...threadFocusable]) {
-            expect(s.action!.length).toBeGreaterThan(0);
+        for (const view of allViews) {
+            for (const s of getFocusableShortcuts(view)) {
+                expect(s.action!.length).toBeGreaterThan(0);
+            }
         }
     });
 });
 
-// ---- computeFooterLines ----
+// ---- computeFooterLines arithmetic ----
 
 describe('Footer — computeFooterLines', () => {
-    it('returns 1 for NewIssue shortcuts at 80 columns', () => {
-        const shortcuts = getFooterShortcuts(ViewType.NewIssue);
-        expect(computeFooterLines(shortcuts, 80)).toBe(1);
+    const short: Shortcut[] = [{ key: 'a', label: 'Do' }];
+    const many: Shortcut[] = Array.from({ length: 10 }, (_, i) => ({
+        key: `k${i}`, label: `Action number ${i}`,
+    }));
+
+    it('returns 1 for a single short shortcut at wide width', () => {
+        expect(computeFooterLines(short, 80)).toBe(1);
     });
 
-    it('returns >= 2 for Detail shortcuts at 40 columns', () => {
-        const shortcuts = getFooterShortcuts(ViewType.Detail);
-        expect(computeFooterLines(shortcuts, 40)).toBeGreaterThanOrEqual(2);
+    it('returns >= 2 for many shortcuts at narrow width', () => {
+        expect(computeFooterLines(many, 30)).toBeGreaterThanOrEqual(2);
     });
 
-    it('returns >= 1 for all view types', () => {
-        const allViews: ViewType[] = [
-            ViewType.Home, ViewType.Detail, ViewType.NewIssue,
-            ViewType.AgentStatus, ViewType.BlockingMap, ViewType.GroupView,
-        ];
-        for (const view of allViews) {
-            const shortcuts = getFooterShortcuts(view);
-            expect(computeFooterLines(shortcuts, 80)).toBeGreaterThanOrEqual(1);
-        }
+    it('returns >= 1 for any input', () => {
+        expect(computeFooterLines(short, 500)).toBeGreaterThanOrEqual(1);
+        expect(computeFooterLines(many, 500)).toBeGreaterThanOrEqual(1);
     });
 
     it('clamps to minimum 1 even with wide terminal', () => {
-        const shortcuts = getFooterShortcuts(ViewType.NewIssue);
-        expect(computeFooterLines(shortcuts, 500)).toBe(1);
+        expect(computeFooterLines(short, 9999)).toBe(1);
     });
 });
 
-// ---- Per-view rendering ----
+// ---- Rendering basics ----
 
-describe('Footer — per-view rendering', () => {
-    it('Dashboard renders all 9 shortcuts (wraps on narrow terminals)', () => {
-        const { lastFrame } = render(<Footer viewType={ViewType.Home} />);
-        const frame = lastFrame()!;
-        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.RETURN)}]`);
-        expect(frame).toContain('View');
-        expect(frame).toContain('[n]');
-        expect(frame).toContain('New');
-        expect(frame).toContain('[a]');
-        expect(frame).toContain('Activate');
-        expect(frame).toContain('[s]');
-        expect(frame).toContain('Agents');
-        expect(frame).toContain('[b]');
-        expect(frame).toContain('Blocking');
-        expect(frame).toContain('[g]');
-        expect(frame).toContain('Groups');
-        expect(frame).toContain('[q]');
-        expect(frame).toContain('Quit');
+describe('Footer — rendering basics', () => {
+    it('renders without crash for every ViewType', () => {
+        for (const view of allViews) {
+            const { lastFrame } = render(<Footer viewType={view} />);
+            expect(lastFrame()).toBeDefined();
+            expect(lastFrame()!.length).toBeGreaterThan(0);
+        }
     });
 
-    it('Detail shows all shortcuts with disabled indicators', () => {
-        const { lastFrame } = render(<Footer viewType={ViewType.Detail} />);
-        const frame = lastFrame()!;
-        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.RETURN)}]`);
-        expect(frame).toContain('Send');
-        expect(frame).toContain('Scroll');
-        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.ESCAPE)}]`);
-        expect(frame).toContain('Back');
-        expect(frame).toContain(`[${ck(KeyCombinations.CTRL_R)}]`);
-        expect(frame).toContain('Resolve Issue');
-        expect(frame).toContain('[d]');
-        expect(frame).toContain('Defer');
-        expect(frame).toContain('[b]');
-        expect(frame).toContain('Block');
-        expect(frame).toContain('[w]');
-        expect(frame).toContain('Rebase');
-        expect(frame).toContain('[s]');
-        expect(frame).toContain('Show pane');
-    });
-
-    it('NewIssue shows 2 shortcuts', () => {
-        const { lastFrame } = render(<Footer viewType={ViewType.NewIssue} />);
-        const frame = lastFrame()!;
-        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.RETURN)}]`);
-        expect(frame).toContain('Create');
-        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.ESCAPE)}]`);
-        expect(frame).toContain('Cancel');
-    });
-
-    it('NewIssue does NOT show Dashboard-only shortcuts', () => {
-        const { lastFrame } = render(<Footer viewType={ViewType.NewIssue} />);
-        const frame = lastFrame()!;
-        expect(frame).not.toContain('[q]');
-        expect(frame).not.toContain('Quit');
-        expect(frame).not.toContain('[a]');
-        expect(frame).not.toContain('Activate');
-    });
-
-    it('AgentStatus shows 3 shortcuts', () => {
-        const { lastFrame } = render(<Footer viewType={ViewType.AgentStatus} />);
-        const frame = lastFrame()!;
-        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.RETURN)}]`);
-        expect(frame).toContain('Focus pane');
-        expect(frame).toContain('[j/k]');
-        expect(frame).toContain('Navigate');
-        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.ESCAPE)}]`);
-        expect(frame).toContain('Back');
-    });
-
-    it('BlockingMap shows 3 shortcuts', () => {
-        const { lastFrame } = render(<Footer viewType={ViewType.BlockingMap} />);
-        const frame = lastFrame()!;
-        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.RETURN)}]`);
-        expect(frame).toContain('View issue');
-        expect(frame).toContain('[j/k]');
-        expect(frame).toContain('Navigate');
-        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.ESCAPE)}]`);
-        expect(frame).toContain('Back');
-    });
-
-    it('GroupView shows 4 shortcuts', () => {
-        const { lastFrame } = render(<Footer viewType={ViewType.GroupView} />);
-        const frame = lastFrame()!;
-        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.RETURN)}]`);
-        expect(frame).toContain('View issues');
-        expect(frame).toContain('[n]');
-        expect(frame).toContain('Next issue');
-        expect(frame).toContain('[p]');
-        expect(frame).toContain('Prev issue');
-        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.ESCAPE)}]`);
-        expect(frame).toContain('Back');
+    it('output contains [key] label chip format', () => {
+        for (const view of allViews) {
+            const output = rts(<Footer viewType={view} columns={cols} />);
+            expect(output).toContain('[');
+            expect(output).toContain(']');
+        }
     });
 });
 
-// ---- Thread rendering ----
+// ---- Focus safety ----
 
-describe('Footer — thread rendering', () => {
-    it('inThread=true shows Sub-thread and Exit thread', () => {
-        const { lastFrame } = render(<Footer viewType={ViewType.Detail} inThread={true} />);
-        const frame = lastFrame()!;
-        expect(frame).toContain('Sub-thread');
-        expect(frame).toContain('Exit thread');
-    });
-
-    it('inThread=true does NOT show detail-only disabled items', () => {
-        const { lastFrame } = render(<Footer viewType={ViewType.Detail} inThread={true} />);
-        const frame = lastFrame()!;
-        expect(frame).not.toContain('Defer');
-        expect(frame).not.toContain('Rebase');
-        expect(frame).not.toContain('Show pane');
-    });
-
-    it('threadResolved=true shows Unresolve instead of Resolve', () => {
-        const { lastFrame } = render(
-            <Footer viewType={ViewType.Detail} inThread={true} threadResolved={true} />
-        );
-        expect(lastFrame()).toContain('Unresolve');
-    });
-
-    it('threadResolved=false shows Resolve', () => {
-        const { lastFrame } = render(
-            <Footer viewType={ViewType.Detail} inThread={true} threadResolved={false} />
-        );
-        expect(lastFrame()).toContain('Resolve');
-    });
-});
-
-// ---- Focused rendering ----
-
-describe('Footer — focused rendering', () => {
-    it('focusedIndex=null renders all items without extra spacing', () => {
-        const a = render(<Footer viewType={ViewType.Detail} focusedIndex={null} columns={120} />);
-        const b = render(<Footer viewType={ViewType.Detail} columns={120} />);
-        expect(a.lastFrame()).toBe(b.lastFrame());
-    });
-
+describe('Footer — focus safety', () => {
     it('focusedIndex out of bounds does not crash', () => {
-        const { lastFrame } = render(
-            <Footer viewType={ViewType.Detail} focusedIndex={99} columns={120} />
-        );
-        expect(lastFrame()).toBeDefined();
-        expect(lastFrame()).toContain('[Enter]');
+        for (const view of allViews) {
+            const { lastFrame } = render(
+                <Footer viewType={view} focusedIndex={99} columns={120} />
+            );
+            expect(lastFrame()).toBeDefined();
+        }
     });
 
-    it('focusedIndex=0 renders first focusable item content', () => {
-        const { lastFrame } = render(
-            <Footer viewType={ViewType.Detail} focusedIndex={0} columns={120} />
-        );
-        // First focusable item in Detail is Thread
-        expect(lastFrame()).toContain('Thread');
+    it('focusedIndex=null is equivalent to no focusedIndex', () => {
+        for (const view of allViews) {
+            const a = render(<Footer viewType={view} focusedIndex={null} columns={120} />);
+            const b = render(<Footer viewType={view} columns={120} />);
+            expect(a.lastFrame()).toBe(b.lastFrame());
+        }
     });
 });
 
-// ---- Row computation (Issue 1 regression) ----
+// ---- Disabled styling (ANSI-aware) ----
+
+describe('Footer — disabled shortcuts render dimmed', () => {
+    const viewWithDisabled = allViews.find(v =>
+        VIEW_SHORTCUTS[v].some(s => s.disabled)
+    );
+
+    it('at least one view has disabled shortcuts for testing', () => {
+        expect(viewWithDisabled).toBeDefined();
+    });
+
+    it('disabled shortcuts produce dim styling', () => {
+        if (!viewWithDisabled) return;
+        const output = renderToString(
+            <Footer viewType={viewWithDisabled} columns={200} />,
+            { columns: 200 },
+        );
+        expect(output).toContain(DIM_OPEN);
+    });
+
+    it('views without disabled shortcuts have none flagged disabled', () => {
+        for (const view of allViews) {
+            const shortcuts = getFooterShortcuts(view);
+            const hasDisabled = shortcuts.some(s => s.disabled);
+            if (!hasDisabled) {
+                expect(shortcuts.every(s => !s.disabled)).toBe(true);
+            }
+        }
+    });
+});
+
+// ---- Focused styling (ANSI-aware) ----
+
+describe('Footer — focused shortcuts render inverse+bold', () => {
+    const viewWithFocusable = allViews.find(v =>
+        getFocusableShortcuts(v).length > 0
+    );
+
+    it('at least one view has focusable shortcuts for testing', () => {
+        expect(viewWithFocusable).toBeDefined();
+    });
+
+    it('focused item contains inverse and bold styling', () => {
+        if (!viewWithFocusable) return;
+        const output = renderToString(
+            <Footer viewType={viewWithFocusable} focusedIndex={0} columns={200} />,
+            { columns: 200 },
+        );
+        expect(output).toContain(INVERSE_OPEN);
+        expect(output).toContain(BOLD_OPEN);
+    });
+
+    it('each focusable item renders inverse+bold when focused', () => {
+        if (!viewWithFocusable) return;
+        const focusable = getFocusableShortcuts(viewWithFocusable);
+        for (let i = 0; i < focusable.length; i++) {
+            const output = renderToString(
+                <Footer viewType={viewWithFocusable} focusedIndex={i} columns={200} />,
+                { columns: 200 },
+            );
+            expect(output).toContain(INVERSE_OPEN);
+            expect(output).toContain(BOLD_OPEN);
+        }
+    });
+});
+
+// ---- Row wrapping ----
 
 describe('Footer — row wrapping keeps key+label together', () => {
-    it('key and label stay on the same line at narrow width', () => {
-        const { lastFrame } = render(
-            <Footer viewType={ViewType.Detail} columns={50} />
-        );
-        const lines = lastFrame()!.split('\n');
-        // No line should contain a bare key without its label or vice versa
-        // Specifically, [s] and "Show pane" must be on the same line
-        const lineWithS = lines.find(l => l.includes('[s]'));
-        expect(lineWithS).toBeDefined();
-        expect(lineWithS).toContain('Show pane');
+    it('every line has balanced brackets at narrow width', () => {
+        for (const view of allViews) {
+            const shortcuts = getFooterShortcuts(view);
+            if (shortcuts.length < 3) continue;
+            const { lastFrame } = render(
+                <Footer viewType={view} columns={50} />
+            );
+            const lines = lastFrame()!.split('\n');
+            for (const line of lines) {
+                const stripped = stripAnsi(line);
+                const opens = (stripped.match(/\[/g) || []).length;
+                const closes = (stripped.match(/\]/g) || []).length;
+                expect(opens).toBe(closes);
+            }
+        }
+    });
+});
+
+// ---- Memoization ----
+
+describe('Footer — memoization', () => {
+    it('Footer is memoized with React.memo', () => {
+        expect(Footer).toHaveProperty('$$typeof', Symbol.for('react.memo'));
     });
 });

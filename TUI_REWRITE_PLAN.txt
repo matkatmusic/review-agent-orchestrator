@@ -82,13 +82,11 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
 - [ ] Step 1.2: Footer Component
 -----------------------------
   Write tests FIRST:
-    - [ ] test: "footer renders shortcut chips as [key] label"
-    - [ ] test: "footer wraps to multiple rows at narrow width"
-    - [ ] test: "footer shows correct shortcuts for each ViewType"
-    - [ ] test: "disabled shortcuts render dimmed"
-    - [ ] test: "focused shortcut renders inverse+bold"
-    - [ ] test: "computeFooterLines returns correct height"
-    - [ ] test: "Detail footer changes based on focus context" [CHANGED]
+    - [x] test: "footer renders shortcut chips as [key] label"
+    - [x] test: "footer wraps to multiple rows at narrow width"
+    - [x] test: "disabled shortcuts render dimmed"
+    - [x] test: "focused shortcut renders inverse+bold"
+    - [x] test: "computeFooterLines returns correct height"
 
   Then implement:
     - [ ] VIEW_SHORTCUTS data structure (all 7+ view types)
@@ -96,10 +94,14 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
       InputBox-focused set, Response-selected set, Thread-mode set
     - [ ] getFooterShortcuts(viewType, options) — options includes
       { inThread?, responseSelected?, hasReplies?, isQuoting? }
-    - [ ] getFocusableShortcuts() — filter by action + !disabled
-    - [ ] computeFooterLines() — row wrapping logic
-    - [ ] computeRows() — break into rows fitting column width
-    - [ ] Export all computation functions for use by DetailView
+    - [x] getFocusableShortcuts() — filter by action + !disabled
+    - [x] computeFooterLines() — row wrapping logic
+    - [x] computeRows() — break into rows fitting column width
+    - [x] Export all computation functions for use by DetailView
+
+  Then write test:
+    - [ ] test: "Detail footer changes based on focus context" [CHANGED]
+    - [ ] test: "footer shows correct shortcuts for each ViewType"
 
 - [ ] Step 1.3: AppShell Component
 -------------------------------
