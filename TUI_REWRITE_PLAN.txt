@@ -54,6 +54,168 @@ Bugs
 PHASE 1: APP SHELL — 3 Zones
 ================================================================================
 
+C++ key event dispatch design, using top-level key press receiver that is the only place that key events arrive at: 
+  key comes in.
+    is it a tab key? 
+      yes -> dispatch to 'cycle focus handler(currentView, key)', end.
+      no -> continue
+    is it a footer hotkey?
+      yes -> dispatch to 'footer hotkey handler(currentView, key)', end.
+      no -> continue
+    dispatch to 'focused component keypress handler(focusedComponent, key)', end.
+
+  cycle focus handler(currentView, key): 
+    get list of focusable components in currentView
+    cycle through the list, refreshing the view each time 'tab' is pressed so the focused component is visually differentiated from other tabbable components. 
+
+  footer hotkey handler(currentView, key): 
+    get list of footer hotkeys for currentView
+    execute action for matching hotkey. 
+
+  focused component keypress handler(focusedComponent, key):
+    forward key event to focusedComponent.
+
+  Question: Should TextInput be a tabbable component so that it is included in the focus cycle, and the focus cycle is how we stop specific keyboard input from arriving at the TextInput?
+  Answer: Yes. In ink, useInput has an isActive option. When TextInput is not
+  the focused element, pass isActive: false and it stops processing keypresses.
+  Focus is declarative state, not imperative routing.
+
+  Question: Which keys need to never be treated as meant for the TextInput?
+  Answer: Tab, Escape, Ctrl+R, Ctrl+Shift+Arrow, Alt+H, Alt+Q, Ctrl+Alt+Q,
+  Ctrl+Alt+R, Shift+Left/Right. In React/Ink these are handled by a useInput
+  hook at a higher level that processes them and updates state. TextInput
+  ignores them because it only receives input when isActive is true, and
+  modifier-key combos are intercepted before TextInput sees them.
+
+React/Ink key event dispatch design (replaces the C++ imperative model above):
+
+  Ink broadcasts every keypress to ALL useInput callbacks simultaneously.
+  There is no single dispatcher — components self-subscribe. The design uses
+  declarative state (focus, isActive) instead of imperative forwarding.
+
+  Architecture:
+    1. Single useInput hook at the view level (e.g., DetailView)
+    2. Checks keys in priority order using early return:
+       a. Tab/Shift+Tab -> call cycleFocus(), return
+       b. Modifier combos (Ctrl+R, Alt+Q, etc.) -> dispatch action, return
+       c. Footer hotkeys (single-char like 'q', 'd', 'b') -> dispatch, return
+       d. Navigation keys (Up/Down/Escape) -> handled by view state, return
+    3. TextInput has its own internal useInput with isActive={inputFocused}
+       - When inputFocused is false, TextInput ignores all keypresses
+       - When inputFocused is true, only unhandled printable chars reach it
+       - Modifier combos (Ctrl+*, Alt+*) are consumed in step 2 before
+         TextInput can see them, because the view-level handler runs first
+         and the key combinations don't produce printable input characters
+
+  Focus model (declarative, not imperative):
+    - focusedSlot: number (managed by useFocusRing hook)
+    - Slot 0 = InputBox, Slots 1-3 = header fields, Slot 4+ = footer items
+    - Each component reads focusedSlot and renders accordingly:
+      const inputFocused = focusedSlot === 0;
+      const groupFocused = focusedSlot === 1;
+      <TextInput isActive={inputFocused} />
+      <HeaderField highlighted={groupFocused} />
+    - No key forwarding needed — components observe state, not events
+
+  Key priority (within the single useInput handler):
+    Priority 1: Tab         -> cycleFocus(+1), Shift+Tab -> cycleFocus(-1)
+    Priority 2: Ctrl+Shift  -> thread navigation (enter/exit)
+    Priority 3: Ctrl+R      -> resolve issue/thread
+    Priority 4: Alt+Q       -> start quoting
+    Priority 5: Escape       -> cancel quote / exit thread / go back
+    Priority 6: Up/Down     -> scroll conversation
+    Priority 7: Return      -> dispatch based on focusedSlot
+                               (send if input, open overlay if header field,
+                                trigger action if footer item)
+    Priority 8: Single chars -> footer hotkeys (only when input not focused)
+
+  Why this differs from the C++ design:
+    - No centralized dispatcher — useInput is per-component, broadcast-based
+    - No "forwarding" of keys — each component decides if it should act
+    - Focus is state, not routing — components read focusedSlot, not events
+    - "Blocking" keys from TextInput is achieved by isActive, not filtering
+
+<Rebuttal> 
+App owns/shows a ViewBase instance.  
+All available views are instances of ViewBase.  
+in C++, ViewBase would be defined like this: 
+struct ViewBase {
+  std::unique_ptr<HeaderBase> header;
+  std::unique_ptr<ContentBase> content;
+  std::unique_ptr<FooterBase> footer;
+
+  virtual InkComponent render();
+};
+
+Every visible object inherits from RenderBase, which defines a single pure virtual function that returns the Component that would be passed into ink's render() function: 
+struct RenderBase {
+  virtual InkComponent getRenderContent() = 0; 
+  virtual std::vector<TabbableComponents*> getTabbableComponents() = 0
+};
+
+HeaderBase as C++: 
+struct HeaderBase : RenderBase { 
+  virtual InkComponent getRenderContent(); - returns the <Component /> that gets passed into ink's render() function.
+  virtual std::vector<TabbableComponents*> getTabbableComponents() override; - returns the list of tabbable components for the tab focus handler. 
+};
+
+ContentBase as C++:
+struct ContentBase : RenderBase {
+public:
+  void setNumLinesToShow(int numLinesToShow); // sets the num lines to show when producing the render content.  must be called before getRenderContent();
+  InkComponent getRenderContent() override {
+    //returns only the visible portion of the content, ContentBase keeps track internally of which part of its view is visible.
+    assert(numDisplayLines != 0); //call setNumLinesToShow() first
+    createScrolledAndClippedViewContent();
+    return getClippedRenderContent();
+  }
+
+  //the content has no tabbable components
+  std::vector<TabbableComponents*> getTabbableComponents() override { return {}; }
+protected:
+  virtual void createScrolledAndClippedViewContent() = 0;
+  virtual InkComponent getClippedRenderContent() = 0;
+};
+
+FooterBase as C++:
+struct FooterBase : RenderBase {
+  std::vector<TabbableComponents*> getTabbableComponents() override;
+  virtual std::vector<HotKeyComponent*> getHotKeyComponents(); //gets all the hot keys for the footer. 
+  virtual int getNumLinesNeeded(); // computes the number of lines needed to show all hotkeys, uses getHotKeyComponent() to figure out if a component can fit on a line or not.     
+};
+
+//ViewBase class rendering approach:
+InkComponent ViewBase::render() {
+  auto headerBlock = header->getRenderContent();
+  auto footerBlock = footer->getRenderContent();
+  auto contentLinesAvailable = computeLinesAvailable(headerBlock, footerBlock, windowHeight);
+  content->setNumLinesToShow(contentLinesAvailable);
+  auto content = content->getRenderContent();
+  return 
+  {
+    <Box>
+      <headerBlock/>
+      <content/>
+      <footerBlock/>
+    </Box>
+  };
+}
+
+Base keyhandling approach: 
+    each ViewBase has a reference to the App.
+    ViewBase.useInput() receives key input.
+      if key is a view-changing key, ViewBase.app.changeView(key, this) is called, passing the key and current view up to the app, so the app can 
+
+  App::changeView(key, ViewBase)  
+    destruct the current view, removing all listeners of key events
+    use 'key' to determine which view should be created. 
+    construct new view (passing in app as reference for view changing).
+    make new view visible. 
+
+</Rebuttal>
+
+
+
 Goal: A running Ink app that shows Header, empty content area, and Footer.
 The shell constrains height to terminal rows and handles resize.
 
