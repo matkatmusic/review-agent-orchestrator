@@ -213,7 +213,8 @@ REQ-HDR-003: Line 2: Status bar showing:
 REQ-HDR-004: Line 3: Context-sensitive subtitle (dimmed):
             - Home: "All issues and orchestration state"
             - Detail (not in thread): empty or hint text
-            - Detail (in thread): "(add a response, ^R to resolve)"
+            [CHANGED] - Detail (in thread): "(add a response)"
+              ("^R to resolve" removed from subtitle)
             - NewIssue: "Create a new issue"
             - AgentStatus: "Active agent sessions"
             - BlockingMap: "Issue dependency graph"
@@ -237,15 +238,28 @@ REQ-FTR-004: Each view type defines its own shortcut set:
               [Return] Select, [n] New, [a] Activate, [d] Defer, [r] Resolve,
               [s] Agents, [b] Blocking, [g] Groups, [q] Quit
 
-            Detail - Issue mode (10+ shortcuts):
+            Detail - InputBox focused (10+ shortcuts):
               [Up/Dn] Scroll, [Shift+L/R] Prev/Next Issue, [Tab] Cycle Focus,
               [Return] Send/Open, [Ctrl+R] Resolve Issue, [Esc] Back,
-              [Alt+H] Home, [s] Agents, [b] Blocking, [g] Groups
+              [Alt+H] Home, [d] Defer (disabled), [b] Block (disabled),
+              [w] Rebase (disabled), [s] Show Agent pane (disabled)
 
-            Detail - Thread mode (7+ shortcuts):
+            [CHANGED] Detail - Response selected (context-sensitive footer):
+              [Ctrl+Shift+->] Create Thread / View Thread
+                (label is "Create" if selected response has no replies,
+                 "View" if it has replies)
+              [Alt+Q] Quote
+              Optional: [Ctrl+Alt+Q] Show quoted
+                (shown only if selected response is quoting another response)
+              Optional: [Ctrl+Alt+R] Resolve Thread
+                (shown only if selected response has replies)
+
+            [CHANGED] Detail - Thread mode (reduced shortcuts):
               [Up/Dn] Scroll, [Ctrl+Shift+L] Exit Thread,
               [Ctrl+Shift+R] Enter Sub-thread, [Tab] Cycle Focus,
-              [Return] Send, [Esc] Exit Thread
+              [Return] Send
+              (Removed: [Ctrl+R], [Esc], [Alt+H] — these keys still function
+               via useInput but are no longer shown in the thread footer.)
 
             NewIssue (2 shortcuts):
               [Return] Create, [Esc] Cancel
@@ -326,12 +340,15 @@ REQ-DTL-002: Conversation height = rows - header(3) - contextHeader - input(3)
 5.2  ISSUE CONTEXT HEADER
 --------------------------
 REQ-DTL-010: When NOT in a thread, display the Issue Header (5 lines):
-            Line 1: Title (bold)
+            [CHANGED] Line 1: LabeledSeparator with status-colored
+              "Issue - I-<#>" text (replaces plain bold title)
             Line 2: "Status: <status>  Group: <group>"
               - Group field is tabbable (inverse+bold when focused)
             Line 3: "Blocked by: I-1, I-3  Blocks: I-7"
               - Both fields are tabbable (inverse+bold when focused)
-            Line 4: Hint text (dimmed)
+            [CHANGED] Line 4: Hint text (dimmed):
+              "([Tab] cycle through selectable components, [Enter] to choose)"
+              (replaces old "(Tab to change Group, Blocked By, Blocks)" text)
             Line 5: Separator line
 
 REQ-DTL-011: Pressing Return while a header field (Group/BlockedBy/Blocks)
@@ -344,7 +361,9 @@ REQ-DTL-012: Group field opens GroupPicker overlay (inline).
 5.3  THREAD CONTEXT HEADER
 ---------------------------
 REQ-DTL-020: When IN a thread, display:
-            Line 1: ThreadHeaderSeparator ("[ Thread ]" or "[ Thread -- Resolved ]")
+            [CHANGED] Line 1: LabeledSeparator("[ Thread ]" or
+              "[ Thread -- Resolved ]") — uses new LabeledSeparator component.
+              "^R to resolve" hint text removed from this separator.
             Lines 2-N: Thread parent ResponseContainer (dimmed, not selectable)
             Final line: Replies separator ("[ Replies ]")
 
@@ -376,8 +395,13 @@ REQ-RSP-004: The viewport MUST detect chain changes (thread enter/exit) and
 REQ-RSP-005: A "[ New Replies ]" separator MUST appear before the first
             message with a timestamp after userLastViewedAt.
 
-REQ-RSP-006: Up/Down arrow keys scroll the selected message index.
-            Selection MUST NOT exceed array bounds.
+REQ-RSP-006: [CHANGED] Up/Down arrow keys scroll through a cyclical ring
+            composed of the response list and the InputBox:
+            - Down past last message: wraps to first message (index 0) and
+              moves focus to InputBox with cursor at end of any existing text.
+            - Up from first message (index 0): wraps to last message.
+            The ring is: InputBox -> Response[0] -> ... -> Response[N] -> InputBox.
+            (Replaces previous behavior where selection stopped at array bounds.)
 
 
 5.5  RESPONSE CONTAINER
@@ -402,8 +426,9 @@ REQ-RSP-013: Reply badge on top border (right-aligned):
             - "[N replies (M new)]" in red+bold if has new unread replies
             - "[N replies (resolved checkmark)]" if thread is resolved
 
-REQ-RSP-014: Bottom border action hints:
-            - No replies: "reply to this"
+REQ-RSP-014: [CHANGED] Bottom border action hints:
+            - No replies: plain bottom border, no action hint.
+              ("reply to this" removed.)
             - Has replies, not focused: "view replies (N)" or "(N new)"
             - Has replies, focused: inverse+bold "view replies" label
 
@@ -425,12 +450,28 @@ REQ-INP-002: Uses ink-text-input for text entry.
 
 REQ-INP-003: The input receives keyboard focus when no header field,
             view-replies button, or footer shortcut is focused.
+            [CHANGED] TextInput.enabled MUST track focus state:
+              TextInput.enabled = (selectedComponent === InputBox).
+              When a Response in the conversation list is selected (via
+              Up/Down), TextInput becomes disabled (no cursor, no input).
 
 REQ-INP-004: Pressing Return with non-empty text calls onSend(text) and
             clears the input.
+            [CHANGED] After sending, InputBox retains focus — the cursor
+            remains in the TextInput. Focus does NOT move to the conversation.
 
 REQ-INP-005: Pressing Return with empty text and a focused header field
             opens the corresponding overlay.
+
+REQ-INP-006: [NEW] On first load of a DetailView, InputBox MUST be the
+            focused component with cursor visible. If Ink's TextInput supports
+            a showCursor prop, enable it.
+
+REQ-INP-007: [NEW] Quoting banner: when a quote is active (see REQ-QUO-*),
+            a banner line appears between the separator and the TextInput:
+              "Responding to <first 40 chars of quoted message>"
+            The banner uses the same color as the original quoted message
+            (cyan for user, green for agent), dimmed.
 
 
 5.7  THREAD NAVIGATION
@@ -675,9 +716,12 @@ REQ-KBD-003: Key label generation:
 REQ-KBD-004: Complete key combination definitions:
             - CTRL_SHIFT_LEFT_ARROW: exit thread
             - CTRL_SHIFT_RIGHT_ARROW: enter thread
-            - CTRL_R: resolve/unresolve
+            - CTRL_R: resolve/unresolve issue
             - ALT_H: go home
             - SCROLL_UP_DOWN: scroll conversation
+            [NEW] - ALT_Q: quote selected response
+            [NEW] - CTRL_ALT_Q: show quoted message (scroll to it)
+            [NEW] - CTRL_ALT_R: resolve thread (when selected has replies)
 
 REQ-KBD-005: Key display string map for terminal-friendly labels
             (e.g., UP_ARROW -> "Up", RETURN -> "Return", etc.)
@@ -704,9 +748,11 @@ Interfaces:
           issue_revision, agent_last_read_at, user_last_viewed_at }
   Message { author, type, body, timestamp, seen }
   Response { id, content: Message, responding_to, response, replying_to, reply,
-             is_continuation, thread_resolved_at }
+             is_continuation, thread_resolved_at,
+             [NEW] quoted_response_id: number | null }
   ResponseRow { id, inum, author, type, body, created_at, responding_to_id,
-                replying_to_id, is_continuation, thread_resolved_at }
+                replying_to_id, is_continuation, thread_resolved_at,
+                [NEW] quoted_response_id: number | null }
   Container { id, name, type, parent_id, description, status, created_at, closed_at }
   Dependency { blocker_inum, blocked_inum }
   AgentSession { inum, pane_id, head_commit, created_at }
@@ -751,6 +797,96 @@ REQ-MOCK-006: saveMockStore() persists current state to disk.
 
 REQ-MOCK-007: getNextResponseId() MUST be persisted across saves to prevent
              ID collisions.
+
+
+================================================================================
+PART 12.5: NEW UTILITY COMPONENTS [NEW — Phase 1.6]
+================================================================================
+
+12.5.1 SEPARATOR COMPONENT
+----------------------------
+REQ-SEP-001: [NEW] Separator(columns, color) renders a full-width horizontal
+            rule using dash characters:
+              -----------------------------------------------
+            Props: columns (number), color (string)
+
+REQ-SEP-002: [NEW] Width MUST equal the columns prop exactly.
+
+
+12.5.2 LABELED SEPARATOR COMPONENT
+------------------------------------
+REQ-SEP-010: [NEW] LabeledSeparator(columns, color, text) renders a
+            horizontal rule with centered label:
+              ------------------- [ text ] ------------------
+            Props: columns (number), color (string), text (string)
+
+REQ-SEP-011: [NEW] The label MUST be centered. Dashes fill equally on both
+            sides. If odd remainder, the extra dash goes on the right.
+
+REQ-SEP-012: [NEW] Reuse the centeredLabel() logic currently in detail.tsx
+            (the function that computes left/right dash counts).
+
+REQ-SEP-013: [NEW] File: src/tui/separator.tsx (new file)
+            Tests: src/tui/separator.test.tsx (verify output width, centering)
+
+
+================================================================================
+PART 12.6: QUOTE FEATURE [NEW — Phase 1.6]
+================================================================================
+
+12.6.1 QUOTE DATA MODEL
+-------------------------
+REQ-QUO-001: [NEW] The Response interface MUST be extended with an optional
+            quote field:
+              quoted_response_id: number | null
+            This references the id of another Response being quoted.
+
+REQ-QUO-002: [NEW] The ResponseRow interface (DB model) MUST add:
+              quoted_response_id: number | null
+
+
+12.6.2 QUOTE INTERACTION
+--------------------------
+REQ-QUO-010: [NEW] Alt+Q: Quote the currently selected response.
+            - Focus moves to InputBox
+            - quotedResponse state is set to the selected Response
+            - Quoting banner appears above InputBox (see REQ-INP-007)
+
+REQ-QUO-011: [NEW] On send while quoting:
+            - The new response includes the quoted_response_id
+            - quotedResponse state is cleared
+            - Quoting banner disappears
+
+REQ-QUO-012: [NEW] Escape while quoting: cancel the quote (clear
+            quotedResponse state, remove banner) without leaving the view.
+
+
+12.6.3 SHOW QUOTED
+--------------------
+REQ-QUO-020: [NEW] Ctrl+Alt+Q: Show the quoted message.
+            - Only available when the selected response has a quoted_response_id
+            - Find the quoted message in the current chain
+            - Scroll the viewport to center that message
+            - Make it the selected message
+
+REQ-QUO-021: [NEW] The [Ctrl+Alt+Q] Show quoted shortcut MUST only appear
+            in the footer when the selected response is quoting another response.
+
+
+12.6.4 QUOTED RESPONSE VISUALS
+--------------------------------
+REQ-QUO-030: [NEW] When a Response contains a quote (quoted_response_id is
+            not null), the ResponseContainer renders an extra line at the top
+            of the body area (below the header border, above the main body):
+              > <first 40 chars of quoted message>
+            The quoted text uses the same color as the original message author
+            (cyan for user, green for agent), dimmed.
+
+REQ-QUO-031: [NEW] The quoted line is truncated at 40 characters with "..."
+            appended if the original message is longer.
+
+REQ-QUO-032: [NEW] The quoted line MUST be included in line count computations
+            (computeLineCount must account for it).
 
 
 ================================================================================
@@ -916,16 +1052,21 @@ Current file                      Rewrite notes
 src/tui/run.tsx                   Keep as entry point, simplify
 src/tui/app.tsx                   Rewrite as functional, useReducer for nav
 src/tui/views.ts                  Keep type definitions, possibly simplify
-src/tui/hotkeys.ts                Keep, clean up enum naming
+src/tui/hotkeys.ts                Keep, add ALT_Q/CTRL_ALT_Q/CTRL_ALT_R [CHANGED]
 src/tui/global-keys.tsx           Convert to custom hook: useGlobalKeys()
 src/tui/header.tsx                Already functional, keep memo'd
-src/tui/footer.tsx                Already functional, keep data-driven
+src/tui/footer.tsx                [CHANGED] Context-sensitive shortcuts for Detail
 src/tui/home-view.tsx             Rewrite as functional
 src/tui/detail.tsx                Rewrite as functional (biggest change)
-src/tui/issue-header.tsx          Already functional, keep
-src/tui/response-container.tsx    Keep, ensure pure/memo'd
+                                  [CHANGED] Add quote state, cyclical Up/Down,
+                                  context-sensitive footer switching
+src/tui/issue-header.tsx          [CHANGED] Use LabeledSeparator for title line,
+                                  update hint text
+src/tui/response-container.tsx    [CHANGED] Remove "reply to this", add quoted
+                                  response visual (> first 40 chars)
 src/tui/response-chain.tsx        Rewrite viewport logic as custom hook
-src/tui/input-box.tsx             Already functional, keep
+src/tui/input-box.tsx             [CHANGED] Add quoting banner, focus tracking
+src/tui/separator.tsx             [NEW] Separator + LabeledSeparator components
 src/tui/newissue.tsx              Already functional, keep
 src/tui/agent-status.tsx          Already functional, keep
 src/tui/blocking-map.tsx          Already functional, keep
@@ -964,6 +1105,10 @@ These are recommended new patterns for the rewrite:
   Returns { focusedIndex, cycleFocus, resetFocus }.
 
 - useSavedSelection(): persists selected message per inum across navigations.
+
+- [NEW] useQuote(): manages quote state for the DetailView. Returns
+  { quotedResponse, startQuote(response), clearQuote(), isQuoting }.
+  Handles Alt+Q trigger, Escape cancel, and quote inclusion on send.
 
 20.2 CONTEXTS
 -------------
