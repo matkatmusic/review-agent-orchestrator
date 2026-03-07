@@ -63,21 +63,21 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
               REQ-ARCH-001, REQ-ARCH-007, REQ-ARCH-008,
               REQ-INK-004, REQ-INK-005
 
-- [ ] Step 1.1: Header Component
+- [x] Step 1.1: Header Component
 ----------------------------
   Write tests FIRST:
-    - [ ] test: "header renders exactly 3 lines"
-    - [ ] test: "header shows centered title with view label"
-    - [ ] test: "header shows Agents count and Unread count"
-    - [ ] test: "header shows context-sensitive subtitle per view type"
-    - [ ] test: "header is memoized (React.memo)"
-    - [ ] test: "detail view label drops 'Detail' when inThread=true"
+    - [x] test: "header renders exactly 3 lines"
+    - [x] test: "header shows centered title with view label"
+    - [x] test: "header shows Agents count and Unread count"
+    - [x] test: "header shows context-sensitive subtitle per view type"
+    - [x] test: "header is memoized (React.memo)"
+    - [x] test: "detail view label drops 'Detail' when inThread=true"
 
   Then implement:
-    - [ ] Functional component, React.memo wrapped
-    - [ ] Props: currentView, columns, activeAgents, maxAgents, unreadCount, threadInfo
-    - [ ] 3 fixed lines: title, status bar, subtitle
-    - [ ] Export HEADER_LINES = 3 constant
+    - [x] Functional component, React.memo wrapped
+    - [x] Props: currentView, columns, activeAgents, maxAgents, unreadCount, threadInfo
+    - [x] 3 fixed lines: title, status bar, subtitle
+    - [x] Export HEADER_LINES = 3 constant
 
 - [ ] Step 1.2: Footer Component
 -----------------------------

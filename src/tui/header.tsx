@@ -8,6 +8,7 @@ export interface HeaderProps {
     currentView: View;
     columns: number;
     activeAgents?: number;
+    maxAgents?: number;
     unreadCount?: number;
     threadInfo?: { inThread: boolean };
 }
@@ -30,7 +31,7 @@ function getSubtitle(view: View, threadInfo?: { inThread: boolean }): string {
             return 'All issues and orchestration state';
         case ViewType.Detail:
             // if (threadInfo?.inThread) return `Thread on I-${view.inum}`;
-            if (threadInfo?.inThread) return '(add a response, ^R to resolve)';
+            if (threadInfo?.inThread) return '(add a response)';
             return '';
         case ViewType.NewIssue:
             return 'Create a new issue';
@@ -59,15 +60,18 @@ const HeaderComponent: React.FC<HeaderProps> = ({
     currentView,
     columns,
     activeAgents,
+    maxAgents,
     unreadCount,
     threadInfo,
 }) => {
-    // const title = `Review Agent Orchestrator \u00b7 ${getViewLabel(currentView, threadInfo)}`;
     const title = `Review Agent Orchestrator - ${getViewLabel(currentView, threadInfo)}`;
     const line1 = centeredRule(title, columns);
 
     const statusParts: string[] = [];
-    if (activeAgents !== undefined) statusParts.push(`Agents: ${activeAgents}`);
+    if (activeAgents !== undefined) {
+        const agentLabel = maxAgents !== undefined ? `Agents: ${activeAgents}/${maxAgents}` : `Agents: ${activeAgents}`;
+        statusParts.push(agentLabel);
+    }
     if (unreadCount !== undefined) statusParts.push(`Unread: ${unreadCount}`);
     const line2 = statusParts.length > 0 ? statusParts.join('  |  ') : ' ';
 
