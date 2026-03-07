@@ -16,7 +16,6 @@ export interface FooterProps {
     readonly viewType: ViewType;
     readonly inThread?: boolean;
     readonly threadResolved?: boolean;
-    readonly selectedHasReplies?: boolean;
     readonly focusedIndex?: number | null;
     readonly columns?: number;
 }
@@ -40,7 +39,6 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
         { key: ik(Ink_keyofKeys_Choices.RETURN), label: 'Send' },
         { key: ck(KeyCombinations.SCROLL_UP_DOWN), label: 'Scroll' },
         { key: ck(KeyCombinations.CTRL_SHIFT_RIGHT_ARROW), label: 'Thread', action: 'enterThread' },
-        { key: ck(KeyCombinations.CTRL_SHIFT_R), label: 'Resolve Thread', action: 'resolveThread' },
         { key: ck(KeyCombinations.CTRL_R), label: 'Resolve Issue' },
         { key: ik(Ink_keyofKeys_Choices.ESCAPE), label: 'Back', action: 'back' },
         { key: ck(KeyCombinations.ALT_H), label: 'Home', action: 'home' },
@@ -82,7 +80,6 @@ const THREAD_SHORTCUTS: readonly Shortcut[] = [
     { key: ck(KeyCombinations.SCROLL_UP_DOWN), label: 'Scroll' },
     { key: ck(KeyCombinations.CTRL_SHIFT_RIGHT_ARROW), label: 'Sub-thread', action: 'enterThread' },
     { key: ck(KeyCombinations.CTRL_SHIFT_LEFT_ARROW), label: 'Exit thread', action: 'exitThread' },
-    { key: ck(KeyCombinations.CTRL_SHIFT_R), label: 'Resolve Thread', action: 'resolveThread' },
     { key: ck(KeyCombinations.CTRL_R), label: 'Resolve Issue' },
     { key: ik(Ink_keyofKeys_Choices.ESCAPE), label: 'Back', action: 'back' },
     { key: ck(KeyCombinations.ALT_H), label: 'Home', action: 'home' },
@@ -139,23 +136,8 @@ function computeRows(shortcuts: readonly Shortcut[], columns: number): Shortcut[
     return rows;
 }
 
-const FooterComponent: React.FC<FooterProps> = ({ viewType, inThread, threadResolved, selectedHasReplies, focusedIndex, columns = 80 }) => {
-    let shortcuts = getFooterShortcuts(viewType, inThread);
-
-    const resolveThreadKey = ck(KeyCombinations.CTRL_SHIFT_R);
-
-    // Hide "Resolve Thread" when selected message has no replies (and not in a thread)
-    if (viewType === ViewType.Detail && !inThread && !selectedHasReplies) {
-        shortcuts = shortcuts.filter(s => s.key !== resolveThreadKey);
-    }
-
-    // Toggle thread resolve label based on thread state
-    if (viewType === ViewType.Detail && inThread && threadResolved !== undefined) {
-        const resolveLabel = threadResolved ? 'Unresolve Thread' : 'Resolve Thread';
-        shortcuts = shortcuts.map(s =>
-            s.key === resolveThreadKey ? { ...s, label: resolveLabel } : s
-        );
-    }
+const FooterComponent: React.FC<FooterProps> = ({ viewType, inThread, threadResolved, focusedIndex, columns = 80 }) => {
+    const shortcuts = getFooterShortcuts(viewType, inThread);
 
     const focusable = getFocusableShortcuts(viewType, inThread);
     const rows = computeRows(shortcuts, columns);

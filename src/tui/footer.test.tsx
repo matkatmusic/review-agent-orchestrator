@@ -160,8 +160,6 @@ describe('Footer — per-view rendering', () => {
         expect(frame).toContain('Scroll');
         expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.ESCAPE)}]`);
         expect(frame).toContain('Back');
-        expect(frame).toContain(`[${ck(KeyCombinations.CTRL_SHIFT_R)}]`);
-        expect(frame).toContain('Resolve Thread');
         expect(frame).toContain(`[${ck(KeyCombinations.CTRL_R)}]`);
         expect(frame).toContain('Resolve Issue');
         expect(frame).toContain('[d]');

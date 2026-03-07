@@ -60,7 +60,6 @@ export enum KeyCombinations {
      */
     CTRL_SHIFT_LEFT_ARROW,
     CTRL_SHIFT_RIGHT_ARROW,
-    CTRL_SHIFT_R,
     CTRL_R,
     ALT_H,
     SCROLL_UP_DOWN
@@ -72,8 +71,6 @@ export function getHotKeyLabel(keyCombo: KeyCombinations): string {
             return InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.CONTROL)! + ' ' + InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.SHIFT)! + ' ' + InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.LEFT_ARROW)!;
         case KeyCombinations.CTRL_SHIFT_RIGHT_ARROW:
             return InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.CONTROL)! + ' ' + InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.SHIFT)! + ' ' + InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.RIGHT_ARROW)!;
-        case KeyCombinations.CTRL_SHIFT_R:
-            return InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.CONTROL)! + ' ' + InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.SHIFT)! + ' ' + 'r';
         case KeyCombinations.CTRL_R:
             return InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.CONTROL)! + ' ' + 'r';
         case KeyCombinations.ALT_H:
@@ -99,10 +96,6 @@ export function matchesKeyCombination(keyCombo: KeyCombinations, input: string, 
             return matchesKey(key, Ink_keyofKeys_Choices.CONTROL)
                 && matchesKey(key, Ink_keyofKeys_Choices.SHIFT)
                 && matchesKey(key, Ink_keyofKeys_Choices.RIGHT_ARROW);
-        case KeyCombinations.CTRL_SHIFT_R:
-            return matchesKey(key, Ink_keyofKeys_Choices.CONTROL)
-                && matchesKey(key, Ink_keyofKeys_Choices.SHIFT)
-                && input === 'r';
         case KeyCombinations.CTRL_R:
             return matchesKey(key, Ink_keyofKeys_Choices.CONTROL)
                 && !matchesKey(key, Ink_keyofKeys_Choices.SHIFT)

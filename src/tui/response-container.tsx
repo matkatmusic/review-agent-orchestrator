@@ -10,6 +10,7 @@ export interface ResponseContainerProps {
     hasNewReplies: boolean;
     threadResolved?: boolean;
     isThreadParent?: boolean;
+    viewRepliesFocused?: boolean;
 }
 
 /** Count nodes in a reply chain. */
@@ -142,7 +143,7 @@ export class ResponseContainer extends React.Component<ResponseContainerProps> {
         }
 
         // └─────────── view replies (N) ─┘  or  └─────────── view replies (N new) ─┘
-        const { hasNewReplies, threadResolved } = this.props;
+        const { hasNewReplies, threadResolved, viewRepliesFocused } = this.props;
         const resolvedMark = threadResolved ? ' \u2713' : '';
         const label = hasNewReplies
             ? ` view replies (${replyCount} new${resolvedMark}) `
@@ -151,7 +152,7 @@ export class ResponseContainer extends React.Component<ResponseContainerProps> {
         return (
             <Text>
                 <Text color={borderColor} bold={selected}>{'└─'}{'─'.repeat(leftDashes)}</Text>
-                <Text color={borderColor}>{label}</Text>
+                <Text color={borderColor} inverse={viewRepliesFocused} bold={viewRepliesFocused}>{label}</Text>
                 <Text color={borderColor} bold={selected}>{'─┘'}</Text>
             </Text>
         );
@@ -197,8 +198,12 @@ export class ResponseContainer extends React.Component<ResponseContainerProps> {
                 {/* Bottom border */}
                 {this.renderBottomBorder(innerWidth, color, selected)}
 
-                {/* Separator */}
-                <Text>{' '}</Text>
+                {/* Separator / resolve hint */}
+                {this.props.viewRepliesFocused ? (
+                    <Text dimColor>{' Press Enter to ' + (this.props.threadResolved ? 'unresolve' : 'resolve')}</Text>
+                ) : (
+                    <Text>{' '}</Text>
+                )}
             </Box>
         );
     }
