@@ -31,7 +31,8 @@ Make a currently missing view load by default. Interact with it, identify missin
   - [x] broken feature: [r] resolve issue: issue not resolved when cursor is in text input. Change to Ctrl r
   - [x] Bug: pressing 'ctrl r' still puts 'r' into the text input, even though the Resolved state is changed.
   - [x] UX change: 'Resolve Thread' should only be shown when a Response with Replies is selected.
-  - [O:E2] bug: pressing Ctrl-Shift r on a message that has replies doesn't resolve the thread.
+  - [x] bug: pressing Ctrl-Shift r on a message that has replies doesn't resolve the thread.
+  >>> Remaining O:E2 items moved to Phase1.6_detail_view_update.txt <<<
   - [x] broken feature: adding a response in a thread doesn't create a new response in the thread view, and doesn't update the mock data json.
   - [x] broken feature: adding a response in an issue doesn't create a new response in the issue view, and doesn't update the mock data json.
   - [x] UX change: Thread resolution hotkey functionality: hot key toggles thread resolution state (resolved/unresolved).  Footer text updates accordingly.

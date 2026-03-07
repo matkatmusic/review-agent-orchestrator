@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text, useInput, type Key } from 'ink';
-import type { Issue, Response, Container } from '../types.js';
+import { IssueStatus, type Issue, type Response, type Container } from '../types.js';
+import { Ink_keyofKeys_Choices, KeyCombinations, matchesKey, matchesKeyCombination } from './hotkeys.js';
 import { HEADER_LINES } from './header.js';
 import { GroupPicker } from './group-picker.js';
 import { ResponseContainer } from './response-container.js';
@@ -39,8 +40,17 @@ export function findResponseById(root: Response | null, id: number): Response | 
 
 // ---- Input bridge ----
 
-function DetailInputBridge({ onKey }: { onKey: (input: string, key: Key) => void }) {
-    useInput(onKey);
+function DetailInputBridge({ onKey, blockKeys, onBlocked }: {
+    onKey: (input: string, key: Key) => void;
+    blockKeys?: (input: string, key: Key) => boolean;
+    onBlocked?: () => void;
+}) {
+    useInput((input, key) => {
+        if (blockKeys && blockKeys(input, key)) {
+            onBlocked?.();
+        }
+        onKey(input, key);
+    });
     return null;
 }
 
@@ -113,7 +123,7 @@ export interface DetailViewProps {
     onBlocksChange?: (blockedInums: number[]) => void;
     onOpenPicker?: (mode: 'blockedBy' | 'blocks') => void;
     onNavigateIssue?: (inum: number) => void;
-    onThreadStateChange: (info: { inThread: boolean }) => void;
+    onThreadStateChange: (info: { inThread: boolean; selectedHasReplies?: boolean }) => void;
     onFooterFocusChange: (index: number | null) => void;
     initialSelectedMessage?: number;
 }
@@ -124,21 +134,25 @@ export class DetailView extends React.Component<DetailViewProps> {
     inputValue: string;
     focusedField: number | null;
     focusedFooterIndex: number | null;
+    focusedViewReplies: boolean;
     overlay: OverlayType;
     blockedBySet: Set<number>;
     blocksSet: Set<number>;
     selectedMessage: number;
     threadStack: ThreadStackEntry[];
+    suppressNextInput: boolean;
 
     constructor(props: DetailViewProps) {
         super(props);
         this.inputValue = '';
         this.focusedField = null;
         this.focusedFooterIndex = null;
+        this.focusedViewReplies = false;
         this.overlay = OverlayType.None;
         this.blockedBySet = new Set(props.blockedBy);
         this.blocksSet = new Set(props.blocks);
         this.threadStack = [];
+        this.suppressNextInput = false;
 
         const messages = flattenToArray(props.rootResponse);
         const lastIndex = Math.max(0, messages.length - 1);
@@ -149,7 +163,24 @@ export class DetailView extends React.Component<DetailViewProps> {
         }
     }
 
+    componentDidMount() {
+        this.notifyThreadState();
+    }
+
     // ---- Derived values ----
+
+    selectedHasReplies(): boolean {
+        const messages = this.currentMessages();
+        const selected = messages[this.selectedMessage];
+        return !!selected?.reply;
+    }
+
+    notifyThreadState() {
+        this.props.onThreadStateChange({
+            inThread: this.threadStack.length > 0,
+            selectedHasReplies: this.selectedHasReplies(),
+        });
+    }
 
     /** Flatten the currently displayed chain (respects thread stack). */
     currentMessages(): Response[] {
@@ -207,7 +238,7 @@ export class DetailView extends React.Component<DetailViewProps> {
         this.props.onFooterFocusChange(null);
 
         // Notify App of thread state change
-        this.props.onThreadStateChange({ inThread: true });
+        this.notifyThreadState();
 
         this.forceUpdate();
     }
@@ -234,8 +265,7 @@ export class DetailView extends React.Component<DetailViewProps> {
         this.props.onFooterFocusChange(null);
 
         // Notify App of thread state change
-        const stillInThread = this.threadStack.length > 0;
-        this.props.onThreadStateChange({ inThread: stillInThread });
+        this.notifyThreadState();
 
         this.forceUpdate();
     }
@@ -264,38 +294,67 @@ export class DetailView extends React.Component<DetailViewProps> {
         this.forceUpdate();
     }
 
+    resolveIssue() {
+        const issue = this.props.issue;
+        if (issue.status === IssueStatus.Resolved) {
+            issue.status = IssueStatus.Active;
+            issue.resolved_at = null;
+        } else {
+            issue.status = IssueStatus.Resolved;
+            issue.resolved_at = new Date().toISOString();
+        }
+        this.forceUpdate();
+    }
+
+    // ---- Key blocking ----
+
+    shouldBlockKey = (input: string, key: Key): boolean => {
+        return (input === 'r' && key.ctrl);
+    };
+
     // ---- Field cycling & overlays ----
 
     cycleFocus(direction: 1 | -1) {
         const isInThread = this.threadStack.length > 0;
         const headerSlots = isInThread ? 0 : DETAIL_FIELD_COUNT;
+        const hasViewReplies = this.selectedHasReplies();
+        const viewRepliesSlots = hasViewReplies ? 1 : 0;
         const focusable = getFocusableShortcuts(ViewType.Detail, isInThread);
         const footerSlots = focusable.length;
-        const totalSlots = 1 + headerSlots + footerSlots;
+        const totalSlots = 1 + headerSlots + viewRepliesSlots + footerSlots;
 
         // Determine current position in ring
         let current: number;
-        if (this.focusedField === null && this.focusedFooterIndex === null) {
+        if (this.focusedField === null && !this.focusedViewReplies && this.focusedFooterIndex === null) {
             current = 0; // input
         } else if (this.focusedField !== null) {
             current = 1 + this.focusedField; // header field
+        } else if (this.focusedViewReplies) {
+            current = 1 + headerSlots; // view replies
         } else {
-            current = 1 + headerSlots + this.focusedFooterIndex!; // footer
+            current = 1 + headerSlots + viewRepliesSlots + this.focusedFooterIndex!; // footer
         }
 
         // Advance with wrapping
         const next = ((current + direction) % totalSlots + totalSlots) % totalSlots;
 
-        // Map back to field/footer
+        // Map back to field/viewReplies/footer
         if (next === 0) {
             this.focusedField = null;
+            this.focusedViewReplies = false;
             this.focusedFooterIndex = null;
         } else if (next <= headerSlots) {
             this.focusedField = next - 1;
+            this.focusedViewReplies = false;
+            this.focusedFooterIndex = null;
+        } else if (hasViewReplies && next === 1 + headerSlots) {
+            this.focusedField = null;
+            this.focusedViewReplies = true;
             this.focusedFooterIndex = null;
         } else {
             this.focusedField = null;
-            this.focusedFooterIndex = next - 1 - headerSlots;
+            this.focusedViewReplies = false;
+            this.focusedFooterIndex = next - 1 - headerSlots - viewRepliesSlots;
         }
 
         this.props.onFooterFocusChange(this.focusedFooterIndex);
@@ -306,7 +365,6 @@ export class DetailView extends React.Component<DetailViewProps> {
         switch (action) {
             case 'enterThread':   this.enterThread(); break;
             case 'exitThread':    this.exitThread(); break;
-            case 'resolveThread': this.resolveThread(); break;
             case 'back':          this.exitThread(); break;
             case 'home':          this.props.onHome(this.selectedMessage); break;
         }
@@ -345,31 +403,27 @@ export class DetailView extends React.Component<DetailViewProps> {
     handleKey = (_input: string, key: Key) => {
         if (this.overlay !== OverlayType.None) return;
 
-        // Alt+h: jump to home (˙ is what macOS sends for Option+h)
-        if ((key.meta && _input === 'h') || _input === '\u02D9') {
+        if (matchesKeyCombination(KeyCombinations.ALT_H, _input, key)) {
             this.props.onHome(this.selectedMessage);
             return;
         }
 
-        // Esc: exit thread if in thread, otherwise exit view
-        if (key.escape) {
+        if (matchesKey(key, Ink_keyofKeys_Choices.ESCAPE)) {
             this.exitThread();
             return;
         }
 
-        // Thread navigation: Ctrl+Shift+Right enters, Ctrl+Shift+Left exits
-        if (key.ctrl && key.shift && key.rightArrow) {
+        if (matchesKeyCombination(KeyCombinations.CTRL_SHIFT_RIGHT_ARROW, _input, key)) {
             this.enterThread();
             return;
         }
-        if (key.ctrl && key.shift && key.leftArrow) {
+        if (matchesKeyCombination(KeyCombinations.CTRL_SHIFT_LEFT_ARROW, _input, key)) {
             this.exitThread();
             return;
         }
 
-        // Ctrl+R: resolve/unresolve thread
-        if (key.ctrl && _input === 'r') {
-            this.resolveThread();
+        if (matchesKeyCombination(KeyCombinations.CTRL_R, _input, key)) {
+            this.resolveIssue();
             return;
         }
 
@@ -382,6 +436,12 @@ export class DetailView extends React.Component<DetailViewProps> {
         // Tab focus cycling
         if (key.tab) {
             this.cycleFocus(key.shift ? -1 : 1);
+            return;
+        }
+
+        // Enter on focused view replies toggles thread resolution
+        if (key.return && this.focusedViewReplies) {
+            this.resolveThread();
             return;
         }
 
@@ -405,11 +465,15 @@ export class DetailView extends React.Component<DetailViewProps> {
         if (key.upArrow) {
             if (this.selectedMessage > 0) {
                 this.selectedMessage--;
+                this.focusedViewReplies = false;
+                this.notifyThreadState();
                 this.forceUpdate();
             }
         } else if (key.downArrow) {
             if (this.selectedMessage < messages.length - 1) {
                 this.selectedMessage++;
+                this.focusedViewReplies = false;
+                this.notifyThreadState();
                 this.forceUpdate();
             }
         }
@@ -418,6 +482,10 @@ export class DetailView extends React.Component<DetailViewProps> {
     // ---- Input handling ----
 
     handleInputChange = (value: string) => {
+        if (this.suppressNextInput) {
+            this.suppressNextInput = false;
+            return;
+        }
         this.inputValue = value;
         this.forceUpdate();
     };
@@ -488,7 +556,11 @@ export class DetailView extends React.Component<DetailViewProps> {
 
         return (
             <Box flexDirection="column">
-                <DetailInputBridge onKey={this.handleKey} />
+                <DetailInputBridge
+                    onKey={this.handleKey}
+                    blockKeys={this.shouldBlockKey}
+                    onBlocked={() => { this.suppressNextInput = true; }}
+                />
 
                 {/* Header area: thread parent or issue metadata */}
                 {isInThread ? (
@@ -524,11 +596,12 @@ export class DetailView extends React.Component<DetailViewProps> {
                     height={this.conversationHeight}
                     userLastViewedAt={this.props.userLastViewedAt ?? null}
                     selectedIndex={this.selectedMessage}
+                    viewRepliesFocusedIndex={this.focusedViewReplies ? this.selectedMessage : undefined}
                 />
 
                 <InputBox
                     value={this.inputValue}
-                    focused={this.focusedField === null && this.focusedFooterIndex === null}
+                    focused={this.focusedField === null && !this.focusedViewReplies && this.focusedFooterIndex === null}
                     columns={columns}
                     onChange={this.handleInputChange}
                     onSubmit={this.handleInputSubmit}

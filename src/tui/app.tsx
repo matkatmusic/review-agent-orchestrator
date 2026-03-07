@@ -46,7 +46,7 @@ interface AppProps {
 class App extends React.Component<AppProps> {
     viewStack: View[];
     groupMode: GroupMode;
-    threadInfo: { inThread: boolean; threadResolved?: boolean };
+    threadInfo: { inThread: boolean; threadResolved?: boolean; selectedHasReplies?: boolean };
     savedSelectedMessage: Map<number, number>;
     focusedFooterIndex: number | null;
 

@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { Box, Text } from 'ink';
 import { ViewType } from './views.js';
+import { Ink_keyofKeys_Choices, InkKeyOfKeysStringMap, KeyCombinations, getHotKeyLabel } from './hotkeys.js';
 
 export const FOOTER_LINES = 1; // deprecated — use computeFooterLines()
 
@@ -19,9 +20,12 @@ export interface FooterProps {
     readonly columns?: number;
 }
 
+const ik = (k: Ink_keyofKeys_Choices) => InkKeyOfKeysStringMap.get(k)!;
+const ck = (k: KeyCombinations) => getHotKeyLabel(k);
+
 export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
     [ViewType.Home]: [
-        { key: 'Enter', label: 'View' },
+        { key: ik(Ink_keyofKeys_Choices.RETURN), label: 'View' },
         { key: 'n',     label: 'New' },
         { key: 'a',     label: 'Activate' },
         { key: 'd',     label: 'Defer' },
@@ -32,37 +36,36 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
         { key: 'q',     label: 'Quit' },
     ],
     [ViewType.Detail]: [
-        { key: 'Enter', label: 'Send' },
-        { key: '\u2191\u2193', label: 'Scroll' },
-        { key: '^⇧→', label: 'Thread', action: 'enterThread' },
-        { key: '^R', label: 'Resolve', action: 'resolveThread' },
-        { key: 'Esc',   label: 'Back', action: 'back' },
-        { key: '⌥h',   label: 'Home', action: 'home' },
+        { key: ik(Ink_keyofKeys_Choices.RETURN), label: 'Send' },
+        { key: ck(KeyCombinations.SCROLL_UP_DOWN), label: 'Scroll' },
+        { key: ck(KeyCombinations.CTRL_SHIFT_RIGHT_ARROW), label: 'Thread', action: 'enterThread' },
+        { key: ck(KeyCombinations.CTRL_R), label: 'Resolve Issue' },
+        { key: ik(Ink_keyofKeys_Choices.ESCAPE), label: 'Back', action: 'back' },
+        { key: ck(KeyCombinations.ALT_H), label: 'Home', action: 'home' },
         { key: 'd',     label: 'Defer', disabled: true },
-        { key: 'r',     label: 'Resolve issue', disabled: true },
         { key: 'b',     label: 'Block', disabled: true },
         { key: 'w',     label: 'Rebase', disabled: true },
         { key: 's',     label: 'Show pane', disabled: true },
     ],
     [ViewType.NewIssue]: [
-        { key: 'Enter', label: 'Create' },
-        { key: 'Esc',   label: 'Cancel' },
+        { key: ik(Ink_keyofKeys_Choices.RETURN), label: 'Create' },
+        { key: ik(Ink_keyofKeys_Choices.ESCAPE), label: 'Cancel' },
     ],
     [ViewType.AgentStatus]: [
-        { key: 'Enter', label: 'Focus pane' },
+        { key: ik(Ink_keyofKeys_Choices.RETURN), label: 'Focus pane' },
         { key: 'j/k',   label: 'Navigate' },
-        { key: 'Esc',   label: 'Back' },
+        { key: ik(Ink_keyofKeys_Choices.ESCAPE), label: 'Back' },
     ],
     [ViewType.BlockingMap]: [
-        { key: 'Enter', label: 'View issue' },
+        { key: ik(Ink_keyofKeys_Choices.RETURN), label: 'View issue' },
         { key: 'j/k',   label: 'Navigate' },
-        { key: 'Esc',   label: 'Back' },
+        { key: ik(Ink_keyofKeys_Choices.ESCAPE), label: 'Back' },
     ],
     [ViewType.GroupView]: [
-        { key: 'Enter', label: 'View issues' },
+        { key: ik(Ink_keyofKeys_Choices.RETURN), label: 'View issues' },
         { key: 'n',     label: 'Next issue' },
         { key: 'p',     label: 'Prev issue' },
-        { key: 'Esc',   label: 'Back' },
+        { key: ik(Ink_keyofKeys_Choices.ESCAPE), label: 'Back' },
     ],
     [ViewType.IssuePicker]: [
         { key: 'Enter', label: 'Toggle' },
@@ -73,13 +76,13 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
 };
 
 const THREAD_SHORTCUTS: readonly Shortcut[] = [
-    { key: 'Enter', label: 'Send' },
-    { key: '\u2191\u2193', label: 'Scroll' },
-    { key: '^⇧→', label: 'Sub-thread', action: 'enterThread' },
-    { key: '^⇧←', label: 'Exit thread', action: 'exitThread' },
-    { key: '^R', label: 'Resolve', action: 'resolveThread' },
-    { key: 'Esc', label: 'Back', action: 'back' },
-    { key: '⌥h', label: 'Home', action: 'home' },
+    { key: ik(Ink_keyofKeys_Choices.RETURN), label: 'Send' },
+    { key: ck(KeyCombinations.SCROLL_UP_DOWN), label: 'Scroll' },
+    { key: ck(KeyCombinations.CTRL_SHIFT_RIGHT_ARROW), label: 'Sub-thread', action: 'enterThread' },
+    { key: ck(KeyCombinations.CTRL_SHIFT_LEFT_ARROW), label: 'Exit thread', action: 'exitThread' },
+    { key: ck(KeyCombinations.CTRL_R), label: 'Resolve Issue' },
+    { key: ik(Ink_keyofKeys_Choices.ESCAPE), label: 'Back', action: 'back' },
+    { key: ck(KeyCombinations.ALT_H), label: 'Home', action: 'home' },
 ];
 
 /** Get the full shortcut list for the given view/thread state. */
@@ -134,15 +137,7 @@ function computeRows(shortcuts: readonly Shortcut[], columns: number): Shortcut[
 }
 
 const FooterComponent: React.FC<FooterProps> = ({ viewType, inThread, threadResolved, focusedIndex, columns = 80 }) => {
-    let shortcuts = getFooterShortcuts(viewType, inThread);
-
-    // Toggle resolve label based on thread state
-    if (viewType === ViewType.Detail && inThread && threadResolved !== undefined) {
-        const resolveLabel = threadResolved ? 'Unresolve' : 'Resolve';
-        shortcuts = shortcuts.map(s =>
-            s.key === '^R' ? { ...s, label: resolveLabel } : s
-        );
-    }
+    const shortcuts = getFooterShortcuts(viewType, inThread);
 
     const focusable = getFocusableShortcuts(viewType, inThread);
     const rows = computeRows(shortcuts, columns);

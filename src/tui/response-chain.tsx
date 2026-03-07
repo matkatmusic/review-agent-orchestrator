@@ -56,6 +56,7 @@ export interface ResponseChainProps {
     height: number;
     userLastViewedAt: string | null;
     selectedIndex: number;
+    viewRepliesFocusedIndex?: number;
 }
 
 /**
@@ -207,7 +208,7 @@ export class ResponseChain extends React.Component<ResponseChainProps> {
     private lastRootResponse: Response | null | undefined;
 
     render() {
-        const { rootResponse, columns, height, userLastViewedAt, selectedIndex } = this.props;
+        const { rootResponse, columns, height, userLastViewedAt, selectedIndex, viewRepliesFocusedIndex } = this.props;
 
         // Reset viewport anchor when the displayed chain changes (thread enter/exit, issue nav)
         if (rootResponse !== this.lastRootResponse) {
@@ -250,6 +251,7 @@ export class ResponseChain extends React.Component<ResponseChainProps> {
                                 selected={globalIndex === selectedIndex}
                                 hasNewReplies={hasNewReplies}
                                 threadResolved={!!response.thread_resolved_at}
+                                viewRepliesFocused={globalIndex === viewRepliesFocusedIndex}
                             />
                         </React.Fragment>
                     );

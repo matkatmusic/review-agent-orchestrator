@@ -10,6 +10,10 @@ import {
     computeFooterLines,
 } from './footer.js';
 import { ViewType } from './views.js';
+import { Ink_keyofKeys_Choices, InkKeyOfKeysStringMap, KeyCombinations, getHotKeyLabel } from './hotkeys.js';
+
+const ik = (k: Ink_keyofKeys_Choices) => InkKeyOfKeysStringMap.get(k)!;
+const ck = (k: KeyCombinations) => getHotKeyLabel(k);
 
 // ---- Shortcut data ----
 
@@ -132,7 +136,7 @@ describe('Footer — per-view rendering', () => {
     it('Dashboard renders all 9 shortcuts (wraps on narrow terminals)', () => {
         const { lastFrame } = render(<Footer viewType={ViewType.Home} />);
         const frame = lastFrame()!;
-        expect(frame).toContain('[Enter]');
+        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.RETURN)}]`);
         expect(frame).toContain('View');
         expect(frame).toContain('[n]');
         expect(frame).toContain('New');
@@ -151,15 +155,15 @@ describe('Footer — per-view rendering', () => {
     it('Detail shows all shortcuts with disabled indicators', () => {
         const { lastFrame } = render(<Footer viewType={ViewType.Detail} />);
         const frame = lastFrame()!;
-        expect(frame).toContain('[Enter]');
+        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.RETURN)}]`);
         expect(frame).toContain('Send');
         expect(frame).toContain('Scroll');
-        expect(frame).toContain('[Esc]');
+        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.ESCAPE)}]`);
         expect(frame).toContain('Back');
+        expect(frame).toContain(`[${ck(KeyCombinations.CTRL_R)}]`);
+        expect(frame).toContain('Resolve Issue');
         expect(frame).toContain('[d]');
         expect(frame).toContain('Defer');
-        expect(frame).toContain('[r]');
-        expect(frame).toContain('Resolve');
         expect(frame).toContain('[b]');
         expect(frame).toContain('Block');
         expect(frame).toContain('[w]');
@@ -171,9 +175,9 @@ describe('Footer — per-view rendering', () => {
     it('NewIssue shows 2 shortcuts', () => {
         const { lastFrame } = render(<Footer viewType={ViewType.NewIssue} />);
         const frame = lastFrame()!;
-        expect(frame).toContain('[Enter]');
+        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.RETURN)}]`);
         expect(frame).toContain('Create');
-        expect(frame).toContain('[Esc]');
+        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.ESCAPE)}]`);
         expect(frame).toContain('Cancel');
     });
 
@@ -189,35 +193,35 @@ describe('Footer — per-view rendering', () => {
     it('AgentStatus shows 3 shortcuts', () => {
         const { lastFrame } = render(<Footer viewType={ViewType.AgentStatus} />);
         const frame = lastFrame()!;
-        expect(frame).toContain('[Enter]');
+        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.RETURN)}]`);
         expect(frame).toContain('Focus pane');
         expect(frame).toContain('[j/k]');
         expect(frame).toContain('Navigate');
-        expect(frame).toContain('[Esc]');
+        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.ESCAPE)}]`);
         expect(frame).toContain('Back');
     });
 
     it('BlockingMap shows 3 shortcuts', () => {
         const { lastFrame } = render(<Footer viewType={ViewType.BlockingMap} />);
         const frame = lastFrame()!;
-        expect(frame).toContain('[Enter]');
+        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.RETURN)}]`);
         expect(frame).toContain('View issue');
         expect(frame).toContain('[j/k]');
         expect(frame).toContain('Navigate');
-        expect(frame).toContain('[Esc]');
+        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.ESCAPE)}]`);
         expect(frame).toContain('Back');
     });
 
     it('GroupView shows 4 shortcuts', () => {
         const { lastFrame } = render(<Footer viewType={ViewType.GroupView} />);
         const frame = lastFrame()!;
-        expect(frame).toContain('[Enter]');
+        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.RETURN)}]`);
         expect(frame).toContain('View issues');
         expect(frame).toContain('[n]');
         expect(frame).toContain('Next issue');
         expect(frame).toContain('[p]');
         expect(frame).toContain('Prev issue');
-        expect(frame).toContain('[Esc]');
+        expect(frame).toContain(`[${ik(Ink_keyofKeys_Choices.ESCAPE)}]`);
         expect(frame).toContain('Back');
     });
 });

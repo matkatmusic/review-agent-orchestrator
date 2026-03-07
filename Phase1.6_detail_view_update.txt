@@ -1,0 +1,283 @@
+Phase 1.6: DetailView Update — O:E2 Implementation Plan
+========================================================
+
+Source: Phase1.5_mock_backend_step1.txt (moved here from lines 34-73)
+Agent: O:E2
+Prerequisite: line 34 (Ctrl-Shift-R resolve bug) — DONE, replaced with tabbable view-replies
+
+
+Original Task Descriptions (from Phase1.5)
+-------------------------------------------
+
+  - [x] bug: pressing Ctrl-Shift r on a message that has replies doesn't resolve the thread.
+  - [ ] ThreadView UX change: remove '^R to resolve' from header.
+  - [ ] ThreadView UX change: remove [Ctl r], [Esc], [Alt h] hot keys from footer
+  - [ ] ThreadView UX change: footer components aren't tabbable.  (consider making Footer components' ability to gain focus using the Tab key an optional param when constructed)
+  - [ ] New class: Separator(color):
+    visuals: -----------------------------------------------
+  - [ ] New class: LabeledSeparator(color, text)
+    visuals: ------------------- [ <text> ] ----------------
+
+  - [ ] New DetailView functionality:
+    - [ ] LabeledSeparator at top: text = "Issue - I-<#>", color = same colors used for statuses on 'Blocked By' view
+    - [ ] (Tab to change Group...) change to: ([Tab] cycle through selectable components, [Enter] to choose)
+    - [ ] changes to Tab key functionality: tab key cycles between Group/BlockedBy/Blocks/TextInput/any footer tabbable buttons.
+    - [ ] changes to Up/Down keys:
+      - [ ] up/down buttons cycle through: TextInput + Response list, as a cyclical list.
+          example: scrolling to top of Response List and then pressing 'up' one more time scrolls to end of list and moves cursor to TextInput, at end of any text in the TextInput.
+          example: scrolling to end of text in TextInput, and then pressing 'down' one more time scrolls to the top of the Response list.
+    - [ ] changes to selected component functionality
+      - [ ] when Selected Component changes, TextInput.enabled = (selectedComponent == textInput);
+    - [ ] changes to first loading: when an issue is first displayed, TextInput becomes focused component with cursor shown (can we make cursor blink?)
+    - [ ] changes to sending responses:
+      - [ ] TextInput remains the focused component, cursor remains in TextInput.
+
+  - [ ] New ResponseContainer functionality:
+    when selected:
+      - [ ] 'reply to this' no longer exists.
+      - [ ] Footer changes to:
+            [Ctl Shft ->] Create/View Thread [Alt Q] Quote
+            Optional: [Ctl Alt q] Show quoted (shown only if selected response is quoting another response)
+            Optional: [Ctl Alt r] Resolve Thread (shown only if selectedResponse.replies.size() > 0)
+      - [ ] Footer HotKey Actions when triggered:
+        - [ ] Create/View Thread: existing thread functionality.  Show 'Create' if Response.replies == 0, else show 'View'
+        - [ ] Quote: TextInput becomes enabled, cursor moves to TextInput, "Responding to <first 40 chars of quoted message>" is shown above TextInput, below horizontal separator.
+        - [ ] Show quoted: Quoted message becomes centered Response in viewport.
+        - [x] Resolve Thread: Thread is marked as resolved. (done — tabbable view-replies)
+    - [ ] changes to visuals if Response contains a Quote
+      |- Response Top Row -|
+      | > <first 40 chars of quoted message> in same color as original message, dimmed. |
+      | <the response> |
+      |------------------------------------- # replies () -----|
+
+
+Inventory
+---------
+
+  DONE: line 34 — Ctrl-Shift-R resolve bug (replaced with tabbable view-replies)
+
+  REMAINING:
+  A. Thread View footer/header cleanup (lines 35-37)
+  B. New utility classes (lines 38-41)
+  C. DetailView functionality changes (lines 43-55)
+  D. ResponseContainer functionality changes (lines 57-73)
+
+
+Phase 1: Thread View cleanup (lines 35-37)
+-------------------------------------------
+
+Scope: 3 small, isolated changes. No new components needed.
+
+1a. [ ] Remove "^R to resolve" from ThreadHeaderSeparator (line 35)
+    File: src/tui/detail.tsx (ThreadHeaderSeparator function, ~line 85)
+    Also check src/tui/header.tsx for any "^R" hint in the breadcrumb.
+    Action: grep for "^R" or "resolve" in the thread header area and remove.
+
+1b. [ ] Remove [Ctl r], [Esc], [Alt h] from thread footer (line 36)
+    File: src/tui/footer.tsx (THREAD_SHORTCUTS array, ~line 78)
+    Action: remove the Ctrl+R (Resolve Issue), Esc (Back), and Alt+H (Home)
+    entries from THREAD_SHORTCUTS. These keys still work via DetailInputBridge;
+    they just won't appear in the footer.
+    Test update: src/tui/footer.test.tsx — update thread rendering assertions.
+
+1c. [ ] Make thread footer tabbable (line 37)
+    File: src/tui/footer.tsx, src/tui/detail.tsx
+    THREAD_SHORTCUTS already have `action` fields from the tabbable rewrite.
+    Verify cycleFocus works when isInThread=true (headerSlots=0). May already
+    work — needs manual verification in tmux.
+
+Dependencies: none
+Risk: low — removal only, existing tests cover footer rendering
+Effort: small
+
+
+Phase 2: Separator utility classes (lines 38-41)
+-------------------------------------------------
+
+2a. [ ] New component: Separator(color)
+    Renders: -----------------------------------------------
+    Props: columns, color
+
+2b. [ ] New component: LabeledSeparator(color, text)
+    Renders: ------------------- [ text ] ------------------
+    Props: columns, color, text
+
+centeredLabel() already exists in detail.tsx (~line 73). Extract and reuse it.
+
+File: new src/tui/separator.tsx
+Tests: new src/tui/separator.test.tsx (verify output width, label centering)
+
+Dependencies: none
+Risk: none
+Effort: small
+
+
+Phase 3: DetailView layout + hint changes (lines 44-45)
+--------------------------------------------------------
+
+3a. [ ] LabeledSeparator at top of DetailView (line 44)
+    File: src/tui/issue-header.tsx
+    Action: replace the plain "I-<#>: <title>" line with:
+      LabeledSeparator(statusColor, "Issue - I-<#>")
+    Use same status colors as the Blocked By picker view.
+
+3b. [ ] Change tab hint text (line 45)
+    File: src/tui/issue-header.tsx (line 42)
+    Action: change "(Tab to change Group, Blocked By, Blocks)" to
+      "([Tab] cycle through selectable components, [Enter] to choose)"
+
+Dependencies: Phase 2 (LabeledSeparator class)
+Risk: low
+Effort: small
+
+
+Phase 4: DetailView behavior changes (lines 46-55)
+---------------------------------------------------
+
+4a. [ ] Tab cycling completeness check (line 46)
+    File: src/tui/detail.tsx (cycleFocus method)
+    The ring should include:
+      InputBox -> Group -> BlockedBy -> Blocks -> ViewReplies(conditional) -> Footer shortcuts
+    Already implemented via cycleFocus(). Verify manually — likely done.
+
+4b. [ ] Up/Down cyclical wrapping (lines 47-50)
+    File: src/tui/detail.tsx (handleKey, ~lines 463-479)
+    Current: up stops at index 0, down stops at last message.
+    Change: down past last message -> wrap to index 0, focus InputBox.
+      Up from index 0 -> wrap to last message.
+    Decision needed: does InputBox occupy a slot in the up/down ring, or
+    does it just receive focus when wrapping past the boundary?
+
+4c. [ ] TextInput.enabled tracking (lines 51-52)
+    File: src/tui/detail.tsx (render method, ~line 604)
+    InputBox `focused` prop already tracks this:
+      focused = (focusedField===null && !focusedViewReplies && focusedFooterIndex===null)
+    InputBox is focused by default (position 0 in tab ring). May already
+    satisfy the requirement — verify behavior.
+
+4d. [ ] First-loading focus (line 53)
+    File: src/tui/detail.tsx (constructor)
+    TextInput should be focused on first render with cursor shown.
+    Currently: focusedField=null, focusedFooterIndex=null,
+    focusedViewReplies=false -> InputBox IS focused by default.
+    Blinking cursor: check if Ink's TextInput supports `showCursor` prop.
+
+4e. [ ] Send keeps TextInput focused (lines 54-55)
+    File: src/tui/detail.tsx (handleInputSubmit, ~line 493)
+    handleInputSubmit clears inputValue but doesn't change focus state.
+    Since focusedField/focusedFooterIndex stay null, InputBox remains
+    focused. Likely already works — verify.
+
+Dependencies: Phase 3 (for coherent UX)
+Risk: medium — up/down wrapping (4b) touches scrolling logic
+Effort: medium (4b is the main work; 4a/4c/4d/4e are likely verify-only)
+
+
+Phase 5a: Remove "reply to this" (line 59)
+-------------------------------------------
+
+[ ] Remove "reply to this" bottom border variant
+    File: src/tui/response-container.tsx (~line 135-136)
+    Action: remove the "reply to this" rendering path. Replace with the
+    standard bottom border (dashes only, no label).
+    Test update: src/tui/detail.test.tsx line 905 — remove assertion for
+    "reply to this".
+
+Dependencies: none (can be done any time)
+Risk: low
+Effort: small
+
+
+Phase 5b: Context-sensitive footer shortcuts (lines 60-63)
+-----------------------------------------------------------
+
+[ ] When a Response is selected (not InputBox), footer shows:
+      [Ctl Shft ->] Create/View Thread  [Alt Q] Quote
+      Optional: [Ctl Alt q] Show quoted (if response is quoting another)
+      Optional: [Ctl Alt r] Resolve Thread (if response has replies)
+
+    "Create" vs "View" label depends on whether response has replies.
+
+    Architecture decision: should DetailView swap VIEW_SHORTCUTS based on
+    focus state, or should footer accept a shortcuts override prop?
+
+    Files: src/tui/footer.tsx, src/tui/detail.tsx, src/tui/app.tsx
+    New hotkeys: Alt+Q, Ctrl+Alt+Q — add to src/tui/hotkeys.ts
+
+Dependencies: Phase 4 (focus management must be solid first)
+Risk: high — context-sensitive footer is an architectural change
+Effort: large
+
+
+Phase 5c: Hotkey actions (lines 64-68)
+---------------------------------------
+
+[ ] Create/View Thread (line 65)
+    Already exists: Ctrl+Shift+Right. Label logic ("Create" vs "View")
+    handled in Phase 5b.
+
+[ ] Quote (line 66)
+    New feature. Needs:
+    - New field on DetailView: quotedResponse (Response | null)
+    - When Alt+Q pressed: focus moves to InputBox, quotedResponse set
+    - New "quoting banner" component between separator and InputBox:
+      "Responding to <first 40 chars of quoted message>"
+    - On send: include quote reference in new response
+
+[ ] Show quoted (line 67)
+    New feature. When Ctrl+Alt+Q pressed:
+    - Find the quoted message in the current chain
+    - Scroll viewport to center that message
+    - Make it the selected message
+
+[ ] Resolve Thread (line 68)
+    Done — tabbable view-replies from previous commit handles this.
+
+Dependencies: Phase 5b (hotkeys must be wired first)
+Risk: medium — Quote introduces new data flow
+Effort: medium
+
+
+Phase 6: Quoted response visuals (lines 69-73)
+-----------------------------------------------
+
+[ ] When a Response contains a quote, render:
+    |- Response Top Row -|
+    | > <first 40 chars of quoted message> in dimmed original color |
+    | <the response>                                                |
+    |-------------------------------------- # replies () -----------|
+
+    Requires: `quoted_response_id` or similar field on the Response type
+    File: src/tui/response-container.tsx (render method)
+    File: src/types.ts (Response interface — add quote field)
+
+Dependencies: Phase 5c (quote functionality must exist first)
+Risk: medium — touches Response type definition and rendering
+Effort: medium
+
+
+Execution Order
+===============
+
+  Phase 1 -> Phase 2 -> Phase 3 -> Phase 5a -> Phase 4 -> Phase 5b -> Phase 5c -> Phase 6
+
+  Phase 1:  Thread cleanup          (small,  no deps)
+  Phase 2:  Separator classes       (small,  no deps, can parallel with Phase 1)
+  Phase 3:  Layout + hint changes   (small,  depends on Phase 2)
+  Phase 5a: Remove "reply to this"  (small,  no deps, quick win)
+  Phase 4:  Behavior changes        (medium, depends on Phase 3)
+  Phase 5b: Context-sensitive footer (large,  depends on Phase 4)
+  Phase 5c: Hotkey actions + Quote  (medium, depends on Phase 5b)
+  Phase 6:  Quoted visuals          (medium, depends on Phase 5c)
+
+Rationale:
+- Phase 5a is a quick deletion with no dependencies — do it early to clean
+  up the codebase before adding new features.
+- Phase 4b (up/down wrapping) should be done before Phase 5b because the
+  context-sensitive footer depends on knowing whether InputBox or a Response
+  is selected.
+- Phase 6 (quoted visuals) must come last since it requires Quote to exist.
+
+Estimated scope: Phases 1-3 + 5a are small (one session). Phase 4b is medium.
+Phases 5b/5c and 6 are the bulk of the remaining work and likely need their
+own sessions.
