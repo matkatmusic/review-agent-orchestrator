@@ -13,10 +13,10 @@ PHASE 0: SCAFFOLDING & TEST INFRASTRUCTURE
 Goal: Clean slate for the rewrite. Existing src/tui/ is preserved on a branch
 for reference. New files are created alongside or replace them.
 
-- [ ] Step 0.1: Preserve Current Code
+- [x] Step 0.1: Preserve Current Code
 ---------------------------------
-  - [ ] Create branch: tui-rewrite
-  - [ ] Tag current HEAD for reference: pre-rewrite
+  - [x] Create branch: tui-rewrite
+  - [x] Tag current HEAD for reference: pre-rewrite
 
 - [ ] Step 0.2: Test Harness Setup
 ------------------------------
