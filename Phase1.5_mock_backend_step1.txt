@@ -31,40 +31,46 @@ Make a currently missing view load by default. Interact with it, identify missin
   - [x] broken feature: [r] resolve issue: issue not resolved when cursor is in text input. Change to Ctrl r
   - [x] Bug: pressing 'ctrl r' still puts 'r' into the text input, even though the Resolved state is changed.
   - [x] UX change: 'Resolve Thread' should only be shown when a Response with Replies is selected.
-  - [O:E2] bug: pressing Ctrl-Shift r on a message that has replies doesn't resolve the thread.
+  - [x] bug: pressing Ctrl-Shift r on a message that has replies doesn't resolve the thread.
   - [O:E2] ThreadView UX change: remove '^R to resolve' from header.
   - [O:E2] ThreadView UX change: remove [Ctl r], [Esc], [Alt h] hot keys from footer
   - [O:E2] ThreadView UX change: footer components aren't tabbable.  (consider making Footer components' ability to gain focus using the Tab key an optional param when constructed)
+  - [O:E2] New class: Separator(color):
+    visuals: -----------------------------------------------
+  - [O:E2] New class: LabeledSeparator(color, text)
+    visuals: ------------------- [ <text> ] ----------------
 
-New DetailView functionality:
-  - [O:E2] changes to Tab key: tab key cycles between Group/BlockedBy/Blocks/TextInput/any footer tabbable buttons. 
-  - [O:E2] changes to Up/Down keys:
-    - [O:E2] up/down buttons cycle through: TextInput + Response list, as a cyclical list.   
-        example: scrolling to top of Response List and then pressing 'up' one more time scrolls to end of list and moves cursor to TextInput, at end of any text in the TextInput. 
-        example: scrolling to end of text in TextInput, and then pressing 'down' one more time scrolls to the top of the Response list. 
-  - [O:E2] changes to selected component functionality
-    - [O:E2] when Selected Component changes, TextInput.enabled = (selectedComponent == textInput);
-  - [O:E2] changes to first loading: when an issue is first displayed, TextInput becomes focused component with cursor shown (can we make cursor blink?)
-  - [O:E2] changes to sending responses: 
-    - [O:E2] TextInput remains the focused component, cursor remains in TextInput. 
+  - [O:E2] New DetailView functionality:
+    - [O:E2] LabeledSeparator at top: text = "Issue - I-<#>", color = same colors used for statuses on 'Blocked By' view
+    - [O:E2] (Tab to change Group...) change to: ([Tab] cycle through selectable components, [Enter] to choose)
+    - [O:E2] changes to Tab key functionality: tab key cycles between Group/BlockedBy/Blocks/TextInput/any footer tabbable buttons. 
+    - [O:E2] changes to Up/Down keys:
+      - [O:E2] up/down buttons cycle through: TextInput + Response list, as a cyclical list.   
+          example: scrolling to top of Response List and then pressing 'up' one more time scrolls to end of list and moves cursor to TextInput, at end of any text in the TextInput. 
+          example: scrolling to end of text in TextInput, and then pressing 'down' one more time scrolls to the top of the Response list. 
+    - [O:E2] changes to selected component functionality
+      - [O:E2] when Selected Component changes, TextInput.enabled = (selectedComponent == textInput);
+    - [O:E2] changes to first loading: when an issue is first displayed, TextInput becomes focused component with cursor shown (can we make cursor blink?)
+    - [O:E2] changes to sending responses: 
+      - [O:E2] TextInput remains the focused component, cursor remains in TextInput. 
 
-New ResponseContainer functionality:
-  when selected:
-    - [O:E2] 'reply to this' no longer exists. 
-    - [O:E2] Footer changes to: 
-          [Ctl Shft ->] Create/View Thread [Alt Q] Quote 
-          Optional: [Ctl Alt q] Show quoted (shown only if selected response is quoting another response)
-          Optional: [Ctl Alt r] Resolve Thread (shown only if selectedResponse.replies.size() > 0)
-    - [O:E2] Footer HotKey Actions when triggered:
-      - [O:E2] Create/View Thread: existing thread functionality.  Show 'Create' if Response.replies == 0, else show 'View'
-      - [O:E2] Quote: TextInput becomes enabled, cursor moves to TextInput, "Responding to <first 40 chars of quoted message>" is shown above TextInput, below horizontal separator. 
-      - [O:E2] Show quoted: Quoted message becomes centered Response in viewport.
-      - [O:E2] Resolve Thread: Thread is marked as resolved. 
-  - [O:E2] changes to visuals if Response contains a Quote
-    |- Response Top Row -|
-    | > <first 40 chars of quoted message> in same color as original message, dimmed. |
-    | <the response> |
-    |------------------------------------- # replies () -----|
+  - [O:E2] New ResponseContainer functionality:
+    when selected:
+      - [O:E2] 'reply to this' no longer exists. 
+      - [O:E2] Footer changes to: 
+            [Ctl Shft ->] Create/View Thread [Alt Q] Quote 
+            Optional: [Ctl Alt q] Show quoted (shown only if selected response is quoting another response)
+            Optional: [Ctl Alt r] Resolve Thread (shown only if selectedResponse.replies.size() > 0)
+      - [O:E2] Footer HotKey Actions when triggered:
+        - [O:E2] Create/View Thread: existing thread functionality.  Show 'Create' if Response.replies == 0, else show 'View'
+        - [O:E2] Quote: TextInput becomes enabled, cursor moves to TextInput, "Responding to <first 40 chars of quoted message>" is shown above TextInput, below horizontal separator. 
+        - [O:E2] Show quoted: Quoted message becomes centered Response in viewport.
+        - [O:E2] Resolve Thread: Thread is marked as resolved. 
+    - [O:E2] changes to visuals if Response contains a Quote
+      |- Response Top Row -|
+      | > <first 40 chars of quoted message> in same color as original message, dimmed. |
+      | <the response> |
+      |------------------------------------- # replies () -----|
 
   - [x] broken feature: adding a response in a thread doesn't create a new response in the thread view, and doesn't update the mock data json.
   - [x] broken feature: adding a response in an issue doesn't create a new response in the issue view, and doesn't update the mock data json.
