@@ -1,0 +1,58 @@
+No skill applies here (`skill-creator`/`skill-installer` are unrelated), so this is a direct design recommendation.
+
+1. Indicator design: choose **yellow star/asterisk** (`*` or your existing Home symbol).
+- Why: semantic consistency with Home, 1-char footprint, easy to scan in dense terminal rows.
+- Avoid: `[new]` is too wide; full title color changes are less explicit and can conflict with status coloring; red dot can imply error/severity instead of unread.
+
+2. Placement: put it **after the issue number in a fixed badge column**.
+- Row shape: `> [x] I-3  * rate_limiting_design...  Awaiting`
+- Why: preserves cursor + checkbox muscle memory, keeps unread marker tied to issue identity, avoids clipping at row end, and keeps status column clean.
+- Implementation detail: always reserve that column (`' '` when no unread) so rows don’t jitter.
+
+3. Data flow: pass **`unreadInums: Set<number>`** into `IssueListPicker`.
+- Why: already exists, O(1) lookup, minimal prop surface, no duplication.
+- Avoid: mutating/expanding `Issue` with UI-derived booleans; `Map<number, boolean>` is redundant vs `Set`.
+
+4. Props interface: keep it **simple now** (`unreadInums?: ReadonlySet<number>`).
+- Why: YAGNI; generic badge systems add complexity before a second badge use-case exists.
+- Future path: if you later add multiple badge types, evolve to `badgesByInum` then.
+
+Implementation sketch:
+
+```tsx
+// detail.tsx (overlay caller)
+<IssueListPicker
+  issues={candidateIssues}
+  unreadInums={unreadInums} // existing set from current unread tracking
+  ...otherProps
+/>
+
+// IssueListPicker.tsx
+type Props = {
+  issues: Issue[];
+  unreadInums?: ReadonlySet<number>;
+  // existing props...
+};
+
+const STAR = "*"; // or the exact symbol Home uses
+
+function renderRow(issue: Issue, selected: boolean, checked: boolean) {
+  const hasUnread = unreadInums?.has(issue.inum) ?? false;
+  const badge = hasUnread ? STAR : " ";
+  const title = truncate(issue.title, 28); // reduced from 30 to make room for badge col
+
+  return (
+    <Text>
+      {selected ? ">" : " "} [{"x" : " "}] {formatInum(issue.inum)}
+      {" "}
+      <Text color={hasUnread ? "yellow" : undefined}>{badge}</Text>
+      {" "}
+      {padRight(title, 28)}
+      {" "}
+      {renderStatus(issue.status)}
+    </Text>
+  );
+}
+```
+
+This gives a clear unread signal without changing existing selection/checkbox behavior.

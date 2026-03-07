@@ -1,0 +1,52 @@
+Debate Topic: How to add a "has new replies" visual indicator to the Blocked By picker in a terminal TUI
+
+Context:
+This is an Ink (React for terminals) TUI app. The "Blocked By" picker is a modal overlay (IssueListPicker component) that lets the user toggle which issues block the current one. Currently each row shows: cursor, checkbox, issue number, title (truncated to 30 chars), and status label.
+
+The task: When an issue in the picker has unread/new replies, show a visual indicator so the user knows at a glance which blocking issues need attention.
+
+Existing infrastructure:
+- Issue type has user_last_viewed_at: string | null
+- Response chain nodes have content.seen: string | null and content.timestamp: string
+- checkNewReplies(response, userLastViewedAt) walks reply chain and returns true if any reply is unseen AND newer than userLastViewedAt
+- Home view already uses unreadInums: Set<number> with a yellow star character to mark issues
+- IssueListPicker receives issues: Issue[] but NOT response data or unread sets
+- The picker is instantiated in detail.tsx overlay section, which has access to allIssues and could pass additional props
+
+Current IssueListPicker row rendering (each row ~50 chars before status):
+  " > [x] I-3    rate_limiting_design              Awaiting"
+  "   [ ] I-6    stale_session_cleanup             Blocked"
+
+Constraints:
+- Ink terminal rendering — limited to ASCII/Unicode characters and ANSI colors
+- Row width is constrained by terminal columns
+- Must not break existing checkbox/selection UX
+- Should reuse existing unread tracking (unreadInums Set or similar) rather than scanning response chains in the picker
+
+Debate these design questions:
+
+1. INDICATOR DESIGN: What visual indicator should represent "has new replies"? Options include:
+   a) Yellow star/asterisk (consistent with Home view's existing yellow star badge)
+   b) Red dot or bullet
+   c) Color change on the issue title or number
+   d) Badge text like "[new]" appended
+   Argue for the best approach considering consistency, space constraints, and terminal rendering.
+
+2. PLACEMENT: Where in the row should the indicator go?
+   a) Before the checkbox: "  * [x] I-3 ..."
+   b) After the issue number: "  [x] I-3 * rate_limiting..."
+   c) After the title: "  [x] I-3  rate_limiting...  * Awaiting"
+   d) After the status: "  [x] I-3  rate_limiting...  Awaiting *"
+
+3. DATA FLOW: How should unread state reach the picker?
+   a) Pass unreadInums: Set<number> as a new prop to IssueListPicker
+   b) Extend the Issue type to include a computed hasNewReplies boolean
+   c) Pass a Map<number, boolean> mapping inum to unread status
+   Which is cleanest architecturally?
+
+4. PROPS INTERFACE: Should IssueListPicker know about "unread" generically, or should it accept a more general "badge" system?
+   a) Simple: just add optional unreadInums?: Set<number> prop
+   b) Generic: accept optional badges?: Map<number, {symbol: string, color: string}> for future extensibility
+   Which approach balances simplicity with future needs?
+
+For each question, argue your position with specific reasoning about UX, code architecture, and terminal rendering constraints. Provide a concrete implementation sketch.

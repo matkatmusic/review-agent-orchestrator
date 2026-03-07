@@ -1,0 +1,147 @@
+# TUI Rewrite Requirements Document (Gemini)
+
+This document defines the complete, definitive requirements for rewriting the React/Ink-based terminal user interface for the review agent orchestrator application.
+
+## 1. COMPONENT ARCHITECTURE REQUIREMENTS
+
+The rewrite must fundamentally shift from a legacy, class-based architecture with mutable state to a modern, functional architecture leveraging React hooks and immutable state.
+
+### Structural Refactoring
+*   **Complete Functional Conversion:** All 9 existing class components (`app.tsx`, `home-view.tsx`, `detail.tsx`, `response-container.tsx`, `response-chain.tsx`, `issue-header.tsx`, `input-box.tsx`, `group-picker.tsx`, `issue-list-picker.tsx`) MUST be rewritten as functional components.
+*   **Eliminate Input Bridges:** The "Input Bridge" anti-pattern (e.g., `HomeViewInputBridge`) MUST be completely removed. Functional components will handle keyboard events directly using Ink's `useInput` hook.
+*   **Eliminate `forceUpdate`:** All instances of `forceUpdate` MUST be replaced with standard React state updates (`useState`, `useReducer`) that trigger declarative re-renders.
+
+### State Management & Context
+*   **Global App State:** Implement a React Context Provider (`AppProvider` or similar) at the root level to manage global state (e.g., `groupMode`, `threadInfo`).
+*   **Immutable Data Store:** The mutable `mock-store.ts` MUST be replaced with an immutable state management approach (e.g., a `DataContextProvider` using `useReducer` or a lightweight store hook). Functions like `resolveIssue` must return new state objects rather than mutating existing data in memory.
+*   **Navigation Context:** Extract the view stack logic (`viewStack`, `pushViewOntoStack`, `popViewFromStack`, `replaceCurrentView`) into a dedicated `useNavigation` hook backed by a Context.
+
+### Custom Hooks to Extract
+*   `useNavigation`: Exposes methods for view transitions (`push`, `pop`, `replace`, `goHome`).
+*   `useGlobalHotkeys`: A centralized dispatcher for application-wide shortcuts (Esc, q, s, b, g, n), attached at the layout root.
+*   `useViewport`: Manages terminal dimensions via Ink's `useStdout`, handling dynamic resizing, and exposing `columns` and `rows` without deep prop-drilling.
+*   `useThreadNavigation`: Encapsulates the complex stack logic for entering/exiting nested message threads within the `DetailView`.
+
+## 2. VIEW-BY-VIEW FUNCTIONAL REQUIREMENTS
+
+### Layout Components
+*   **Header (`header.tsx`)**:
+    *   **UI:** Render exactly 3 lines (`HEADER_LINES=3`): a centered title rule, agent/unread status, and a subtitle.
+    *   **Data:** Consumes `currentView`, `activeAgents`, `unreadCount`, and `threadInfo` via props or context. Must remain memoized.
+*   **Footer (`footer.tsx`)**:
+    *   **UI:** Render contextual shortcuts (`VIEW_SHORTCUTS`, `THREAD_SHORTCUTS`) mapped to the current view. Format shortcut keys in cyan bold, disabled actions in dim color, and focused items in inverse text.
+    *   **Logic:** Compute required rows using dynamic word-wrapping calculations based on terminal width.
+
+### Home View (`home-view.tsx`)
+*   **UI:** Render status tabs (Active, Blocked, etc.) with count badges. Render a scrollable list of issues with a selection marker, unread indicators, status colors, truncated titles, and capacity indicators.
+*   **Keyboard Interactions:**
+    *   `Up`/`Down` or `k`/`j`: Move cursor up/down by 1, wrapping to the opposite end when reaching list boundaries.
+    *   `Tab`/`Shift+Tab`: Cycle the active status filter tab left/right.
+    *   `Enter`: Navigate to `DetailView` for the currently selected issue.
+    *   `a`/`d`/`r`: Trigger Activate, Defer, or Resolve actions on the selected issue.
+    *   `n`: Navigate to `NewIssue` view.
+*   **State Transitions:** Update `statusFilter` tab state, update `cursor` index state based on the newly filtered list length.
+*   **Data:** Requires the full issue list, unread `inums`, and `maxAgents`.
+
+### Detail View (`detail.tsx`) - (Core Complexity)
+*   **UI:**
+    *   Issue Header (5 lines): Title, status, dependencies, hint, and separator.
+    *   Dependency Fields: Interactive Group, BlockedBy, and Blocks fields.
+    *   Response Chain: Scrollable, word-wrapped message history with distinct top/bottom borders based on reply/continuation state.
+    *   Input Box (3 lines): Text input for new responses.
+    *   Overlays: Capable of rendering `GroupPicker` or `IssueListPicker` over the main content.
+*   **Keyboard Interactions:**
+    *   `Alt+H`: Navigate to Home.
+    *   `Esc`: Exit current thread (pop thread stack) or go back to previous view.
+    *   `Ctrl+Shift+Right`/`Left`: Enter/Exit focused thread.
+    *   `Ctrl+R`: Resolve the current thread.
+    *   `Shift+Left`/`Right`: Navigate directly to the previous/next adjacent issue without returning to Home.
+    *   `Tab`/`Shift+Tab`: Cycle focus through the predefined ring.
+    *   `Up`/`Down`: Scroll the message viewport.
+    *   `Enter`: When focused on a dependency field, open the respective Picker overlay.
+*   **Focus Ring (Strict Order):** Text Input -> Group Field -> BlockedBy Field -> Blocks Field -> View Replies button -> Footer actions.
+*   **State:** `inputValue`, `focusedField` ID, `overlay` visibility state, `threadStack` (for nested threads), `selectedMessage` index.
+*   **Data:** Requires specific `issue` lookup by `inum`, its `rootResponse`, dependency mappings, and full terminal dimension context for viewport centering math.
+
+### New Issue View (`newissue.tsx`)
+*   **UI:** A structured form containing Title, Description, Group, and Blocked By input fields. Display validation errors if applicable.
+*   **Keyboard Interactions:**
+    *   `Tab`/`Shift+Tab`: Move focus between the 4 form fields.
+    *   `Enter`: Submit form data to create the issue.
+    *   `Esc`: Cancel creation and pop the view.
+*   **State:** `activeField` tracker, `values` record mapping field names to strings, `error` string.
+
+### Agent Status View (`agent-status.tsx`)
+*   **UI:** A tabular display with columns: Inum, Title, Pane, Status (alive/dead), and LastActivity.
+*   **Keyboard Interactions:**
+    *   `Up`/`Down` or `k`/`j`: Navigate row selection.
+    *   `Enter`: Trigger action to focus the associated tmux pane.
+
+### Blocking Map View (`blocking-map.tsx`)
+*   **UI:** An ASCII-formatted tree representing issue dependencies.
+*   **Keyboard Interactions:**
+    *   `Up`/`Down` or `k`/`j`: Navigate tree nodes.
+    *   `Enter`: Navigate to `DetailView` for the highlighted issue.
+*   **State:** Compute and memoize the flattened tree representation (`buildFlatRows`).
+
+### Group View (`group-view.tsx`)
+*   **UI (Two Modes):**
+    1.  **List Mode:** Display containers with aggregate progress bars.
+    2.  **Issues Mode:** Display issues belonging to the selected container.
+*   **Keyboard Interactions:**
+    *   `Up`/`Down` or `k`/`j`: Navigate the active list.
+    *   `Enter`: Drill down into a container (List Mode) or navigate to `DetailView` (Issues Mode).
+    *   `Esc`: Pop back to List Mode (if in Issues Mode) or go back to previous view.
+*   **State:** A state machine tracking `mode` (list vs issues) and `selectedIndex`.
+
+### Modal Pickers (`group-picker.tsx` & `issue-list-picker.tsx`)
+*   **Group Picker:** Renders a bordered box. Allows scrolling existing containers (`j`/`k`/`Enter`) or text input to create a new one.
+*   **Issue List Picker:** Renders a checklist. Uses `j`/`k`/`Up`/`Down` to navigate, `Enter` to toggle selection checkboxes, `Ctrl+V` to preview an issue, and `Esc` to close. Maintains a `Set` of selected IDs.
+
+## 3. CROSS-CUTTING CONCERNS
+
+*   **Focus Management:**
+    *   MUST use Ink's `useFocus` and `useFocusManager` hooks exclusively.
+    *   Manual state-based focus tracking (`focusedField = 1`) must be replaced by registering components with IDs and using `focusNext()`/`focusSpecific()`.
+    *   Ensure only one component claims focus at any given time to prevent double-handling of `useInput` events.
+*   **Keyboard Architecture:**
+    *   Centralize hotkey definitions (`hotkeys.ts`).
+    *   Implement event bubbling prevention. If an overlay is open or an input box is focused, global shortcuts (like `q` to quit) MUST be suppressed to avoid accidental application exits while typing.
+*   **Theming & Styling:**
+    *   Extract all hardcoded colors and styling into a central theme configuration file.
+    *   Maintain the existing `status-color.ts` mapping (Active=green, Awaiting=blue, Blocked=red, Deferred=yellow, Resolved=gray) but consume it through the theme provider.
+*   **Error Handling:**
+    *   Implement an `ErrorBoundary` component at the root level.
+    *   Ensure that if a render fails, the TUI exits gracefully and prints the stack trace to standard output, rather than permanently hanging the terminal interface.
+*   **Performance & Rendering:**
+    *   Retain and strictly utilize the viewport centering algorithm (`centerOnSelection`, `computeLastVisible`) in the `DetailView` to prevent rendering thousands of off-screen text nodes.
+    *   Memoize pure layout calculations (e.g., word-wrapping algorithms, dependency tree generation).
+
+## 4. INK-SPECIFIC IMPLEMENTATION REQUIREMENTS
+
+*   **Strict Composition Rules:**
+    *   Every single string rendered to the screen MUST be wrapped in a `<Text>` component.
+    *   Raw text placed directly inside a `<Box>` or a React fragment will throw Ink rendering errors and is strictly forbidden.
+    *   `<Box>` components cannot be nested inside `<Text>` components.
+*   **Flexbox Layouts:**
+    *   Replace hardcoded ASCII math for widths with Ink's Yoga flexbox properties (`flexDirection`, `flexGrow`, `justifyContent`, `alignItems`).
+    *   Use the `padding` and `margin` props on `<Box>` instead of manually rendering empty space strings.
+*   **Input Handling:**
+    *   Use `useInput((input, key) => { ... })`. Use the `key` object to check for modifier keys (`key.ctrl`, `key.shift`) and special keys (`key.return`, `key.escape`, `key.up`).
+*   **Borders:**
+    *   Leverage Ink's native `borderStyle` property on `<Box>` components for standard borders (e.g., modals, simple lists) to reduce manual string manipulation overhead.
+
+## 5. TESTING REQUIREMENTS
+
+*   **Unit Testing Setup:**
+    *   Custom hooks (e.g., `useNavigation`, `useThreadNavigation`) MUST be tested using `@testing-library/react-hooks` to verify state transitions in isolation.
+    *   Utility functions (`splitIntoParagraphs`, text wrapping math, thread builder helpers) MUST have high-coverage pure function tests.
+*   **Integration Testing:**
+    *   Use `ink-testing-library` to render component trees in memory.
+    *   Verify layout structures by asserting against the `lastFrame()` output string.
+*   **Keyboard & Focus Testing:**
+    *   Use `ink-testing-library`'s `stdin.write()` to simulate precise keystrokes.
+    *   Test suites MUST verify that simulating the `Tab` key moves the `isFocused` state correctly between input fields and interactive buttons according to the defined focus rings.
+*   **Data Mocking:**
+    *   Tests MUST NOT rely on the global mutable `mock-data.ts`.
+    *   Implement factory functions to generate isolated, immutable state trees for each test case to prevent test pollution.

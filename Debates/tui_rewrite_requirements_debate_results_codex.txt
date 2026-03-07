@@ -1,0 +1,252 @@
+**Definitive Rewrite Requirements (Functional Parity + Hooks + Ink Best Practices)** (Codex)
+
+## 0) Non-Negotiables
+1. Every React class component must be replaced with functional components and hooks; `forceUpdate`, mutable instance fields, and imperative rerender triggers are forbidden.
+2. Functional parity is mandatory: same views, same keyboard shortcuts, same navigation outcomes, same visible UI semantics, same data mutations.
+3. All state updates must be immutable (`Map`/`Set` updates via cloned copies).
+4. No raw text outside `<Text>`, and no `<Box>` inside `<Text>`.
+5. Keyboard handling must be focus-aware and deterministic with explicit priority: `overlay > focused control > view-local > global`.
+6. Tab traversal must use Ink focus primitives (`useFocus`, `useFocusManager`) rather than manual class-state tab ring code.
+7. Rewrite must keep current constants/behavioral contracts: header 3 lines, issue header 5 lines, input area 3 lines, footer dynamic wrapping rules.
+
+## 1) Component Architecture Requirements
+1. Required top-level tree:
+```txt
+run.tsx
+  AppRoot
+    ErrorBoundary
+    StoreProvider
+    NavigationProvider
+    ThemeProvider
+    LayoutProvider (stdout cols/rows)
+    AppShell
+      Header
+      ViewRouter (Home | Detail | NewIssue | AgentStatus | BlockingMap | GroupView)
+      ModalLayer (GroupPicker | IssueListPicker)
+      Footer
+```
+2. `App` class responsibilities must be split into hooks/providers:
+   - `useNavigationStack` for `push/pop/replace/goHome/goBack`.
+   - `useViewParams` for typed view payload access.
+   - `useSavedSelection` for per-issue selected message memory.
+   - `useGroupMode` and thread-info state.
+3. Create reducer-driven app store (`useReducer`) with typed actions for issue status changes, dependencies, thread resolution, unread state, and containers.
+4. Keep ephemeral UI state local to each view (cursor index, active field, overlay mode, input text); keep canonical domain state in store context.
+5. Derived data must be selectors (`useMemo`): filtered issues, dependency rows, response flattening, unread counts, per-status counts.
+6. Extract reusable hooks:
+   - `useGlobalShortcuts`
+   - `useListCursor`
+   - `useTabFocusRing`
+   - `useDetailThreadNavigation`
+   - `useResponseViewport`
+   - `usePersistentStore` (load/save JSON)
+7. Eliminate Input Bridge anti-pattern: each interactive component directly uses `useInput` gated by `isFocused` from `useFocus`.
+8. Footer and header must become pure presentational components with memoized props and centralized shortcut/token config.
+9. All callbacks passed to children must be stable (`useCallback`) to avoid full-tree rerenders.
+10. No prop-drilling of `columns/rows` and global callbacks through deep chains; use layout/navigation/store contexts.
+
+## 2) View-by-View Functional Requirements
+
+### Home View
+| Type | Requirement |
+|---|---|
+| UI | Render status filter tabs with count badges; active tab visually distinct. |
+| UI | Render issue rows with selected marker, unread indicator, status color, truncated title, and capacity indicator vs `maxAgents`. |
+| UI | Render empty-state row when filtered list is empty. |
+| Keyboard | `Up` or `k`: move cursor `-1`, clamped at `0`. |
+| Keyboard | `Down` or `j`: move cursor `+1`, clamped at `lastVisibleIndex`. |
+| Keyboard | `Tab`: next status filter, wrapping end-to-start. |
+| Keyboard | `Shift+Tab`: previous status filter, wrapping start-to-end. |
+| Keyboard | `Enter`: open selected issue detail via `onSelect(inum)`. |
+| Keyboard | `a`: set selected issue to Active via `onActivate(inum)`. |
+| Keyboard | `d`: set selected issue to Deferred via `onDefer(inum)`. |
+| Keyboard | `r`: set selected issue to Resolved via `onResolve(inum)`. |
+| Keyboard | `n`: navigate to New Issue via `onNewIssue()`. |
+| State | Maintain `statusFilter` and `cursor`; cursor must re-clamp when filter/data changes. |
+| Data | Requires `issues`, `unreadInums`, `maxAgents`, and mutation/navigation callbacks. |
+
+### Detail View
+| Type | Requirement |
+|---|---|
+| UI | Render issue header block (title, status, group, blocked-by, blocks, hint/separator) with focus affordances for editable header fields. |
+| UI | Render response chain viewport with selection highlighting, continuation borders, new-reply indicators, thread parent/reply affordances, and resolve hint separator. |
+| UI | Render input area (3 lines) using `ink-text-input`, focused styling, and submit affordance. |
+| UI | Render thread context indicator when inside thread and show resolved/unresolved thread state. |
+| UI | Render overlay modal layer for GroupPicker and IssueListPicker variants. |
+| Keyboard | `Tab`: focus order must be `Input -> Group -> BlockedBy -> Blocks -> ViewReplies -> FooterItems -> Input`. |
+| Keyboard | `Shift+Tab`: reverse same order. |
+| Keyboard | `Up/Down`: move selected message index in visible response chain and keep selection visible via viewport scroll anchoring. |
+| Keyboard | `Enter` on focused input: submit message if non-empty. |
+| Keyboard | `Enter` on focused Group field: open GroupPicker overlay. |
+| Keyboard | `Enter` on focused BlockedBy field: open IssueListPicker overlay for blocked-by set. |
+| Keyboard | `Enter` on focused Blocks field: open IssueListPicker overlay for blocks set. |
+| Keyboard | `Ctrl+Shift+Right`: enter thread on selected message if replies exist; push prior context to thread stack. |
+| Keyboard | `Ctrl+Shift+Left`: exit current thread; restore prior selection/cursor from stack. |
+| Keyboard | `Esc`: close overlay if open; else exit thread if in thread; else navigate back. |
+| Keyboard | `Ctrl+R`: toggle thread resolution in thread mode; otherwise toggle issue status Active<->Resolved. |
+| Keyboard | `Shift+Right`: navigate to next adjacent issue. |
+| Keyboard | `Shift+Left`: navigate to previous adjacent issue. |
+| Keyboard | `Alt+H`: navigate Home immediately. |
+| State | Maintain `inputValue`, focused region, `focusedFooterIndex`, `focusedViewReplies`, `overlay`, `blockedBySet`, `blocksSet`, `selectedMessage`, `threadStack`, `suppressNextInput`. |
+| State | Enter-thread must push parent context; exit-thread must pop and restore selection/focus deterministically. |
+| Data | Requires `inum`, `issue`, `rootResponse`, `blockedBy`, `blocks`, `group`, `columns`, `rows`, `containers`, `allIssues`, `unreadInums`, `userLastViewedAt`, and all mutation/navigation callbacks. |
+
+### New Issue View
+| Type | Requirement |
+|---|---|
+| UI | Render fields in order: Title, Description, Group, Blocked by; active field clearly highlighted. |
+| UI | Render validation error text when submit fails required checks. |
+| Keyboard | `Tab`: next field, wrapping. |
+| Keyboard | `Shift+Tab`: previous field, wrapping. |
+| Keyboard | `Enter`: submit form via `onCreated` when valid. |
+| Keyboard | `Esc`: cancel via `onCancel`. |
+| State | Maintain `activeField`, `values`, and `error`; clear error on field edits. |
+| Data | Requires create/cancel/navigation callbacks and access to issue/container data for validation/lookups. |
+
+### Agent Status View
+| Type | Requirement |
+|---|---|
+| UI | Render table columns: `Inum | Title | Pane | Status | LastActivity`; status must show alive/dead semantics. |
+| Keyboard | `Up/Down` and `j/k`: move selected row with clamped boundaries. |
+| Keyboard | `Enter`: focus selected pane/issue via callback. |
+| State | Maintain selected row index and clamp on data refresh. |
+| Data | Requires current agents/issues/status metadata and focus callback. |
+
+### Blocking Map View
+| Type | Requirement |
+|---|---|
+| UI | Render ASCII dependency tree from flattened graph rows; include indentation/branch glyph semantics. |
+| Keyboard | `Up/Down` and `j/k`: move selected row with clamped boundaries. |
+| Keyboard | `Enter`: open selected issue detail. |
+| State | Maintain selected row index mapped to flattened rows. |
+| Data | Requires issues and dependency edges, via `buildFlatRows`-equivalent selector. |
+
+### Group View
+| Type | Requirement |
+|---|---|
+| UI | Two modes: container list mode (group rows + progress bars) and container issue mode (issues within selected container). |
+| Keyboard | `Up/Down` and `j/k`: move cursor in current mode. |
+| Keyboard | `Enter` in list mode: drill into selected container. |
+| Keyboard | `Enter` in issues mode: open selected issue detail. |
+| Keyboard | `Esc` in issues mode: return to list mode. |
+| Keyboard | `Esc` in list mode: go back to prior app view. |
+| State | Maintain mode, selected container index, selected issue index per container, and restore prior list cursor on back. |
+| Data | Requires containers, per-container issue membership, issue statuses, and unread metadata. |
+
+### IssueListPicker
+| Type | Requirement |
+|---|---|
+| UI | Bordered modal with title, instruction line, checklist rows, status colors, unread indicators. |
+| Keyboard | `Up/Down` and `j/k`: move row cursor. |
+| Keyboard | `Enter`: toggle selected issue in bound Set. |
+| Keyboard | `Ctrl+V`: trigger `onViewIssue(inum)` without closing picker. |
+| Keyboard | `Esc`: close via `onClose`. |
+| State | Maintain picker cursor; selection state updates must be immutable and reflected immediately. |
+| Data | Requires `title`, `issues`, `selected`, `unreadInums`, toggle/close/view callbacks. |
+
+### GroupPicker
+| Type | Requirement |
+|---|---|
+| UI | Bordered modal with two modes: list existing groups and create-new input mode. |
+| Keyboard | List mode `Up/Down` and `j/k`: move group cursor. |
+| Keyboard | List mode `Enter`: select highlighted group or transition to create mode on "new group" option. |
+| Keyboard | Create mode text input: character editing/backspace supported. |
+| Keyboard | Create mode `Enter`: confirm new group and close picker. |
+| Keyboard | `Esc`: close picker; in create mode may return to list first, then close on second `Esc`. |
+| State | Maintain `mode`, `cursor`, `inputValue`, optional validation error. |
+| Data | Requires `containers/groups`, select/create/close callbacks. |
+
+## 3) Cross-Cutting Concerns
+
+### Navigation
+1. Keep typed `ViewType` union with payloads (`inum`, picker params, etc.).
+2. Preserve stack semantics: `push`, `replaceCurrent`, `pop`, `goHome`, `goBackToPreviousView`, `saveSelectedAndGoBack`, `saveSelectedAndGoHome`.
+3. Global keys must remain: `Esc` back, `q` quit, `s` AgentStatus, `b` BlockingMap, `g` GroupView, `n` NewIssue.
+4. Navigation must preserve per-view transient selections when returning (cursor/selected message memory where currently supported).
+
+### Focus Management
+1. Every interactive region must register with `useFocus`; handlers run only when focused.
+2. `useFocusManager` controls Tab and Shift+Tab traversal; traversal must wrap.
+3. Modal overlays must trap focus and restore previous focus on close.
+4. Footer focused shortcut index must remain synchronized with focus ring state.
+
+### Keyboard Architecture
+1. Central key map from `hotkeys.ts` remains source of truth; no duplicated inline key literals.
+2. One dispatcher layer normalizes key combos and routes to highest-priority active handler.
+3. Conflicting keys must be resolved by context precedence; global shortcuts suppressed when overlay consumes key.
+4. Prevent duplicate firing from key-repeat where action should be edge-triggered (e.g., submit/resolve toggles).
+
+### Data Layer
+1. Replace direct `MOCK_*` mutations with reducer actions + repository adapter.
+2. Repository must support load/save of issues, responses, dependencies, containers, unread, maxAgents.
+3. Persist mutations automatically after successful action (debounced write acceptable).
+4. Keep domain model parity (issue statuses, thread resolved timestamps, dependency sets, group assignments).
+5. All reducers/selectors must be pure and side-effect free.
+
+### Theming/Styling
+1. Centralize color/style tokens in one module (status colors, focused/inverse, dim/disabled, shortcut key color, borders).
+2. Keep status-color mapping parity: Active green, Awaiting blue, Blocked red, Deferred yellow, Resolved gray.
+3. Centralize static labels (view titles, footer shortcut labels, thread shortcut labels).
+4. Truncation/wrapping behavior must be centralized and reused (header/footer/rows/containers).
+
+### Error Handling
+1. Add app-level ErrorBoundary with fallback UI and exit hint.
+2. Data load/save failures must surface non-crashing error banner/state.
+3. Invalid user actions must be no-op with visible hint (e.g., enter thread when no replies).
+4. Async side effects must handle cancellation on unmount.
+
+### Accessibility
+1. Use `useIsScreenReaderEnabled`; provide text-first alternatives to color-only cues.
+2. Focused element must always have non-color indicator (`inverse`, prefix marker, or explicit label).
+3. Keyboard-only operation must cover all functionality; no mouse dependency.
+4. Header/footer hint text must remain readable and concise on narrow terminals.
+
+### Performance
+1. Keep response viewport computations memoized and O(n) per relevant change.
+2. Preserve scroll anchoring behavior when selection/thread context changes.
+3. Avoid rerendering full response chain on input keystrokes unrelated to chain.
+4. Use memoized row renderers and stable callbacks for large issue/response lists.
+5. Respect terminal size changes without layout thrash; throttle if needed.
+
+## 4) Ink-Specific Implementation Requirements
+1. All displayed strings must be inside `<Text>`; all layout via `<Box>`.
+2. Compose borders/padding consistently using Box props; no manual spacing hacks where Box can express layout.
+3. `useInput` must be attached in focused components and/or centralized dispatcher; never rely on hidden bridge components.
+4. `useFocus({autoFocus})` should establish deterministic initial focus per view (`Home list`, `Detail input`, picker first row/input as appropriate).
+5. `useFocusManager` handles Tab traversal, including reverse traversal and modal focus trap.
+6. Terminal dimensions must come from `useStdout`; layout recomputes on resize and re-clamps cursors/viewport offsets.
+7. Avoid hard-coded widths except constant line blocks; width-sensitive components must wrap/truncate based on current columns.
+8. Maintain consistent spacing conventions: header 3 lines, issue header 5 lines, input area 3 lines, footer line-count based on wrapping function.
+9. No `console.log` in render path; debug logging (if any) behind dev flag and outside render.
+
+## 5) Testing Requirements
+
+### Unit Tests
+1. Reducers: all action types, immutability guarantees, and edge cases.
+2. Selectors: filtered issue counts, unread counts, group progress, dependency flattening.
+3. Hotkeys: `matchesKey`, combo parsing, visual label mapping.
+4. Response utilities: flattening, new-reply detection, first-new-reply index, line-count computation, viewport range math.
+5. Text utilities: paragraph splitting with code fences, truncation/wrap helpers.
+6. Navigation helpers: stack push/pop/replace/home/back behavior with payload integrity.
+
+### Integration Tests (Ink Rendering + Input)
+1. App flow: Home -> Detail -> back -> Home with state restoration.
+2. All global shortcuts (`q/s/b/g/n/Esc`) across eligible views.
+3. Home keymap (`j/k`, arrows, tab filters, `a/d/r`, `Enter`).
+4. Detail keymap including thread enter/exit, resolve toggles, adjacent issue navigation, overlay open/close.
+5. GroupPicker and IssueListPicker interaction loops and callback emissions.
+6. GroupView two-mode transitions and back behavior.
+7. Footer focus highlighting and tab ring traversal order.
+
+### Focus Tests
+1. Exactly one focused element at a time in each view.
+2. Non-focused components must not consume key events.
+3. Modal focus trap and focus restoration after close.
+4. Auto-focus correctness on initial render and after navigation transitions.
+
+### Mock Data Strategy for Tests
+1. Use deterministic fixture builders for issues/responses/dependencies/containers.
+2. Freeze fixtures to catch accidental mutation.
+3. Provide timestamp-controlled fixtures for unread/new-reply logic.
+4. For persistence tests, use temp-directory file adapter and assert serialized output.
+5. Add characterization tests before rewrite for any ambiguous boundary behavior (cursor clamp/wrap, tie-breaking, restoration rules) and treat them as parity gates.

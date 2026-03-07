@@ -1,0 +1,509 @@
+TUI REWRITE REQUIREMENTS -- UNIFIED SYNTHESIS
+================================================
+Three-Agent Debate: Gemini (gemini-3.1-pro-preview) | Codex (gpt-5.3-codex) | Claude (security-auditor)
+Date: 2026-03-06
+
+This document merges the outputs of all three agents into a single authoritative
+requirements specification. Where agents agreed, the requirement stands as consensus.
+Where they diverged, the strongest position is selected with rationale noted.
+
+
+================================================================================
+0. NON-NEGOTIABLE CONSTRAINTS (All 3 agents agreed)
+================================================================================
+
+N-1. Every class component becomes a functional component with hooks. Zero class
+     components in the rewrite. forceUpdate() is forbidden.
+N-2. 100% functional parity: same views, same shortcuts, same navigation, same UI.
+N-3. All state updates are immutable -- no in-place mutation of arrays, objects,
+     Sets, or Maps. Always produce new copies.
+N-4. Ink composition rules enforced: all text in <Text>, no <Box> inside <Text>,
+     no raw strings outside <Text>.
+N-5. Keyboard priority chain: overlay > focused control > view-local > global.
+N-6. Tab traversal uses Ink focus primitives or a well-designed custom hook.
+N-7. Fixed layout constants preserved: header 3 lines, issue header 5 lines,
+     input area 3 lines, footer dynamic wrapping.
+
+
+================================================================================
+1. COMPONENT ARCHITECTURE
+================================================================================
+
+1.1 Restructured Component Tree (Codex proposed most complete, Claude refined)
+
+  run.tsx
+    AppRoot (functional)
+      ErrorBoundary
+      StoreProvider (AppStateContext via useReducer)
+      NavigationProvider (view stack + saved selections)
+      LayoutProvider (columns/rows from useStdout, resize handling)
+      AppShell
+        Header (functional, memo -- keep existing)
+        ViewRouter (switch on currentView.type)
+          HomeView
+          DetailView
+            IssueHeader (functional, add memo)
+            ResponseChain (functional, memo)
+              ResponseContainer (functional, memo with custom comparator)
+            InputBox (functional, add memo)
+          NewIssue (functional -- keep)
+          AgentStatus (functional, memo -- keep)
+          BlockingMap (functional, memo -- keep)
+          GroupView (functional -- keep)
+        ModalLayer (GroupPicker | IssueListPicker -- rendered above ViewRouter)
+        Footer (functional, memo -- keep existing)
+
+  NOTE: Codex proposed a ThemeProvider. All three agents want centralized tokens.
+  Implementation: a simple theme module (exported constants) is sufficient over a
+  full React context, since theme values don't change at runtime.
+
+1.2 Input Bridge Elimination (Unanimous)
+
+  All four bridge components are deleted:
+    DetailInputBridge, HomeViewInputBridge, GroupPickerInputBridge, IssueListInputBridge
+  Each parent functional component calls useInput() directly.
+
+1.3 Custom Hooks (Merged from all 3 agents)
+
+  HOOK                        SOURCE    PURPOSE
+  useNavigation()             All 3     View stack: push/pop/replace/goHome/goBack
+  useGlobalKeys()             All 3     Esc/q/s/b/g/n dispatch, returns consumed bool
+  useViewport()               Gemini+   Terminal cols/rows via useStdout + resize
+  useThreadNavigation()       All 3     Thread stack enter/exit/resolve + message list
+  useFocusRing()              Claude    Dynamic circular Tab ring with slot count
+  useSavedSelection()         Codex+    Per-inum selected message memory (useRef<Map>)
+  useCursorNavigation()       Claude+   Reusable j/k/Up/Down cursor for list views
+  useListCursor()             Codex     (Same as useCursorNavigation -- merge into one)
+  useResponseViewport()       Codex+    Scroll anchor logic from ResponseChain
+  usePersistentStore()        Codex     Load/save JSON with debounced writes
+
+  Final hook list (deduplicated):
+    useNavigation, useGlobalKeys, useViewport, useThreadNavigation,
+    useFocusRing, useSavedSelection, useCursorNavigation,
+    useResponseViewport, usePersistentStore
+
+1.4 State Management (Consensus with Codex's detail)
+
+  NavigationContext (useReducer):
+    - viewStack: View[]
+    - Actions: PUSH_VIEW, POP_VIEW, REPLACE_VIEW, GO_HOME
+    - savedSelections: Map<number, number> (useRef, not reducer)
+    - threadInfo, groupMode (lifted from old App class)
+
+  AppStateContext (useReducer):
+    - issues, unreadInums, maxAgents, detailData, containers,
+      dependencies, containerIssues
+    - Typed actions for: SET_ISSUE_STATUS, TOGGLE_DEPENDENCY, RESOLVE_THREAD,
+      ADD_RESPONSE, CREATE_ISSUE, UPDATE_GROUP, MARK_READ, etc.
+    - All reducers pure, no side effects
+
+  Ephemeral state stays local (useState in each view):
+    - cursor, activeField, overlay, inputValue, etc.
+
+  Derived data via useMemo selectors:
+    - Filtered issues, status counts, unread counts, dependency tree,
+      response arrays, container progress
+
+
+================================================================================
+2. VIEW-BY-VIEW FUNCTIONAL REQUIREMENTS
+================================================================================
+
+--- 2.1 HOME VIEW ---
+
+UI:
+  - Status filter tabs with count badges, active tab bold+inverse
+  - Issue list with: cursor marker (U+25B8), I-<inum> (6ch), title (40ch truncated),
+    unread star (U+2731 yellow), status label (10ch, colored)
+    [Claude corrected column order: cursor, inum, title, unread, status]
+  - Selected row: cyan+bold
+  - Capacity warning: "Agents full (N/M)" red+bold when at capacity
+  - Empty state: "No issues in this view." dimmed
+
+Keyboard:
+  - Up/k: cursor -1, clamped to 0
+  - Down/j: cursor +1, clamped to lastIndex
+  - Tab: next status filter, wrapping end->start. Reset cursor to 0.
+  - Shift+Tab: prev status filter, wrapping start->end. Reset cursor to 0.
+  - Enter: onSelect(inum) for selected issue
+  - a: onActivate(inum)
+  - d: onDefer(inum)
+  - r: onResolve(inum)
+  - n: onNewIssue()
+  - Fallthrough to global keys (Esc, q, s, b, g)
+
+State: statusFilter (enum), cursor (number, resets on filter change)
+Data: issues[], unreadInums Set, maxAgents
+
+--- 2.2 DETAIL VIEW ---
+
+UI:
+  Normal mode:
+    - IssueHeader (5 lines): title bold, status+group (group inverse when focused),
+      blockedBy+blocks (inverse when focused), Tab hint dim, separator rule
+    - ResponseChain: scrollable viewport, height = rows - header - context - input - footer
+    - InputBox (3 lines): separator, "Enter response: > " cyan, TextInput
+    - Overlays: GroupPicker or IssueListPicker replace content when active
+
+  Thread mode:
+    - ThreadHeaderSeparator: "[ Thread ]" or "[ Thread -- Resolved ]" centered
+    - Thread parent ResponseContainer (gray, isThreadParent=true)
+    - "[ Replies ]" separator
+    - ResponseChain showing reply chain
+
+Keyboard (priority order, all 3 agents agreed):
+  1. Overlay active: all keys to overlay, DetailView suppressed
+  2. Alt+H (or U+02D9): navigate home
+  3. Esc: close overlay > exit thread > go back
+  4. Ctrl+Shift+Right: enter thread (no-op if no replies)
+  5. Ctrl+Shift+Left: exit thread
+  6. Ctrl+R: resolve issue (Active<->Resolved) or resolve thread
+     (Must suppress 'r' echo into TextInput -- use isActive guard or modifier check)
+  7. Shift+Left: previous adjacent issue (replaceCurrentView)
+  8. Shift+Right: next adjacent issue (replaceCurrentView)
+  9. Tab: cycle focus forward through ring
+  10. Shift+Tab: cycle focus backward through ring
+  11. Enter on viewReplies: toggle thread resolution
+  12. Enter on focused field: open overlay (Group->GroupPicker, BlockedBy/Blocks->IssueListPicker)
+  13. Enter on focused footer item: dispatch footer action
+  14. Up: selectedMessage -1, clamped, clear viewReplies focus
+  15. Down: selectedMessage +1, clamped, clear viewReplies focus
+
+Focus Ring (strict order):
+  Input -> Group -> BlockedBy -> Blocks -> ViewReplies -> FooterItems -> (wrap to Input)
+  In thread mode: Input -> ViewReplies -> FooterItems -> (wrap)
+  (Header fields excluded in thread mode, ViewReplies only when selected has replies)
+
+State: inputValue, focusedField, focusedFooterIndex, focusedViewReplies,
+  overlay, blockedBySet, blocksSet, selectedMessage, threadStack[], suppressNextInput
+Data: inum, issue, rootResponse, blockedBy[], blocks[], group, columns, rows,
+  containers[], allIssues[], unreadInums, userLastViewedAt
+
+--- 2.3 NEW ISSUE VIEW ---
+
+UI:
+  - 4 fields vertical: Title (required), Description (required),
+    Group (optional), Blocked by (optional)
+  - Active field: triangle cursor, cyan, bold label, TextInput
+  - Inactive: indent, white label, static value
+  - Error text in red below fields on validation failure
+
+Keyboard:
+  - Tab: next field, wraps 3->0
+  - Shift+Tab: prev field, wraps 0->3
+  - Enter: validate and submit
+    - Title non-empty after trim
+    - Description non-empty after trim
+    - Blocked by: comma-separated, optional "I"/"i" prefix, must be digits
+  - Esc: cancel
+
+State: activeField (0-3), values Record<number,string>, error string|null
+Data: self-contained (callbacks only)
+
+--- 2.4 AGENT STATUS VIEW ---
+
+UI:
+  - Table columns: Inum(8) | Title(30, truncated 28) | Pane(8) | Status(8) | LastActivity
+  - Status: filled circle green (alive), empty circle red (dead)
+    [Claude corrected: dead=red not gray, per actual code]
+  - Selected row: cyan
+  - Empty: "No active agents" dimmed
+
+Keyboard:
+  - Up/k: cursor up, clamped
+  - Down/j: cursor down, clamped
+  - Enter: onFocusPane(paneId)
+  - ADDITION (Claude+Gemini): Add global key handling (Esc/q/s/b/g) for consistency
+
+State: cursor number
+Data: agents[] (via props/context, NOT inline mock import)
+
+--- 2.5 BLOCKING MAP VIEW ---
+
+UI:
+  - "Dependency Graph" title bold
+  - ASCII tree: U+251C/U+2514 branches, U+2502 continuation, U+2500 horizontal
+  - Nodes: cursor marker, tree prefix dim, "I-<inum>" bold, title, [status] colored
+  - "No dependencies:" section header dim for isolated issues
+  - Selected: bold white on inum
+  - Empty: "No issues or dependencies to display." dimmed
+
+Keyboard:
+  - j/Down: cursor down, clamped
+  - k/Up: cursor up, clamped
+  - Enter: navigate to DetailView for selected inum
+
+State: cursor, flatRows (memoized via useMemo)
+Data: issues[], dependencies[] (via props/context, NOT inline mock import)
+
+--- 2.6 GROUP VIEW ---
+
+UI (two modes):
+  List mode:
+    - "Groups & Sprints" title bold with container count dim
+    - Container rows: cursor, name (25ch truncated), type (6ch dim),
+      progress bar (10ch U+2588/U+2591 green), resolved/total (5ch)
+    - Selected: cyan+bold
+  Issues mode:
+    - Container name bold + type dim + resolved count
+    - Issue rows: cursor, I-<inum>, status (9ch colored), title (40ch truncated)
+    - Selected: cyan+bold
+
+Keyboard:
+  List mode: j/k/Up/Down navigate, Enter drill, Esc back
+  Issues mode: j/k/n/Up/Down navigate, p prev, Enter select, Esc back to list
+
+State: GroupMode union { mode:'list', cursor } | { mode:'issues', containerId, cursor, listCursor }
+  State externally managed (lifted to context) to survive navigation
+Data: containers[], containerIssues Record
+
+--- 2.7 ISSUE LIST PICKER ---
+
+UI:
+  - Bordered box (single style) with padding
+  - Title text bold
+  - Rows: cursor triangle cyan, checkbox [x]/[ ] green/gray, unread star yellow,
+    I-<inum> (6ch), title (30ch truncated), status colored
+  - Legend: "* = Unread replies" dim
+  - Empty: "No other issues." dim
+
+Keyboard:
+  - Esc: close
+  - Up/k: cursor up, clamped
+  - Down/j: cursor down, clamped
+  - Enter: toggle selection (immutable Set update)
+  - Ctrl+V: view issue without closing
+
+State: cursor, initialized to first selected index (or 0)
+Data: title, issues[] (excluding current), selected Set, unreadInums Set
+
+--- 2.8 GROUP PICKER ---
+
+UI:
+  List mode:
+    - Bordered box, row 0 "+" Create new group" green, rows 1+ container names
+      (current group yellow with bullet)
+  Create mode:
+    - Bordered box, "Create new group" bold, "Name: " + TextInput, hint text dim
+
+Keyboard:
+  List mode: j/k/Up/Down navigate, Enter select or enter create mode, Esc close
+  Create mode: TextInput handles typing, Enter submit if non-empty, Esc cancel to list
+  BUG FIX (Claude identified): Current code lacks Esc handler in create mode
+    because InputBridge only renders in list mode. Rewrite MUST have useInput
+    active in both modes.
+
+State: cursor, creating boolean, newGroupName string
+Data: containers[], currentGroup string
+
+
+================================================================================
+3. CROSS-CUTTING CONCERNS
+================================================================================
+
+3.1 Navigation (All 3 agreed)
+  - View stack array, minimum 1 entry (root = Home)
+  - Operations: push, pop, replace, goHome
+  - Global keys: Esc back, q quit, s AgentStatus, b BlockingMap, g GroupView, n NewIssue
+  - Per-view selections persist across navigations via useRef<Map>
+  - Footer focus resets to null on navigation
+  - Minimize raw ANSI escape codes for screen clearing
+
+3.2 Focus Management (Claude's analysis most thorough)
+  - DetailView focus ring is dynamic (slot count changes per thread mode + reply state)
+  - Two viable approaches:
+    A) Ink useFocus/useFocusManager: each focusable element is a component
+    B) Custom useFocusRing hook: manual index with dynamic slot count
+  - RECOMMENDATION: Option B (custom hook). Rationale: the focus ring includes
+    non-component targets (header fields, conceptual buttons). A custom hook is
+    simpler and avoids conflicts with Ink's global focus system.
+  - Modal overlays MUST trap focus and restore on close
+
+3.3 Keyboard Architecture (Codex's tier model, Claude's detail)
+  Three tiers:
+    Tier 1 - Global: useGlobalKeys() in views that want it
+    Tier 2 - View-specific: useInput() per view with own handler
+    Tier 3 - Overlay/modal: priority when active, parent handler suppressed
+  Hotkey utilities preserved: matchesKey(), matchesKeyCombination(), all enums
+  useInput isActive parameter gates handler activation based on overlay state
+
+3.4 Data Layer (All 3 agreed)
+  - No direct MOCK_* imports in view components
+  - All data through AppStateContext
+  - Mutations via reducer dispatch -> immutable updates
+  - Mock store remains as persistence layer, loaded on mount
+  - Auto-save after mutations (debounced write)
+  - Thread resolution: either immutable Response chain relinking or external
+    resolution state map keyed by response ID (Codex+Claude both noted this)
+
+3.5 Theming/Styling (Claude most detailed)
+  Centralized theme module with tokens:
+    Status colors: Active=green, Awaiting=blue, Blocked=red, Deferred=yellow, Resolved=gray
+    UI colors: selected=cyan, authorUser=cyan, authorAgent=green, threadParent=gray,
+      unread=yellow, error=red, disabled=dim
+    Characters: cursor=U+25B8, unread=U+2731, alive=U+25CF, dead=U+25CB,
+      rule=U+2500, checkmark=U+2713
+
+3.6 Error Handling (All 3 agreed)
+  - Top-level ErrorBoundary with fallback UI and Esc-to-home
+  - Graceful empty states for missing data
+  - Data load/save failures surface as non-crashing banner
+  - Invalid actions are no-ops with hints (e.g., enter thread when no replies)
+  - Async side effects handle cancellation on unmount
+
+3.7 Accessibility (Codex most specific)
+  - Use useIsScreenReaderEnabled() for detection
+  - All color indicators have text alternatives (labels alongside colors)
+  - Focused element has non-color indicator (inverse, prefix marker, or label)
+  - Keyboard-only covers 100% of functionality
+  - Header/footer readable on narrow terminals
+
+3.8 Performance (All 3 agreed, Claude most specific)
+  Memoization priorities:
+    - ResponseContainer: React.memo with custom comparator (id, selected, hasNewReplies,
+      threadResolved, viewRepliesFocused)
+    - ResponseChain: memoize message array and viewport calculations
+    - flattenToArray(): memoize based on rootResponse identity
+    - computeLineCount(): memoize per (body, columns) if profiling shows need
+    - buildFlatRows(): already memoized -- keep
+    - Header, Footer: already memo'd -- keep
+  Scroll anchoring: useResponseViewport hook tracks lastFirstVisible/lastHeight
+    via useRef, resets on chain identity change (thread enter/exit)
+  Avoid rerendering response chain on unrelated input keystrokes
+  All callbacks via useCallback for stability
+
+
+================================================================================
+4. INK-SPECIFIC IMPLEMENTATION
+================================================================================
+
+4.1 Box/Text Composition (Unanimous)
+  - All text in <Text>, all layout in <Box>
+  - Horizontal: <Box flexDirection="row">
+  - Vertical: <Box flexDirection="column">
+  - Borders on overlays/pickers: <Box borderStyle="single">
+  - Response containers: manual Unicode box-drawing (preserved, not Ink borders)
+  - <Spacer /> for flexible gaps, gap={} for consistent spacing
+
+4.2 Focus Integration
+  - Use useFocus({ autoFocus }) for initial focus per view
+  - Use useInput with isActive guard for overlay suppression
+  - Custom useFocusRing for DetailView's complex focus ring
+  - Modal focus trap via isActive toggling
+
+4.3 useInput Patterns
+  Handler structure:
+    1. Guard: return if overlay active (or use isActive parameter)
+    2. Check modifier combos (Ctrl+Shift+Arrow, Ctrl+R, Alt+H)
+    3. Check special keys (Esc, Return, Tab, arrows)
+    4. Check character keys (j, k, a, d, r, n, q)
+    5. Fallthrough to global handler
+
+4.4 Responsive Layout
+  - Terminal dimensions from useStdout + resize listener
+  - Width flows through LayoutContext (not prop drilling)
+  - Width-sensitive components wrap/truncate based on current columns
+  - No hard-coded widths except fixed constants (HEADER_LINES, etc.)
+
+4.5 Border & Spacing Conventions
+  - Response container inner width: columns - 4
+  - Unicode box-drawing: U+250C, U+2510, U+2514, U+2518, U+2500, U+2502
+  - Spacing: gap={2} between tabs, marginBottom={1} section headers,
+    paddingLeft/Right={1} bordered boxes
+
+
+================================================================================
+5. TESTING REQUIREMENTS
+================================================================================
+
+5.1 Unit Tests (Pure functions, no rendering)
+  - statusToColor() mapping
+  - splitIntoParagraphs() edge cases (code fences, blanks, empty)
+  - flattenToArray() linked list conversion
+  - deriveFirstVisible(), computeLastVisible() viewport math
+  - computeFooterLines(), computeRows() footer layout
+  - buildFlatRows() dependency tree
+  - matchesKey(), matchesKeyCombination() key matching
+  - NewIssue validation (blocked-by parsing)
+  - Navigation reducer (all action types, immutability)
+  - AppState reducer (all typed actions, immutability guarantees)
+  - Selectors (filtered counts, unread counts, progress calculations)
+
+5.2 Integration Tests (ink-testing-library + Vitest)
+  - View routing: push, pop, replace, home, deep navigation
+  - Stack boundary: cannot pop past root
+  - HomeView: cursor, filter cycling, selection, status actions
+  - DetailView: scrolling, thread enter/exit, resolve, focus cycling, overlays
+  - NewIssue: field cycling, validation, submission
+  - AgentStatus: cursor, pane focus
+  - BlockingMap: tree render, issue selection
+  - GroupView: list/issues mode switching
+  - Pickers: toggle, view, close, create
+  - Footer: shortcuts, wrapping, focus highlighting
+  - Header: titles per view, thread mode labels
+
+5.3 Keyboard Testing
+  - stdin.write() with escape sequences:
+    Arrows: \x1B[A/B/C/D, Return: \r, Esc: \x1B, Tab: \t
+    Ctrl+R: \x12, chars: literal
+  - Verify via lastFrame() output assertions
+
+5.4 Focus Testing
+  - Exactly one focused element per view at any time
+  - Non-focused components must not consume keys
+  - Modal focus trap + restore after close
+  - Auto-focus correct on render and navigation transitions
+  - Dynamic slot count verification (thread mode, reply state)
+
+5.5 Mock Data Strategy
+  - Use thread-builders.ts helpers: createMessage, buildResponseChain, etc.
+  - resetIdCounter() before each test for deterministic IDs
+  - No disk reads in tests -- in-memory fixtures only
+  - Object.freeze() on fixtures to catch mutation
+  - Timestamp-controlled fixtures for unread/new-reply logic
+  - Characterization tests before rewrite for ambiguous boundary behavior
+
+
+================================================================================
+6. BUGS AND ERRATA (Claude's source-code audit)
+================================================================================
+
+BUG-1: GroupPicker create-mode has no Esc handler. The InputBridge only renders
+  in list mode, so Esc in create mode is unhandled. Rewrite must fix this.
+
+BUG-2: AgentStatus dead color is red in code, but was documented as gray.
+  Rewrite uses red.
+
+BUG-3: AgentStatus lacks global key handling (Esc/q not handled). Rewrite
+  should add global keys for consistency.
+
+BUG-4: Home view column order in prior docs was wrong. Actual: cursor, inum,
+  title, unread, status. Rewrite follows actual code order.
+
+BUG-5: App.render() switch only handles Home, Detail, IssuePicker. NewIssue,
+  AgentStatus, BlockingMap, GroupView are navigated to but never rendered.
+  Rewrite MUST implement all seven view routes in ViewRouter.
+
+
+================================================================================
+AGENT AGREEMENT MATRIX
+================================================================================
+
+  Requirement                          Gemini  Codex  Claude  Status
+  ---------------------------------------------------------------
+  All functional components             YES     YES    YES    CONSENSUS
+  Eliminate InputBridges                YES     YES    YES    CONSENSUS
+  useReducer for state                  YES     YES    YES    CONSENSUS
+  Context providers                     YES     YES    YES    CONSENSUS
+  Navigation hook                       YES     YES    YES    CONSENSUS
+  Custom focus ring hook                --      YES    YES    MAJORITY (recommended)
+  Ink useFocus for focus                YES     --     --     MINORITY (not recommended)
+  ErrorBoundary                         YES     YES    YES    CONSENSUS
+  Centralized theme tokens              YES     YES    YES    CONSENSUS
+  Immutable state updates               YES     YES    YES    CONSENSUS
+  Auto-save persistence                 --      YES    YES    MAJORITY
+  Keyboard priority tiers               --      YES    YES    MAJORITY
+  useIsScreenReaderEnabled              --      YES    YES    MAJORITY
+  Characterization tests pre-rewrite    --      YES    --     CODEX UNIQUE (adopted)
+  Security observations                 --      --     YES    CLAUDE UNIQUE (noted)
+  Bug identification (5 bugs)           --      --     YES    CLAUDE UNIQUE (adopted)

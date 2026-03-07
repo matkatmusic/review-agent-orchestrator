@@ -1,0 +1,290 @@
+Debate Response: "Has New Replies" Visual Indicator for IssueListPicker
+Agent: Claude (UX Researcher persona)
+=====================================================================
+
+PREAMBLE
+
+I reviewed the actual implementation of IssueListPicker (src/tui/issue-list-picker.tsx),
+DetailView (src/tui/detail.tsx), HomeView (src/tui/home-view.tsx), and the App wiring
+(src/tui/app.tsx) before forming these positions. My arguments are grounded in the
+existing codebase, not hypothetical designs.
+
+Notably, it appears the implementation has already landed in some form -- the current
+IssueListPicker code already accepts unreadInums?: Set<number> and renders a yellow
+asterisk. My debate positions below evaluate whether this implementation is the right
+one and whether refinements are warranted.
+
+
+=====================================================================
+1. INDICATOR DESIGN
+=====================================================================
+
+Position: Yellow asterisk (option a), matching the Home view's existing convention.
+This is the correct choice. Here is why.
+
+CONSISTENCY IS THE DOMINANT CONCERN
+
+The Home view already uses a yellow Unicode heavy asterisk (U+2731) via:
+
+    <Text color="yellow" bold>{unread ? '\u2731' : ' '}</Text>
+
+When a user sees a yellow star-like symbol on the Home view, they learn its meaning:
+"this issue has replies I haven't seen." That learned association should transfer
+directly into every other surface where issues appear. Introducing a red dot, a color
+change, or badge text like "[new]" would force the user to learn a second visual
+vocabulary for the same concept. In a terminal UI with limited visual affordances,
+every unique symbol has to earn its place. Re-using the same one for the same meaning
+is the obvious UX win.
+
+The current IssueListPicker implementation uses a plain ASCII asterisk '*' rather than
+the Unicode heavy asterisk U+2731 used in the Home view. I would argue this is a minor
+inconsistency worth correcting. The picker should use the same U+2731 character to
+create exact visual parity. Both are single-column-width characters, so there is no
+spacing difference.
+
+WHY THE ALTERNATIVES ARE WORSE
+
+- Red dot/bullet (option b): Introduces a new color semantic. Red in this TUI is
+  already used for unresolved thread separators and error states. Overloading red for
+  "unread" would create cognitive interference. Additionally, a red dot suggests
+  urgency or danger, which is a stronger signal than "there are new replies." Unread
+  replies are informational, not alarming.
+
+- Color change on title/number (option c): Extremely space-efficient (zero extra
+  characters), but it is too subtle. The cursor highlight already uses cyan on the
+  focused row. If we also colorize the title yellow for unread, the user sees two
+  different color meanings competing on the same text element when the cursor lands on
+  an unread issue. The result is a confusing visual hierarchy. Dedicated badge
+  characters are better because they occupy their own spatial lane.
+
+- Badge text "[new]" (option d): Consumes 5 characters of horizontal space. The row
+  is already tight -- cursor (2), checkbox (4), issue number (6), title (up to 30),
+  status label (variable). Adding "[new]" would require further title truncation or
+  push the status label off screen in narrow terminals. A single character is vastly
+  preferable.
+
+RECOMMENDATION
+
+Use the same yellow U+2731 heavy asterisk that Home view uses, rendered in yellow and
+bold. When the issue has no unread replies, render a space character to preserve column
+alignment.
+
+
+=====================================================================
+2. PLACEMENT
+=====================================================================
+
+Position: After the checkbox and before the issue number (option b, modified).
+The current implementation places it between the checkbox and the issue number, which
+is the right zone but worth examining carefully.
+
+The current rendering order in issue-list-picker.tsx is:
+
+    cursor | checkbox | unread indicator | issue number | title | status
+
+This produces rows like:
+
+    > [x] * I-3    rate_limiting_design              Awaiting
+      [ ]   I-6    stale_session_cleanup             Blocked
+
+I argue this placement is correct for the following reasons:
+
+SCANNING PATTERN ALIGNMENT
+
+Terminal users scan rows left to right. The leftmost elements are the highest-signal
+elements. The cursor tells you "where am I," the checkbox tells you "is this selected,"
+and the unread indicator tells you "does this need attention." These three pieces of
+state information form a natural cluster at the left edge. The issue number and title
+are identification information, and the status is classification information. Grouping
+state before identity before classification follows information hierarchy principles.
+
+WHY NOT THE OTHER PLACEMENTS
+
+- Before the checkbox (option a): "  * [x] I-3 ..."
+  This interleaves the unread indicator with the cursor column. When the cursor is on
+  the row, you get "> * [x]" which is three consecutive single-character symbols. It
+  becomes visually cluttered and hard to parse at a glance. The cursor indicator needs
+  breathing room.
+
+- After the title (option c): "  [x] I-3  rate_limiting...  * Awaiting"
+  This pushes the indicator into a variable-width zone. Because titles are truncated
+  to different lengths (some hit the 30-char max, some are shorter), the asterisk
+  would appear at inconsistent horizontal positions across rows. The eye cannot form a
+  vertical "unread column" to scan, which defeats the purpose of a glanceable indicator.
+  The current code pads titles, but any variability undermines scannability.
+
+- After the status (option d): "  [x] I-3  rate_limiting...  Awaiting *"
+  The rightmost position is the worst for discoverability. Users' eyes would have to
+  travel the full width of each row to find the indicator. In terminals narrower than
+  expected, the indicator might be clipped entirely. Status labels also have variable
+  width, compounding the alignment problem.
+
+RECOMMENDATION
+
+Keep the current placement: after the checkbox, before the issue number. This creates
+a clean vertical column of asterisks that the eye can scan independently of the other
+columns.
+
+
+=====================================================================
+3. DATA FLOW
+=====================================================================
+
+Position: Pass unreadInums: Set<number> as a prop (option a). This is the cleanest
+architecture by a significant margin.
+
+WHY Set<number> IS RIGHT
+
+The unreadInums set is already computed and maintained at the App level. It is passed to
+HomeView. It is now passed to DetailView (which forwards it to the picker flow). The
+set is the canonical source of truth for "which issues have unread replies." Passing
+the same set reference to IssueListPicker means:
+
+1. Zero additional computation. The picker does a single O(1) Set.has() lookup per row.
+2. Single source of truth. If the App updates unreadInums (e.g., after the user views
+   an issue and replies are marked seen), every consumer automatically reflects the
+   change on next render.
+3. No coupling between the picker and the response chain data model. The picker does
+   not need to know what a Response is, what "seen" means, or how checkNewReplies works.
+
+WHY THE ALTERNATIVES ARE WORSE
+
+- Computed boolean on Issue type (option b): This violates separation of concerns. The
+  Issue type is a data model representing an issue's intrinsic properties (title, status,
+  assignee, etc.). Whether the current user has unread replies is a user-session-scoped
+  computed value, not an intrinsic property of the issue. Baking it into the Issue type
+  means either (1) mutating Issue objects when read state changes, which is error-prone
+  and creates stale data risks, or (2) recomputing it on every render, which couples the
+  Issue type to the response chain data structure. Neither is clean.
+
+  There is also a practical problem: the Issue type is likely shared across multiple
+  files and possibly serialized to/from JSON. Adding a volatile computed field to a
+  data transfer type creates confusion about which fields are persistent and which are
+  ephemeral.
+
+- Map<number, boolean> (option c): This is functionally equivalent to Set<number> but
+  strictly worse. A Set is the natural data structure for "membership in a group." A
+  Map<number, boolean> is a Set that wastes memory storing boolean true values and
+  forces the caller to handle the undefined-vs-false ambiguity. The API for checking
+  membership is also less readable: map.get(inum) === true vs set.has(inum). There is
+  no advantage to the Map approach.
+
+THE EXISTING IMPLEMENTATION IS CORRECT
+
+Looking at app.tsx, the wiring is already in place:
+
+    <IssueListPicker
+        title={...}
+        issues={otherIssues}
+        selected={selectedSet}
+        unreadInums={MOCK_UNREAD_INUMS}
+        ...
+    />
+
+This is exactly the right pattern. The App owns the unreadInums set and passes it down.
+
+RECOMMENDATION
+
+Keep the current approach: pass unreadInums: Set<number> as a prop.
+
+
+=====================================================================
+4. PROPS INTERFACE
+=====================================================================
+
+Position: Simple approach (option a) -- just the optional unreadInums?: Set<number>
+prop. Do not build a generic badge system.
+
+THE CASE AGAINST PREMATURE GENERALIZATION
+
+A generic badges?: Map<number, {symbol: string, color: string}> prop is a textbook
+example of speculative generality. Let me enumerate the costs:
+
+1. TYPE COMPLEXITY: Instead of Set<number>, the consumer must construct a Map with
+   object values. Every call site that wants to show unread indicators must do:
+
+       const badges = new Map<number, {symbol: string, color: string}>();
+       for (const inum of unreadInums) {
+           badges.set(inum, { symbol: '\u2731', color: 'yellow' });
+       }
+
+   Compare this to just passing unreadInums directly. The generic version adds
+   boilerplate at every call site for zero functional benefit today.
+
+2. RENDERING COMPLEXITY: The picker's render code must handle arbitrary badge
+   configurations. What if two badges apply to the same issue? Do they stack? In what
+   order? What if a badge symbol is multi-character or multi-column-width and breaks
+   the alignment? These are design questions that do not need to be answered until a
+   second badge type actually exists.
+
+3. INCONSISTENCY RISK: A generic badge system means different callers could use
+   different symbols and colors for the same concept. The whole point of question 1
+   was consistency -- using the same yellow star everywhere. A badge system invites
+   inconsistency by making the symbol and color caller-specified.
+
+4. YAGNI (You Ain't Gonna Need It): The prompt asks us to consider "future
+   extensibility," but extensibility has a cost. Every generic abstraction is harder
+   to understand, harder to test, and harder to change than a specific one. If and
+   when a second badge type is needed (e.g., "assigned to you," "mentioned"), it takes
+   about 15 minutes to refactor Set<number> into a more general structure. The cost of
+   refactoring later is negligible compared to the ongoing complexity of maintaining a
+   generic system that serves only one use case.
+
+THE CURRENT IMPLEMENTATION IS RIGHT
+
+The existing code uses:
+
+    unreadInums?: Set<number>
+
+This is optional (the picker works fine without it), type-safe, minimal, and exactly
+expressive enough for the current requirement. The '?' makes it backward compatible
+with any existing call sites that do not pass unread data.
+
+IF WE EVER NEED A SECOND BADGE
+
+When (not if) a second badge type arises, the refactoring path is clear:
+
+1. Change the prop from Set<number> to something like:
+   badges?: Map<number, BadgeConfig[]>
+2. Update the two or three call sites.
+3. Update the render logic.
+
+This is a 30-minute refactor with full type-checker support. There is no reason to
+pay for this generality today.
+
+RECOMMENDATION
+
+Keep the simple unreadInums?: Set<number> prop. Revisit if a second badge type
+emerges.
+
+
+=====================================================================
+IMPLEMENTATION SUMMARY
+=====================================================================
+
+The existing implementation in the codebase is almost exactly right. The only
+refinement I would recommend:
+
+CHANGE: In issue-list-picker.tsx line 88, replace the ASCII asterisk with the
+Unicode heavy asterisk to match the Home view:
+
+    Current:  {hasNewReplies ? '* ' : '  '}
+    Proposed: {hasNewReplies ? '\u2731 ' : '  '}
+
+And optionally add bold to match the Home view's styling:
+
+    <Text color={hasNewReplies ? 'yellow' : undefined} bold={hasNewReplies}>
+        {hasNewReplies ? '\u2731 ' : '  '}
+    </Text>
+
+Everything else -- the Set<number> data flow, the placement after the checkbox, the
+simple props interface, the legend at the bottom of the picker -- is well designed
+and should ship as-is.
+
+FINAL ROW RENDERING (with fix applied):
+
+    > [x] * I-3    rate_limiting_design              Awaiting
+      [ ]   I-6    stale_session_cleanup             Blocked
+
+Where * renders as the yellow bold U+2731 heavy asterisk, identical in appearance
+to the Home view's unread badge.

@@ -1,0 +1,132 @@
+Here is a detailed debate and analysis of the design questions for adding a "has new replies" indicator to the `IssueListPicker`, concluding with a recommended implementation sketch.
+
+### 1. INDICATOR DESIGN: What visual indicator should represent "has new replies"?
+
+**Arguments:**
+*   **a) Yellow star/asterisk (`*`):** 
+    *   *Pros:* Absolute consistency with the existing `Home` view. Reusing visual vocabulary means the user doesn't have to learn a new paradigm. Yellow is universally supported in terminal ANSI colors and stands out without implying an error.
+    *   *Cons:* Can sometimes feel slightly cluttered if placed next to other punctuation (like `[x]`).
+*   **b) Red dot or bullet (`•`):** 
+    *   *Pros:* Traditional web/mobile UI pattern for "unread".
+    *   *Cons:* In CLI/TUI environments, Red almost exclusively means "Error" or "Failing". Using it for "unread" causes semantic friction. Bullet characters can also render inconsistently across different terminal emulators or fonts.
+*   **c) Color change on the issue title or number:**
+    *   *Pros:* Zero additional horizontal space used.
+    *   *Cons:* Destroys existing semantic coloring (e.g., if statuses or numbers have specific colors). It also creates accessibility (color-blindness) issues where the state change relies entirely on color without a shape change.
+*   **d) Badge text (`[new]`):**
+    *   *Pros:* Completely unambiguous.
+    *   *Cons:* Takes up 5-6 terminal columns. In a constrained row that already has a cursor, checkbox, ID, truncated title, and status, horizontal space is a premium commodity.
+
+**Winner: (a) Yellow star/asterisk.** Consistency is king in UI design. If the user already associates a yellow star with "unread/new" on the Home view, reusing it here eliminates the learning curve and conserves horizontal space.
+
+---
+
+### 2. PLACEMENT: Where in the row should the indicator go?
+
+**Arguments:**
+*   **a) Before the checkbox (`  * [x] I-3`):**
+    *   *Pros:* Highly scannable in a straight vertical line down the left edge.
+    *   *Cons:* Competes directly with the navigation cursor (`>`). A row that is both focused and unread (`> * [x]`) looks chaotic and pushes the core interaction (checkbox) further right.
+*   **b) After the issue number (`  [x] I-3 * rate_limiting`):**
+    *   *Pros:* Groups the "unread" state logically with the issue identifier. It keeps the interactive elements (cursor, checkbox) cleanly aligned on the far left. By padding with spaces when *not* unread, the titles remain perfectly vertically aligned.
+    *   *Cons:* Requires precise padding management to ensure the title doesn't shift left/right depending on the unread state.
+*   **c) After the title (`  [x] I-3 rate_limiting... * Awaiting`):**
+    *   *Pros:* Good use of whitespace if titles are padded.
+    *   *Cons:* Because titles are truncated or variable length, this creates a ragged edge. The user's eye would have to zigzag down the screen to spot the stars.
+*   **d) After the status (`  [x] I-3 rate_limiting... Awaiting *`):**
+    *   *Pros:* Anchored to the far right, keeping it out of the way of the data.
+    *   *Cons:* Disconnected entirely from the issue identity. "Unread" is a property of the issue/conversation, not the status.
+
+**Winner: (b) After the issue number.** It preserves the clean left margin for navigation/selection, associates the metadata directly with the Issue ID, and is easily tamed by strict column padding (e.g., reserving a 2-character column for the indicator/padding).
+
+---
+
+### 3. DATA FLOW: How should unread state reach the picker?
+
+**Arguments:**
+*   **a) Pass `unreadInums: Set<number>` as a new prop:**
+    *   *Pros:* O(1) lookup. Perfectly matches the data structure already used by the `Home` view. Minimal memory overhead and avoids iterating over the issues array just to map data.
+    *   *Cons:* Couples the `IssueListPicker` slightly to the domain concept of "unread".
+*   **b) Extend the `Issue` type to include a computed `hasNewReplies` boolean:**
+    *   *Pros:* Keeps the component API pristine (`issues: Issue[]`). The component doesn't need to know *why* an issue is flagged, it just renders the flag.
+    *   *Cons:* Forces the parent (the detail view overlay manager) to map over the `issues` array and create a deep/shallow copy to inject this boolean every time the picker opens, which is wasteful and hurts React's reference-equality rendering optimizations.
+*   **c) Pass a `Map<number, boolean>`:**
+    *   *Pros:* Clean key-value lookup.
+    *   *Cons:* Redundant. A `Set` is exactly what is needed for a simple binary "is present" check, and `Set` is already what the rest of the application uses.
+
+**Winner: (a) Pass `unreadInums: Set<number>`.** It relies on existing infrastructure, avoids unnecessary array mapping/allocations before render, and provides lightning-fast O(1) lookups during the list render loop.
+
+---
+
+### 4. PROPS INTERFACE: Should IssueListPicker know about "unread" generically, or use a general "badge" system?
+
+**Arguments:**
+*   **a) Simple: `unreadInums?: Set<number>` prop:**
+    *   *Pros:* Strict adherence to YAGNI (You Aren't Gonna Need It). Highly readable, strictly typed, and directly solves the immediate product requirement with minimal code.
+    *   *Cons:* If tomorrow we need an "urgent" indicator and an "assigned" indicator, we'll keep piling on `Set` props (`urgentInums`, `assignedInums`).
+*   **b) Generic: `badges?: Map<number, {symbol: string, color: string}>`:**
+    *   *Pros:* Highly extensible. The component becomes a dumb renderer of generic badges.
+    *   *Cons:* Over-engineering. Terminal UIs have extremely limited space; realistically, you will almost never stack 3 or 4 different badge types on a single 50-character row. It also shifts the burden of defining visual aesthetics (colors, symbols) to the parent container, violating separation of visual concerns.
+
+**Winner: (a) Simple prop.** In React terminal applications, keep props explicit and tightly scoped until a second or third use-case actually emerges. 
+
+---
+
+### Recommended Implementation Sketch
+
+Based on the debate winners, here is how the implementation should look:
+
+```tsx
+// IssueListPicker.tsx
+import React from 'react';
+import { Box, Text } from 'ink';
+
+type Props = {
+  issues: Issue[];
+  selectedInums: Set<number>;
+  unreadInums?: Set<number>; // Optional: Passed from detail.tsx
+  cursorIndex: number;
+  // ...other props
+};
+
+export const IssueListPicker: React.FC<Props> = ({ 
+  issues, 
+  selectedInums, 
+  unreadInums = new Set(), // Default to empty set
+  cursorIndex 
+}) => {
+  return (
+    <Box flexDirection="column">
+      {issues.map((issue, index) => {
+        const isCursor = index === cursorIndex;
+        const isSelected = selectedInums.has(issue.inum);
+        const isUnread = unreadInums.has(issue.inum);
+        
+        // Pad ID to 4 chars (e.g., "I-3 ") for alignment, assuming max I-999
+        const idString = `I-${issue.inum}`.padEnd(5, ' ');
+        
+        return (
+          <Box key={issue.inum} flexDirection="row">
+            {/* Cursor */}
+            <Text>{isCursor ? '> ' : '  '}</Text>
+            
+            {/* Checkbox */}
+            <Text>{isSelected ? '[x] ' : '[ ] '}</Text>
+            
+            {/* ID + Unread Indicator (Winner of Q1 & Q2) */}
+            <Text>{idString}</Text>
+            <Text color={isUnread ? "yellow" : undefined}>
+              {isUnread ? '* ' : '  '}
+            </Text>
+            
+            {/* Title (Truncated) */}
+            <Text>{truncate(issue.title, 30).padEnd(32, ' ')}</Text>
+            
+            {/* Status */}
+            <Text>{issue.status}</Text>
+          </Box>
+        );
+      })}
+    </Box>
+  );
+};
+```

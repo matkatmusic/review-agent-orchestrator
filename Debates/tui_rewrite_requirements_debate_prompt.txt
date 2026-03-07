@@ -1,0 +1,192 @@
+TUI REWRITE REQUIREMENTS DEBATE
+================================
+
+CONTEXT:
+We are performing a complete rewrite of a React/Ink-based terminal user interface (TUI) for a review agent orchestrator application. The current implementation has significant architectural issues that need to be addressed. Your task is to produce a COMPLETE, DEFINITIVE list of functional requirements for the rewrite.
+
+The rewrite must:
+1. Convert all class components to functional components with hooks
+2. Follow React best practices (proper state management, no forceUpdate, no mutation)
+3. Follow Ink framework best practices (useFocus, useFocusManager, useInput, proper Box/Text composition)
+4. Maintain 100% functional parity with the current implementation
+
+CURRENT CODEBASE AUDIT (35 source files):
+
+=== FILE INVENTORY ===
+
+Entry Point & App Shell:
+- run.tsx: Entry point, handles --resetMockData, creates AppWrapper with useStdout()/useApp(), manages terminal resize, passes initial view
+- app.tsx: Main App (CLASS component), manages viewStack[], groupMode, threadInfo, savedSelectedMessage Map, focusedFooterIndex. Navigation methods: pushViewOntoStack, popViewFromStack, navigateToView, replaceCurrentView, goBackToPreviousView, goHome, saveSelectedAndGoBack, saveSelectedAndGoHome, setGroupMode
+- views.ts: ViewType enum (Home, Detail, NewIssue, AgentStatus, BlockingMap, GroupView, IssuePicker), discriminated union View type, ViewTypeStringsMap
+
+Layout Components:
+- header.tsx: Functional/memoized. Props: currentView, columns, activeAgents?, unreadCount?, threadInfo?. Renders 3 lines: centered title rule, agent/unread status, subtitle. HEADER_LINES=3
+- footer.tsx: Functional/memoized. Props: viewType, inThread?, threadResolved?, focusedIndex?, columns?. VIEW_SHORTCUTS per ViewType, THREAD_SHORTCUTS array. computeFooterLines(), computeRows() for word-wrapping. Renders shortcuts with cyan bold keys, dimColor disabled, inverse focused
+
+Home View:
+- home-view.tsx: CLASS component. Props: issues, unreadInums Set, maxAgents, onSelect, onNewIssue, onActivate, onDefer, onResolve, onNavigate?, onBack?, onQuit?. State: useStatusFilter, statusFilter, cursor. Uses HomeViewInputBridge for useInput. Keys: Up/Down/j/k navigate, Tab/Shift+Tab cycle status filter, Enter select, a/d/r activate/defer/resolve, n new issue. Renders status tabs with count badges, issue list with selection marker, unread indicator, status color, truncated title, capacity indicator
+
+Detail View (MOST COMPLEX - 612 lines):
+- detail.tsx: CLASS component. Props: inum, issue, rootResponse, blockedBy[], blocks[], group, columns, rows, containers?, allIssues?, unreadInums?, userLastViewedAt?, plus 9 callbacks. State: inputValue, focusedField (0=Group/1=BlockedBy/2=Blocks), focusedFooterIndex, focusedViewReplies, overlay (None/Group), blockedBySet, blocksSet, selectedMessage, threadStack[], suppressNextInput.
+  Features:
+  - Thread Navigation: enterThread() pushes parent to stack, exitThread() pops and restores cursor
+  - Thread Resolution: resolveThread() toggles thread_resolved_at
+  - Issue Resolution: resolveIssue() toggles Active/Resolved
+  - Focus Cycling (Tab ring): input -> header fields -> view replies -> footer items
+  - Overlay Management: GroupPicker or IssueListPicker
+  - Adjacent Issue Navigation: Shift+Left/Right for prev/next issue
+  Keys: Alt+H home, Esc exit thread/back, Ctrl+Shift+Right/Left enter/exit thread, Ctrl+R resolve, Shift+Left/Right adjacent issue, Tab/Shift+Tab focus ring, Up/Down scroll messages, Enter on focused field opens picker
+
+Response Display:
+- response-container.tsx: CLASS component. Props: response, columns, selected, hasNewReplies, threadResolved?, isThreadParent?, viewRepliesFocused?. Static computeLineCount(). Renders top border (continuation/regular/selected modes), word-wrapped body, bottom border (reply/view replies/plain), separator line with resolve hint
+- response-chain.tsx: CLASS component. Props: rootResponse, columns, height, userLastViewedAt, selectedIndex, viewRepliesFocusedIndex?. Utilities: flattenToArray(), checkNewReplies(), findFirstNewReplyIndex(), computeHeight(), centerOnSelection(), deriveFirstVisible(), computeLastVisible(). Viewport centering algorithm with scroll anchoring
+
+Issue Header & Input:
+- issue-header.tsx: CLASS component. Props: inum, issue, group, blockedByStr, blocksStr, columns, focusedField?. ISSUE_HEADER_LINE_COUNT=5 (title + status + deps + hint + separator)
+- input-box.tsx: CLASS component. Props: value, focused, columns, onChange, onSubmit. INPUT_AREA_LINES=3. Uses TextInput from ink-text-input
+
+Modals/Pickers:
+- group-picker.tsx: CLASS component. Two modes: list (browse containers j/k/Enter) and create (text input for new group). Bordered box
+- issue-list-picker.tsx: CLASS component. Props: title, issues, selected Set, unreadInums?, onToggle, onClose, onViewIssue?. Checklist with status color, j/k/Enter toggle, Ctrl+V view, Esc close
+
+Other Views:
+- newissue.tsx: FUNCTIONAL component. Props: onCreated, onCancel, onNavigate?, onBack?, onQuit?. State: activeField (0-3), values Record, error. FIELDS=['Title','Description','Group','Blocked by']. Tab cycles fields, Enter submit, Esc cancel
+- agent-status.tsx: FUNCTIONAL/memoized. Renders agent table: Inum|Title|Pane|Status(alive/dead)|LastActivity. j/k navigate, Enter focus pane
+- blocking-map.tsx: FUNCTIONAL/memoized. buildFlatRows() creates ASCII dependency tree. j/k navigate, Enter view issue
+- group-view.tsx: FUNCTIONAL. Two-mode state machine: list (containers with progress bars) and issues (drilled into container). j/k/Up/Down navigate, Enter drill/select, Esc back
+
+Hotkey System:
+- hotkeys.ts: Ink_keyofKeys_Choices enum, HotKeys_keyofKey_Map, InkKeyOfKeysStringMap (visual labels), KeyCombinations enum, getHotKeyLabel(), matchesKey(), matchesKeyCombination()
+- global-keys.tsx: handleGlobalKey() dispatcher: Esc back, q quit, s AgentStatus, b BlockingMap, g GroupView, n NewIssue
+
+Utilities:
+- status-color.ts: Maps IssueStatus to color (Active=green, Awaiting=blue, Blocked=red, Deferred=yellow, Resolved=gray)
+- paragraph-utils.ts: splitIntoParagraphs() preserving code fences
+- thread-builders.ts: Response chain construction helpers (createMessage, makeResponseNode, linkResponseChain, buildResponseChain, buildReplyChain, splitAgentMessage, buildMixedChain)
+- mock-data.ts + mock-store.ts: File-backed JSON store with issues, responses, details, dependencies, containers, unreadInums, maxAgents
+
+=== COMPONENT TREE ===
+
+run.tsx
+  AppWrapper (functional, hooks)
+    App (class)
+      Header
+      HomeView
+        HomeViewInputBridge
+      DetailView
+        DetailInputBridge
+        ThreadHeaderSeparator
+        GroupPicker (overlay)
+        IssueHeader
+        ResponseChain
+          ResponseContainer (multiple)
+        InputBox
+      IssueListPicker
+        IssueListInputBridge
+      NewIssue
+      AgentStatus
+      BlockingMap
+      GroupView
+      Footer
+
+=== KNOWN ANTI-PATTERNS IN CURRENT CODE ===
+
+1. Mixed class + functional components (inconsistent)
+2. forceUpdate() overuse instead of proper state management
+3. Mutable mock data (direct MOCK_* mutations)
+4. No error boundaries
+5. Manual Tab ring management instead of useFocus/useFocusManager
+6. Scattered keyboard handling (no centralized dispatcher)
+7. Excessive prop drilling (columns, rows, callbacks repeated everywhere)
+8. No auto-save persistence
+9. Hard-coded colors/labels duplicated across files
+10. Input Bridge pattern needed only because class components can't use hooks
+
+=== INK FRAMEWORK BEST PRACTICES (from official documentation) ===
+
+Components:
+- Box: Flexbox layout via Yoga (flexDirection, justifyContent, alignItems, gap, padding, margin, borders, dimensions)
+- Text: Required wrapper for ALL text (color, bold, italic, underline, dim, inverse, wrap, truncate)
+- Static: Persistent output above dynamic content, renders once
+- Transform: Modify string output before display
+- Spacer: Flexible space along major axis
+- STRICT RULE: Raw text outside <Text> throws errors. <Box> inside <Text> throws errors.
+
+Hooks:
+- useInput(callback): Keyboard capture with (input, key) signature. Key has direction flags, special keys, modifiers
+- useFocus({ autoFocus }): Component focus registration, returns { isFocused }
+- useFocusManager(): Navigate between focusable components (focusPrevious, focusNext, focusSpecific)
+- useApp(): Application lifecycle (exit)
+- useStdin/useStdout: Direct stream access
+- useIsScreenReaderEnabled: Accessibility detection
+
+State Management:
+- Use standard React hooks (useState, useEffect, useMemo, useCallback)
+- Proper cleanup in useEffect returns
+- Batch state updates
+- Memoize expensive computations
+
+Focus System:
+- useFocus() auto-registers with focus manager
+- Tab/Shift+Tab navigates focus
+- Only one component focused at a time
+- autoFocus for initial focus
+
+Performance:
+- maxFps (default 30) controls render throttle
+- incrementalRendering updates only changed lines
+- Memoize expensive computations
+- Conditional rendering with isFocused
+- Test with large datasets
+
+Anti-patterns to avoid:
+- Raw text outside <Text>
+- Uncontrolled infinite re-renders
+- Blocking synchronous operations
+- Ignoring focus state in input handlers
+- Hard-coded widths (breaks responsive layouts)
+- Console.log in render path
+
+=== YOUR TASK ===
+
+Analyze the codebase audit and Ink best practices above. Produce a COMPLETE list of requirements for the TUI rewrite organized into these categories:
+
+1. COMPONENT ARCHITECTURE REQUIREMENTS
+   - How should the component tree be restructured?
+   - What custom hooks should be extracted?
+   - How should state be managed (context providers, hook composition, etc.)?
+   - How should the Input Bridge anti-pattern be eliminated?
+
+2. VIEW-BY-VIEW FUNCTIONAL REQUIREMENTS
+   For each view (Home, Detail, NewIssue, AgentStatus, BlockingMap, GroupView, IssueListPicker, GroupPicker), list:
+   - Every piece of UI that must be rendered
+   - Every keyboard interaction that must work
+   - Every state transition
+   - Every data dependency
+
+3. CROSS-CUTTING CONCERNS
+   - Navigation system (view stack, back navigation, global shortcuts)
+   - Focus management (how to leverage useFocus/useFocusManager correctly)
+   - Keyboard handling architecture
+   - Data layer (how to replace mutable mock data with proper state)
+   - Theming/styling (centralized color/style tokens)
+   - Error handling
+   - Accessibility
+   - Performance (viewport calculations, memoization, scroll anchoring)
+
+4. INK-SPECIFIC IMPLEMENTATION REQUIREMENTS
+   - Proper Box/Text composition patterns
+   - useFocus integration for the Tab ring
+   - useInput patterns for keyboard handling
+   - Responsive layout handling
+   - Border and spacing conventions
+
+5. TESTING REQUIREMENTS
+   - What should be unit tested vs integration tested
+   - How to test keyboard interactions
+   - How to test focus management
+   - Mock data strategy for tests
+
+For each requirement, be SPECIFIC. Don't say "handle keyboard input" -- say "Up arrow and k key move cursor up by 1 in the issue list, wrapping to bottom when at index 0."
+
+The goal is a requirements document so complete that a developer could rewrite the entire TUI from scratch without looking at the original code.
