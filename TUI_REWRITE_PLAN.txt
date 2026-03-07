@@ -18,17 +18,17 @@ for reference. New files are created alongside or replace them.
   - [x] Create branch: tui-rewrite
   - [x] Tag current HEAD for reference: pre-rewrite
 
-- [ ] Step 0.2: Test Harness Setup
+- [x] Step 0.2: Test Harness Setup
 ------------------------------
-  - [ ] Verify vitest + ink-testing-library work with a trivial component
-  - [ ] keep colocated .test.tsx
-  - [ ] Create test helper: renderApp(view?, props?) that wraps Ink render()
+  - [x] Verify vitest + ink-testing-library work with a trivial component
+  - [x] keep colocated .test.tsx
+  - [x] Create test helper: renderApp(view?, props?) that wraps Ink render()
     with mock stdout, controlled dimensions, and stdin for input simulation
-  - [ ] Create test helper: tick(ms?) for async flush
+  - [x] Create test helper: tick(ms?) for async flush
 
   Tests to write FIRST (red):
-    - [ ] test: "renderApp returns a frame" — trivial <Text>hello</Text>
-    - [ ] test: "stdin.write sends input" — useInput receives it
+    - [x] test: "renderApp returns a frame" — trivial <Text>hello</Text>
+    - [x] test: "stdin.write sends input" — useInput receives it
 
   Deliverable: Working test harness, 2 passing tests.
   Req coverage: REQ-TEST-001, REQ-TEST-002, REQ-TEST-003
