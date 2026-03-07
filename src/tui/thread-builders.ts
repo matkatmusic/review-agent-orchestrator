@@ -31,6 +31,7 @@ function makeResponseNode(message: Message, isContinuation = false): Response {
         reply: null,
         is_continuation: isContinuation,
         thread_resolved_at: null,
+        quoted_response_id: null,
     };
 }
 

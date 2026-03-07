@@ -1,32 +1,24 @@
 import React from 'react';
 import { render } from 'ink-testing-library';
 
-/**
- * Shared test helpers for Ink TUI tests.
- *
- * renderApp — wraps ink-testing-library render() with controlled dimensions.
- * tick      — flushes async effects (useEffect / useInput registration).
- */
-
 interface RenderAppOptions {
     columns?: number;
-    rows?: number;
 }
 
 /**
- * Renders a React element through ink-testing-library with controllable
- * terminal dimensions via the COLUMNS environment variable.
- *
- * Returns the same object as ink-testing-library's render() — lastFrame,
- * frames, stdin, cleanup, etc.
+ * Wraps ink-testing-library render() with controlled terminal dimensions.
+ * Sets process.stdout.columns before rendering so Ink sees the desired width.
  */
 export function renderApp(
     ui: React.ReactElement,
     options: RenderAppOptions = {},
-) {
+): ReturnType<typeof render> {
     const { columns = 80 } = options;
-    // ink-testing-library accepts columns to control virtual terminal width
-    return render(ui, { columns });
+    const prev = process.stdout.columns;
+    process.stdout.columns = columns;
+    const result = render(ui);
+    process.stdout.columns = prev;
+    return result;
 }
 
 /**

@@ -322,6 +322,7 @@ describe('DetailView', () => {
             reply: null,
             is_continuation: false,
             thread_resolved_at: null,
+            quoted_response_id: null,
         };
         nodes[0].reply = replyNode;
 
@@ -357,6 +358,7 @@ describe('DetailView', () => {
             reply: null,
             is_continuation: false,
             thread_resolved_at: null,
+            quoted_response_id: null,
         };
         nodes[0].reply = replyNode;
 
@@ -407,6 +409,7 @@ describe('DetailView', () => {
             reply: null,
             is_continuation: false,
             thread_resolved_at: null,
+            quoted_response_id: null,
         };
         nodes[0].reply = replyNode;
 
@@ -450,6 +453,7 @@ describe('DetailView', () => {
             reply: null,
             is_continuation: false,
             thread_resolved_at: null,
+            quoted_response_id: null,
         };
         nodes[0].reply = replyNode;
 
@@ -478,6 +482,7 @@ describe('DetailView', () => {
             reply: null,
             is_continuation: false,
             thread_resolved_at: null,
+            quoted_response_id: null,
         };
         nodes[0].reply = replyNode;
         nodes[0].thread_resolved_at = '2025-01-15T12:00:00Z';
@@ -514,7 +519,7 @@ describe('DetailView', () => {
             id: 100,
             content: createMessage(AuthorType.Agent, ResponseType.None, 'Reply', '2025-01-15T12:00:00Z'),
             responding_to: null, response: null, replying_to: nodes[0], reply: null,
-            is_continuation: false, thread_resolved_at: null,
+            is_continuation: false, thread_resolved_at: null, quoted_response_id: null,
         };
         nodes[0].reply = replyNode;
 
@@ -634,7 +639,7 @@ describe('DetailView', () => {
             id: 100,
             content: createMessage(AuthorType.Agent, ResponseType.None, 'Reply', '2025-01-15T12:00:00Z'),
             responding_to: null, response: null, replying_to: nodes[0], reply: null,
-            is_continuation: false, thread_resolved_at: null,
+            is_continuation: false, thread_resolved_at: null, quoted_response_id: null,
         };
         nodes[0].reply = replyNode;
 
@@ -659,7 +664,7 @@ describe('DetailView', () => {
             id: 100,
             content: createMessage(AuthorType.Agent, ResponseType.None, 'Reply', '2025-01-15T12:00:00Z'),
             responding_to: null, response: null, replying_to: nodes[0], reply: null,
-            is_continuation: false, thread_resolved_at: null,
+            is_continuation: false, thread_resolved_at: null, quoted_response_id: null,
         };
         nodes[0].reply = replyNode;
 
@@ -686,7 +691,7 @@ describe('DetailView', () => {
             id: 100,
             content: createMessage(AuthorType.Agent, ResponseType.None, 'Reply', '2025-01-15T12:00:00Z'),
             responding_to: null, response: null, replying_to: nodes[0], reply: null,
-            is_continuation: false, thread_resolved_at: null,
+            is_continuation: false, thread_resolved_at: null, quoted_response_id: null,
         };
         nodes[0].reply = replyNode;
 
@@ -752,7 +757,7 @@ describe('DetailView', () => {
             id: 100,
             content: createMessage(AuthorType.Agent, ResponseType.None, 'Reply', '2025-01-15T12:00:00Z'),
             responding_to: null, response: null, replying_to: nodes[0], reply: null,
-            is_continuation: false, thread_resolved_at: null,
+            is_continuation: false, thread_resolved_at: null, quoted_response_id: null,
         };
         nodes[0].reply = replyNode;
 
@@ -807,6 +812,7 @@ describe('ResponseContainer', () => {
                 reply: null,
                 is_continuation: false,
                 thread_resolved_at: null,
+                quoted_response_id: null,
             };
         };
 
@@ -908,9 +914,9 @@ describe('ResponseContainer', () => {
         it('shows view replies when selected with replies', () => {
             const resp = makeResponse();
             // Build a reply chain of 3
-            const r1: Response = { id: 90, content: { ...resp.content }, responding_to: null, response: null, replying_to: resp, reply: null, is_continuation: false, thread_resolved_at: null };
-            const r2: Response = { id: 91, content: { ...resp.content }, responding_to: r1, response: null, replying_to: null, reply: null, is_continuation: false, thread_resolved_at: null };
-            const r3: Response = { id: 92, content: { ...resp.content }, responding_to: r2, response: null, replying_to: null, reply: null, is_continuation: false, thread_resolved_at: null };
+            const r1: Response = { id: 90, content: { ...resp.content }, responding_to: null, response: null, replying_to: resp, reply: null, is_continuation: false, thread_resolved_at: null, quoted_response_id: null };
+            const r2: Response = { id: 91, content: { ...resp.content }, responding_to: r1, response: null, replying_to: null, reply: null, is_continuation: false, thread_resolved_at: null, quoted_response_id: null };
+            const r3: Response = { id: 92, content: { ...resp.content }, responding_to: r2, response: null, replying_to: null, reply: null, is_continuation: false, thread_resolved_at: null, quoted_response_id: null };
             r1.response = r2;
             r2.response = r3;
             resp.reply = r1;
@@ -925,8 +931,8 @@ describe('ResponseContainer', () => {
             const resp = makeResponse();
             resp.is_continuation = true;
             // Build a reply chain of 2
-            const r1: Response = { id: 93, content: { ...resp.content }, responding_to: null, response: null, replying_to: resp, reply: null, is_continuation: false, thread_resolved_at: null };
-            const r2: Response = { id: 94, content: { ...resp.content }, responding_to: r1, response: null, replying_to: null, reply: null, is_continuation: false, thread_resolved_at: null };
+            const r1: Response = { id: 93, content: { ...resp.content }, responding_to: null, response: null, replying_to: resp, reply: null, is_continuation: false, thread_resolved_at: null, quoted_response_id: null };
+            const r2: Response = { id: 94, content: { ...resp.content }, responding_to: r1, response: null, replying_to: null, reply: null, is_continuation: false, thread_resolved_at: null, quoted_response_id: null };
             r1.response = r2;
             resp.reply = r1;
 

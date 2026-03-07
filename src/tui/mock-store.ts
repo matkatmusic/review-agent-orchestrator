@@ -28,6 +28,7 @@ export interface MockResponseRow {
     replying_to_id: number | null;
     is_continuation: boolean;
     thread_resolved_at: string | null;
+    quoted_response_id: number | null;
 }
 
 export interface MockDetailJson {
@@ -109,6 +110,7 @@ function hydrateResponses(rows: MockResponseRow[]): Map<number, Response> {
             reply: null,
             is_continuation: row.is_continuation,
             thread_resolved_at: row.thread_resolved_at,
+            quoted_response_id: row.quoted_response_id ?? null,
         };
         nodeMap.set(row.id, node);
     }
@@ -169,6 +171,7 @@ function flattenResponse(node: Response, inum: number, visited: Set<number>): Mo
             replying_to_id: current.replying_to?.id ?? null,
             is_continuation: current.is_continuation,
             thread_resolved_at: current.thread_resolved_at,
+            quoted_response_id: current.quoted_response_id,
         });
 
         // Recurse into reply chains

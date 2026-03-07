@@ -33,17 +33,17 @@ for reference. New files are created alongside or replace them.
   Deliverable: Working test harness, 2 passing tests.
   Req coverage: REQ-TEST-001, REQ-TEST-002, REQ-TEST-003
 
-- [ ] Step 0.3: Port Stable Modules (no changes)
+- [x] Step 0.3: Port Stable Modules (no changes)
 --------------------------------------------
   These files are carried forward unchanged:
-    - [ ] src/types.ts (add quoted_response_id to Response + ResponseRow)
-    - [ ] src/tui/status-color.ts
-    - [ ] src/tui/paragraph-utils.ts (+ its tests)
-    - [ ] src/tui/thread-builders.ts (+ its tests)
-    - [ ] src/tui/hotkeys.ts (add ALT_Q, CTRL_ALT_Q, CTRL_ALT_R)
-    - [ ] src/tui/views.ts
+    - [x] src/types.ts (add quoted_response_id to Response + ResponseRow)
+    - [x] src/tui/status-color.ts
+    - [x] src/tui/paragraph-utils.ts (+ its tests)
+    - [x] src/tui/thread-builders.ts (+ its tests)
+    - [x] src/tui/hotkeys.ts (add ALT_Q, CTRL_ALT_Q, CTRL_ALT_R)
+    - [x] src/tui/views.ts
 
-  - [ ] Tests: run existing tests, confirm green.
+  - [x] Tests: run existing tests, confirm green.
 
 Bugs
 - [ ]

@@ -62,6 +62,9 @@ export enum KeyCombinations {
     CTRL_SHIFT_RIGHT_ARROW,
     CTRL_R,
     ALT_H,
+    ALT_Q,
+    CTRL_ALT_Q,
+    CTRL_ALT_R,
     SCROLL_UP_DOWN
 }
 
@@ -75,6 +78,12 @@ export function getHotKeyLabel(keyCombo: KeyCombinations): string {
             return InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.CONTROL)! + ' ' + 'r';
         case KeyCombinations.ALT_H:
             return InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.META_ALT)! + ' ' + 'h';
+        case KeyCombinations.ALT_Q:
+            return InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.META_ALT)! + ' ' + 'q';
+        case KeyCombinations.CTRL_ALT_Q:
+            return InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.CONTROL)! + ' ' + InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.META_ALT)! + ' ' + 'q';
+        case KeyCombinations.CTRL_ALT_R:
+            return InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.CONTROL)! + ' ' + InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.META_ALT)! + ' ' + 'r';
         case KeyCombinations.SCROLL_UP_DOWN:
             return InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.UP_ARROW)! + InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.DOWN_ARROW)!;
         default:
@@ -103,6 +112,16 @@ export function matchesKeyCombination(keyCombo: KeyCombinations, input: string, 
         case KeyCombinations.ALT_H:
             return (matchesKey(key, Ink_keyofKeys_Choices.META_ALT) && input === 'h')
                 || input === '\u02D9';
+        case KeyCombinations.ALT_Q:
+            return matchesKey(key, Ink_keyofKeys_Choices.META_ALT) && input === 'q';
+        case KeyCombinations.CTRL_ALT_Q:
+            return matchesKey(key, Ink_keyofKeys_Choices.CONTROL)
+                && matchesKey(key, Ink_keyofKeys_Choices.META_ALT)
+                && input === 'q';
+        case KeyCombinations.CTRL_ALT_R:
+            return matchesKey(key, Ink_keyofKeys_Choices.CONTROL)
+                && matchesKey(key, Ink_keyofKeys_Choices.META_ALT)
+                && input === 'r';
         case KeyCombinations.SCROLL_UP_DOWN:
             return matchesKey(key, Ink_keyofKeys_Choices.UP_ARROW)
                 || matchesKey(key, Ink_keyofKeys_Choices.DOWN_ARROW);
