@@ -12,6 +12,89 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 WORKTREE_PATH="${REPO_ROOT}/../${WORKTREE_NAME}"
 COMMIT="HEAD"
 
+is_ignored_worktree_file() {
+  # Shell uses 0 for "true/success", so return 0 when this path is safe to ignore.
+  case "$1" in
+    ".claude/settings.json"|".vscode/tasks.json")
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+has_meaningful_changes() {
+  local line path
+
+  # `git status --porcelain` prefixes each entry with a 2-char status plus a space.
+  # Strip those first 3 chars and compare only the worktree-relative path.
+  while IFS= read -r line; do
+    path="${line:3}"
+
+    if ! is_ignored_worktree_file "${path}"; then
+      # Return success here to mean "yes, we found a meaningful change".
+      return 0
+    fi
+  done < <(git -C "${WORKTREE_PATH}" status --porcelain --untracked-files=all 2>/dev/null || true)
+
+  # Nonzero means "no meaningful changes were found".
+  return 1
+}
+
+discard_ignored_changes() {
+  local line path
+
+  while IFS= read -r line; do
+    path="${line:3}"
+
+    case "${path}" in
+      ".claude/settings.json")
+        git -C "${WORKTREE_PATH}" restore --source=HEAD --staged --worktree -- ".claude/settings.json"
+        ;;
+      ".vscode/tasks.json")
+        git -C "${WORKTREE_PATH}" clean -f -- ".vscode/tasks.json"
+        rmdir "${WORKTREE_PATH}/.vscode" 2>/dev/null || true
+        ;;
+    esac
+  done < <(git -C "${WORKTREE_PATH}" status --porcelain --untracked-files=all 2>/dev/null || true)
+}
+
+cleanup_worktree() {
+  echo "Evaluating cleanup for ${WORKTREE_PATH}"
+
+  if [ ! -d "${WORKTREE_PATH}" ]; then
+    echo "Worktree path already removed: ${WORKTREE_PATH}"
+    return
+  fi
+
+  # Discard generated files first so `git worktree remove` can succeed cleanly.
+  discard_ignored_changes
+
+  if has_meaningful_changes; then
+    echo "Worktree has local changes; keeping ${WORKTREE_PATH}"
+    return
+  fi
+
+  if git -C "${REPO_ROOT}" worktree remove "${WORKTREE_PATH}"; then
+    echo "Worktree removed."
+  else
+    echo "Failed to remove worktree: ${WORKTREE_PATH}"
+    return
+  fi
+
+  if tmux has-session -t "${WORKTREE_NAME}" 2>/dev/null; then
+    tmux kill-session -t "${WORKTREE_NAME}"
+    echo "tmux session killed."
+  fi
+
+  if git -C "${REPO_ROOT}" branch -d "${WORKTREE_NAME}" 2>/dev/null; then
+    echo "Branch deleted."
+  else
+    echo "Branch ${WORKTREE_NAME} kept (unmerged changes). Delete with: git branch -D ${WORKTREE_NAME}"
+  fi
+}
+
 # --- Validate ---
 if [ -e "${WORKTREE_PATH}" ]; then
   echo "Error: path already exists: ${WORKTREE_PATH}"
@@ -61,26 +144,17 @@ cat > "${WORKTREE_PATH}/.vscode/tasks.json" << EOF
         "focus": false
       },
       "isBackground": true
-    },
-    {
-      "label": "Cleanup worktree on close",
-      "type": "shell",
-      "command": "cleanup() { cd '${REPO_ROOT}' && git worktree remove --force '${WORKTREE_PATH}' 2>/dev/null; if git branch -d '${WORKTREE_NAME}' 2>/dev/null; then echo 'Branch deleted.'; else echo 'Branch ${WORKTREE_NAME} kept (unmerged changes). Delete with: git branch -D ${WORKTREE_NAME}'; fi; echo 'Cleanup complete.'; }; trap cleanup EXIT HUP TERM; echo 'Cleanup watcher active — will run when window closes.'; while true; do sleep 86400; done",
-      "runOptions": {"runOn": "folderOpen"},
-      "presentation": {
-        "reveal": "never",
-        "panel": "dedicated",
-        "focus": false
-      },
-      "isBackground": true
     }
   ]
 }
 EOF
 
-# --- Open in IDE ---
-agy "${WORKTREE_PATH}"
-
 echo "Worktree '${WORKTREE_NAME}' created at ${WORKTREE_PATH}"
 echo "IDE opening — Claude + tmux will auto-launch on folder open."
-echo "Worktree will auto-cleanup when the IDE window is closed."
+echo "Worktree cleanup runs after that IDE window closes."
+
+# --- Open in IDE ---
+# `--wait` blocks until that IDE window closes, which makes cleanup lifecycle
+# depend on the window itself instead of a long-running background task.
+agy --new-window --wait "${WORKTREE_PATH}"
+cleanup_worktree
