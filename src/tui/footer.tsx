@@ -33,14 +33,14 @@ const comboKey = (k: KeyCombinations) => getHotKeyLabel(k);
 
 export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
     [ViewType.Home]: [
-        { key: inkKey(Ink_keyofKeys_Choices.RETURN), label: 'View' },
-        { key: 'n',     label: 'New' },
-        { key: 'a',     label: 'Activate' },
-        { key: 'd',     label: 'Defer' },
-        { key: 'r',     label: 'Resolve' },
-        { key: 's',     label: 'Agents' },
-        { key: 'b',     label: 'Blocking' },
-        { key: 'g',     label: 'Groups' },
+        // { key: inkKey(Ink_keyofKeys_Choices.RETURN), label: 'View' },
+        // { key: 'n',     label: 'New' },
+        // { key: 'a',     label: 'Activate' },
+        // { key: 'd',     label: 'Defer' },
+        // { key: 'r',     label: 'Resolve' },
+        // { key: 's',     label: 'Agents' },
+        // { key: 'b',     label: 'Blocking' },
+        // { key: 'g',     label: 'Groups' },
         { key: 'q',     label: 'Quit' },
     ],
     [ViewType.Detail]: [

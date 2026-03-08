@@ -6,6 +6,18 @@ import { AppWrapper, processResetFlag } from './run.js';
 
 vi.mock('./mock-store.js', () => ({
     resetMockData: vi.fn(),
+    loadMockData: vi.fn(() => ({
+        issues: [
+            { inum: 1, title: 'test_issue', description: '', status: 0, created_at: '2026-01-01T00:00:00Z', resolved_at: null, issue_revision: 1, agent_last_read_at: null, user_last_viewed_at: null },
+        ],
+        unreadInums: new Set<number>(),
+        maxAgents: 6,
+        detailData: {},
+        containers: [],
+        dependencies: [],
+        containerIssues: {},
+        nextResponseId: 1,
+    })),
 }));
 
 describe('run.tsx — AppWrapper', () => {
@@ -24,7 +36,6 @@ describe('run.tsx — AppWrapper', () => {
         const plain = stripAnsi(output);
         expect(plain).toContain('Review Agent Orchestrator');
         expect(plain).toContain('Quit');
-        expect(plain).toContain('View');
         const titlePos = plain.indexOf('Review Agent Orchestrator');
         const quitPos = plain.indexOf('Quit');
         expect(titlePos).toBeLessThan(quitPos);
@@ -37,19 +48,15 @@ describe('run.tsx — AppWrapper', () => {
         expect(lines).toHaveLength(24);
     });
 
-    it('content area is empty (Phase 1 placeholder)', () => {
+    it('content area shows issue list', () => {
         const { lastFrame } = render(<AppWrapper />);
         const output = lastFrame()!;
         const plain = stripAnsi(output);
-        const lines = plain.split('\n');
-        const subtitleIdx = lines.findIndex(l => l.includes('All issues and orchestration state'));
-        const footerIdx = lines.findIndex(l => l.includes('['));
-        expect(subtitleIdx).toBeGreaterThanOrEqual(0);
-        expect(footerIdx).toBeGreaterThan(subtitleIdx);
-        for (let i = subtitleIdx + 1; i < footerIdx; i++) {
-            expect(lines[i].trim()).toBe('');
-        }
+        expect(plain).toContain('I-1');
+        expect(plain).toContain('test_issue');
     });
+
+    // q → exit() verified manually in tmux; ESM prevents mocking useApp in tests.
 });
 
 describe('run.tsx — --resetMockData flag', () => {

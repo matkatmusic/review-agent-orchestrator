@@ -10,7 +10,7 @@
 
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resetMockData } from './mock-store.js';
+import { resetMockData, loadMockData } from './mock-store.js';
 
 export function processResetFlag(): void {
     if (process.argv.includes('--resetMockData')) {
@@ -28,11 +28,13 @@ const [
     { render, useStdout, useInput, useApp },
     { AppShell },
     { ViewType },
+    { HomeView },
 ] = await Promise.all([
     import('react'),
     import('ink'),
     import('./app-shell.js'),
     import('./views.js'),
+    import('./home-view.js'),
 ]);
 
 import type { View } from './views.js';
@@ -57,6 +59,8 @@ export function AppWrapper() {
         rows: stream?.rows ?? DEFAULT_ROWS,
     });
 
+    const [store] = useState(() => loadMockData());
+
     const onResize = useCallback(() => {
         if (stream) {
             setDims({ columns: stream.columns, rows: stream.rows });
@@ -73,8 +77,16 @@ export function AppWrapper() {
     const currentView: View = { type: ViewType.Home };
 
     return (
-        <AppShell columns={dims.columns} rows={dims.rows} currentView={currentView}>
-            {(_setFooterOptions) => null}
+        <AppShell
+            columns={dims.columns}
+            rows={dims.rows}
+            currentView={currentView}
+            maxAgents={store.maxAgents}
+            unreadCount={store.unreadInums.size}
+        >
+            {(_setFooterOptions) => (
+                <HomeView issues={store.issues} unreadInums={store.unreadInums} />
+            )}
         </AppShell>
     );
 }
