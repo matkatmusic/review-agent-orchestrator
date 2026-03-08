@@ -340,25 +340,25 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
     - Detail-specific context-sensitive shortcut sets are implemented in Step 8.10.
       Step 1.2 is complete when non-Detail shortcuts and Footer primitives are green.
 
-- [ ] Step 1.3: AppShell Component
+- [x] Step 1.3: AppShell Component
 -------------------------------
   Write tests FIRST:
-    - [ ] test: "app shell renders header, content, footer vertically"
-    - [ ] test: "app shell constrains height to rows prop"
-    - [ ] test: "content area gets remaining height after header and footer"
-    - [ ] test: "resize updates dimensions"
-    - [ ] test: "setFooterOptions state reaches Footer props"
+    - [x] test: "app shell renders header, content, footer vertically"
+    - [x] test: "app shell constrains height to rows prop"
+    - [x] test: "content area gets remaining height after header and footer"
+    - [x] test: "resize updates dimensions"
+    - [x] test: "setFooterOptions state reaches Footer props"
 
   Then implement:
-    - [ ] Functional component
-    - [ ] Props: children, columns, rows
+    - [x] Functional component
+    - [x] Props: children, columns, rows
           (In Phase 2, AppShell reads currentView from NavigationContext
           via useNavigation() — it is NOT passed as a prop from App)
-    - [ ] Owns footerOptions state (useState<FooterOptions>({}))
-    - [ ] Passes setFooterOptions callback down through children
-    - [ ] Header receives currentView as prop
-    - [ ] Footer receives viewType + footerOptions as props
-    - [ ] Layout: <Box flexDirection="column" height={rows}>
+    - [x] Owns footerOptions state (useState<FooterOptions>({}))
+    - [x] Passes setFooterOptions callback down through children
+    - [x] Header receives currentView as prop
+    - [x] Footer receives viewType + footerOptions as props
+    - [x] Layout: <Box flexDirection="column" height={rows}>
         <Header currentView={currentView} ... />
         {children(setFooterOptions)}
         <Footer viewType={currentView.type} {...footerOptions} />

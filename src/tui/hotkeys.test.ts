@@ -13,6 +13,8 @@ const emptyKey: Key = {
     rightArrow: false,
     pageDown: false,
     pageUp: false,
+    home: false,
+    end: false,
     return: false,
     escape: false,
     ctrl: false,
@@ -21,6 +23,10 @@ const emptyKey: Key = {
     backspace: false,
     delete: false,
     meta: false,
+    super: false,
+    hyper: false,
+    capsLock: false,
+    numLock: false,
 };
 
 function makeKey(overrides: Partial<Key>): Key {
