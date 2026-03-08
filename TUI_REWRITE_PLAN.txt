@@ -1081,6 +1081,87 @@ PHASE 9: KEYBOARD SYSTEM INTEGRATION
 ================================================================================
 
 Goal: Verify all hotkeys work end-to-end across all views.
+Test approach: Navigation testing — simulate keypress sequences against a
+rendered app loaded with mock data, then verify the rendered output.
+
+- [ ] Step 9.0: Navigation Test Harness
+-------------------------------------
+  Build a test helper that enables declarative keypress-and-verify tests.
+
+  Design:
+
+    Test authors write tests like this:
+
+      const app = await createTestApp({
+        mockData: 'data/mock-data.default.json',
+        initialView: { type: ViewType.Detail, inum: 1 },
+        columns: 80,
+        rows: 24,
+      });
+
+      await app.press('up', 'up');
+      expect(app.frame()).toContain('Please implement JWT auth.');
+
+      await app.press('ctrl+shift+right');
+      expect(app.frame()).toContain('Sub-thread');
+
+      app.cleanup();
+
+  The harness consists of two parts:
+
+  Part A — Key map (src/tui/test-keys.ts):
+    A const object mapping human-readable key names to the stdin byte
+    sequences that Ink's parse-keypress.js converts into the correct
+    (input, key) pairs for useInput handlers.
+
+    Key map entries (verified against Ink's parser):
+      ENTER:              '\r'
+      ESC:                '\x1b'
+      TAB:                '\t'
+      SHIFT_TAB:          '\x1b[Z'
+      UP:                 '\x1b[A'
+      DOWN:               '\x1b[B'
+      LEFT:               '\x1b[C'        (note: not used in app)
+      RIGHT:              '\x1b[D'        (note: not used in app)
+      CTRL_R:             '\x12'          (ctrl+letter = codepoint offset)
+      ALT_Q:              '\x1bq'         (ESC prefix = meta)
+      ALT_H:              '\x1bh'         (ESC prefix = meta)
+      CTRL_SHIFT_RIGHT:   '\x1b[1;6C'    (xterm modifier 6 = ctrl+shift)
+      CTRL_SHIFT_LEFT:    '\x1b[1;6D'
+      SHIFT_RIGHT:        '\x1b[1;2C'    (xterm modifier 2 = shift)
+      SHIFT_LEFT:         '\x1b[1;2D'
+      CTRL_ALT_Q:         '\x1b[113;7u'  (Kitty protocol: codepoint;mods u)
+      CTRL_ALT_R:         '\x1b[114;7u'  (Kitty protocol: codepoint;mods u)
+
+    Kitty protocol is required for Ctrl+Alt combinations because the legacy
+    xterm encoding cannot represent Ctrl+Alt+letter. Ink's parser supports
+    both protocols transparently.
+
+  Part B — Test app wrapper (src/tui/test-app.tsx):
+    A helper function that:
+    - Loads mock data from a JSON fixture path (or accepts inline fixtures)
+    - Renders the full App/AppShell component via ink-testing-library
+    - Returns an object with:
+        press(...keys: string[]):  writes stdin bytes for each key name
+                                   (from the key map), with tick() between
+                                   each to let React process the input
+        frame():                   returns stripAnsi(lastFrame())
+        rawFrame():                returns lastFrame() with ANSI intact
+        cleanup():                 calls unmount()
+
+  Write tests FIRST:
+    - [ ] test: "key map: CTRL_R produces key.ctrl=true, input='r'"
+    - [ ] test: "key map: ALT_Q produces key.meta=true, input='q'"
+    - [ ] test: "key map: CTRL_SHIFT_RIGHT produces ctrl+shift+rightArrow"
+    - [ ] test: "key map: CTRL_ALT_Q produces ctrl+meta, input='q'"
+    - [ ] test: "createTestApp renders and returns frame with mock data"
+    - [ ] test: "press('up') changes the rendered frame"
+
+  Then implement:
+    - [ ] src/tui/test-keys.ts — key name to stdin byte map
+    - [ ] src/tui/test-app.tsx — createTestApp() wrapper
+
+  Deliverable: Reusable test harness. 6 tests green.
 
 - [ ] Step 9.1: End-to-End Keyboard Tests
 --------------------------------------
@@ -1088,9 +1169,9 @@ Goal: Verify all hotkeys work end-to-end across all views.
 
   Note: Hotkey definitions (ALT_Q, CTRL_ALT_Q, CTRL_ALT_R enum values,
   matchers, and display labels) were added in Step 0.3. This step verifies
-  they work end-to-end across the full app.
+  they work end-to-end across the full app using the Step 9.0 harness.
 
-  Write integration tests:
+  Write integration tests using createTestApp + press():
     - [ ] test: "Home -> press Return -> Detail view shown"
     - [ ] test: "Detail -> press Escape -> back to Home"
     - [ ] test: "Detail -> Ctrl+Shift+Right -> enters thread"
@@ -1271,12 +1352,12 @@ Phase  Description                        Planned Tests     Deps
   6    Separator components                       5         P0
   7    Response rendering pipeline               33         P3, P6
   8    DetailView (12 sub-steps)                72         P5, P6, P7
-  9    Keyboard integration                       7         P4, P8
+  9    Keyboard integration                      13         P4, P8
   10   Mock data persistence                      9         P4, P8
   11   Polish & integration                      11         P10
   12   Final validation                           4         P9, P11
 
-Total listed planned tests (all must be promoted to per-step gate tests): 253
+Total listed planned tests (all must be promoted to per-step gate tests): 259
 
 Parallelizable:
   - P3 (mock data) can run parallel with P1 (shell) and P2 (nav)
@@ -1343,6 +1424,7 @@ FILE INVENTORY (NEW FILES)
 ================================================================================
 
 New files created during rewrite:
+  src/tui/app-shell.tsx           3-zone layout shell (header + content + footer)
   src/tui/navigation.tsx          Navigation reducer + context + hook
   src/tui/use-global-keys.tsx     Global keyboard shortcut hook
   src/tui/view-router.tsx         View type -> component mapping
@@ -1351,6 +1433,8 @@ New files created during rewrite:
   src/tui/use-thread-navigation.tsx  Thread stack management hook
   src/tui/use-focus-ring.tsx      Focus cycling hook
   src/tui/use-quote.tsx           Quote feature hook
+  src/tui/test-keys.ts            Key name -> stdin byte map (test infra)
+  src/tui/test-app.tsx            createTestApp() integration test wrapper
 
 Rewritten files (functional components replacing class components):
   src/tui/app.tsx                 Functional, uses contexts
