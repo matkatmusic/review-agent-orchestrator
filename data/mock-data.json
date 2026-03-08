@@ -253,7 +253,7 @@
       "type": "none",
       "body": "looks good, but add config.yaml support too",
       "timestamp": "2026-01-01T14:00:00Z",
-      "seen": "2026-03-05T22:10:39.131Z",
+      "seen": null,
       "responding_to_id": null,
       "replying_to_id": 4,
       "is_continuation": false,
@@ -266,22 +266,9 @@
       "type": "implementation",
       "body": "Added config.yaml support alongside the existing JSON config.",
       "timestamp": "2026-01-01T14:05:00Z",
-      "seen": "2026-03-05T22:10:39.131Z",
+      "seen": null,
       "responding_to_id": 14,
       "replying_to_id": null,
-      "is_continuation": false,
-      "thread_resolved_at": null
-    },
-    {
-      "id": 22,
-      "inum": 1,
-      "author": "user",
-      "type": "none",
-      "body": "adding a response",
-      "timestamp": "2026-03-05T22:11:01.367Z",
-      "seen": "2026-03-05T22:11:01.367Z",
-      "responding_to_id": 15,
-      "replying_to_id": 4,
       "is_continuation": false,
       "thread_resolved_at": null
     },
@@ -498,5 +485,5 @@
     6
   ],
   "maxAgents": 6,
-  "nextResponseId": 23
+  "nextResponseId": 20
 }

@@ -11,9 +11,11 @@ import {
     getFooterShortcuts,
     getFocusableShortcuts,
     computeFooterLines,
+    HOME_ALLOWED_KEYS_BY_STATUS,
 } from './footer.js';
 import type { Shortcut } from './footer.js';
 import { ViewType } from './views.js';
+import { IssueStatus } from '../types.js';
 
 const cols = 80;
 const rts = (el: React.JSX.Element) => renderToString(el, { columns: cols });
@@ -268,6 +270,73 @@ describe('Footer — footer shows correct shortcuts for each non-Detail ViewType
                 expect(output, `view ${ViewType[vt]}: missing key "${shortcut.key}"`).toContain(shortcut.key);
                 expect(output, `view ${ViewType[vt]}: missing label "${shortcut.label}"`).toContain(shortcut.label);
             }
+        }
+    });
+});
+
+// ---- Status-filtered Home shortcuts ----
+
+describe('Footer — status-filtered Home shortcuts', () => {
+    const keys = (shortcuts: readonly Shortcut[]) => shortcuts.map(s => s.key);
+
+    it('no selectedIssueStatus returns all Home shortcuts', () => {
+        const result = getFooterShortcuts(ViewType.Home, {});
+        expect(result).toBe(VIEW_SHORTCUTS[ViewType.Home]);
+    });
+
+    it('Active status excludes "a"', () => {
+        const result = getFooterShortcuts(ViewType.Home, { selectedIssueStatus: IssueStatus.Active });
+        const k = keys(result);
+        expect(k).not.toContain('a');
+        expect(k).toContain('d');
+        expect(k).toContain('r');
+    });
+
+    it('Awaiting status includes all action keys', () => {
+        const result = getFooterShortcuts(ViewType.Home, { selectedIssueStatus: IssueStatus.Awaiting });
+        const k = keys(result);
+        expect(k).toContain('a');
+        expect(k).toContain('d');
+        expect(k).toContain('r');
+    });
+
+    it('Blocked status includes all action keys', () => {
+        const result = getFooterShortcuts(ViewType.Home, { selectedIssueStatus: IssueStatus.Blocked });
+        const k = keys(result);
+        expect(k).toContain('a');
+        expect(k).toContain('d');
+        expect(k).toContain('r');
+    });
+
+    it('Deferred status excludes "d"', () => {
+        const result = getFooterShortcuts(ViewType.Home, { selectedIssueStatus: IssueStatus.Deferred });
+        const k = keys(result);
+        expect(k).not.toContain('d');
+        expect(k).toContain('a');
+        expect(k).toContain('r');
+    });
+
+    it('Resolved status excludes "r"', () => {
+        const result = getFooterShortcuts(ViewType.Home, { selectedIssueStatus: IssueStatus.Resolved });
+        const k = keys(result);
+        expect(k).not.toContain('r');
+        expect(k).toContain('a');
+        expect(k).toContain('d');
+    });
+
+    it('"q" is always present for every status', () => {
+        for (const status of [IssueStatus.Active, IssueStatus.Awaiting, IssueStatus.Blocked, IssueStatus.Deferred, IssueStatus.Resolved]) {
+            const result = getFooterShortcuts(ViewType.Home, { selectedIssueStatus: status });
+            expect(keys(result)).toContain('q');
+        }
+    });
+
+    it('non-Home views are unaffected by selectedIssueStatus', () => {
+        const nonHomeViews = [ViewType.Detail, ViewType.NewIssue, ViewType.AgentStatus, ViewType.BlockingMap, ViewType.GroupView];
+        for (const vt of nonHomeViews) {
+            const without = getFooterShortcuts(vt, {});
+            const with_ = getFooterShortcuts(vt, { selectedIssueStatus: IssueStatus.Active });
+            expect(with_).toBe(without);
         }
     });
 });

@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { Box, Text } from 'ink';
 import { ViewType } from './views.js';
+import { IssueStatus } from '../types.js';
 import { Ink_keyofKeys_Choices, InkKeyOfKeysStringMap, KeyCombinations, getHotKeyLabel } from './hotkeys.js';
 
 export const FOOTER_LINES = 1; // deprecated — use computeFooterLines()
@@ -19,6 +20,7 @@ export interface FooterOptions {
     readonly isQuoting?: boolean;
     readonly focusedAction?: string;
     readonly inputFocused?: boolean;
+    readonly selectedIssueStatus?: IssueStatus;
 }
 
 export interface FooterProps extends FooterOptions {
@@ -87,6 +89,14 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
     ],
 };
 
+export const HOME_ALLOWED_KEYS_BY_STATUS: ReadonlyMap<IssueStatus, ReadonlySet<string>> = new Map([
+    [IssueStatus.Active,   new Set(['d', 'r', 'q'])],
+    [IssueStatus.Awaiting, new Set(['a', 'd', 'r', 'q'])],
+    [IssueStatus.Blocked,  new Set(['a', 'd', 'r', 'q'])],
+    [IssueStatus.Deferred, new Set(['a', 'r', 'q'])],
+    [IssueStatus.Resolved, new Set(['a', 'd', 'q'])],
+]);
+
 const THREAD_SHORTCUTS: readonly Shortcut[] = [
     { key: inkKey(Ink_keyofKeys_Choices.RETURN), label: 'Send' },
     { key: comboKey(KeyCombinations.SCROLL_UP_DOWN), label: 'Scroll' },
@@ -100,7 +110,13 @@ const THREAD_SHORTCUTS: readonly Shortcut[] = [
 /** Get the full shortcut list for the given view/thread state. */
 export function getFooterShortcuts(viewType: ViewType, options?: FooterOptions | boolean): readonly Shortcut[] {
     const inThread = typeof options === 'boolean' ? options : options?.inThread ?? false;
-    return (viewType === ViewType.Detail && inThread) ? THREAD_SHORTCUTS : VIEW_SHORTCUTS[viewType];
+    const base = (viewType === ViewType.Detail && inThread) ? THREAD_SHORTCUTS : VIEW_SHORTCUTS[viewType];
+    if (viewType !== ViewType.Home || typeof options === 'boolean') return base;
+    const status = (options as FooterOptions | undefined)?.selectedIssueStatus;
+    if (status === undefined) return base;
+    const allowed = HOME_ALLOWED_KEYS_BY_STATUS.get(status);
+    if (!allowed) return base;
+    return base.filter(s => allowed.has(s.key));
 }
 
 /** Get only the shortcuts that participate in the Tab focus ring. */
@@ -149,11 +165,20 @@ function computeRows(shortcuts: readonly Shortcut[], columns: number): Shortcut[
     return rows;
 }
 
-const FooterComponent: React.FC<FooterProps> = ({ viewType, inThread, responseSelected, hasReplies, isQuoting, focusedAction, inputFocused, threadResolved, focusedIndex, columns = 80 }) => {
-    const options: FooterOptions = { inThread, responseSelected, hasReplies, isQuoting, focusedAction, inputFocused };
-    const shortcuts = getFooterShortcuts(viewType, options);
+const FooterComponent: React.FC<FooterProps> = (footerProps: FooterProps) => {
+    const columns = footerProps.columns ?? 80;
+    const options: FooterOptions = {
+        inThread: footerProps.inThread,
+        responseSelected: footerProps.responseSelected,
+        hasReplies: footerProps.hasReplies,
+        isQuoting: footerProps.isQuoting,
+        focusedAction: footerProps.focusedAction,
+        inputFocused: footerProps.inputFocused,
+        selectedIssueStatus: footerProps.selectedIssueStatus,
+    };
+    const shortcuts = getFooterShortcuts(footerProps.viewType, options);
 
-    const focusable = getFocusableShortcuts(viewType, options);
+    const focusable = getFocusableShortcuts(footerProps.viewType, options);
     const rows = computeRows(shortcuts, columns);
 
     return (
@@ -162,18 +187,19 @@ const FooterComponent: React.FC<FooterProps> = ({ viewType, inThread, responseSe
                 <Box key={rowIdx}>
                     {row.map((s, i) => {
                         const focusIdx = focusable.indexOf(s);
-                        const isFocused = focusedIndex != null && focusIdx !== -1 && focusIdx === focusedIndex;
-
+                        const isFocused = footerProps.focusedIndex != null && focusIdx !== -1 && focusIdx === footerProps.focusedIndex;
                         const label = `[${s.key}] ${s.label}`;
+                        const marginRight = i < row.length - 1 ? 2 : 0;
+
+                        const content = isFocused
+                            ? <Text>{[...label].map((ch, ci) => <Text key={ci} inverse bold>{ch}</Text>)}</Text>
+                            : s.disabled
+                            ? <Text dimColor>{label}</Text>
+                            : <Text><Text bold color="cyan">[{s.key}]</Text> {s.label}</Text>;
+
                         return (
-                            <Box key={i} marginRight={i < row.length - 1 ? 2 : 0}>
-                                {isFocused ? (
-                                    <Text>{[...label].map((ch, ci) => <Text key={ci} inverse bold>{ch}</Text>)}</Text>
-                                ) : s.disabled ? (
-                                    <Text dimColor>{label}</Text>
-                                ) : (
-                                    <Text><Text bold color="cyan">[{s.key}]</Text> {s.label}</Text>
-                                )}
+                            <Box key={i} marginRight={marginRight}>
+                                {content}
                             </Box>
                         );
                     })}
