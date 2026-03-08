@@ -26,3 +26,13 @@ export type View =
     | { type: ViewType.BlockingMap }
     | { type: ViewType.GroupView }
     | { type: ViewType.IssuePicker; mode: 'blockedBy' | 'blocks'; inum: number };
+
+export interface TerminalProps {
+    columns: number;
+    rows: number;
+}
+
+export interface LayoutProps {
+    headerLines: number;
+    footerLines: number;
+}

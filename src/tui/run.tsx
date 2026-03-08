@@ -84,8 +84,13 @@ export function AppWrapper() {
             maxAgents={store.maxAgents}
             unreadCount={store.unreadInums.size}
         >
-            {(_setFooterOptions) => (
-                <HomeView issues={store.issues} unreadInums={store.unreadInums} />
+            {(_setFooterOptions, terminal, layout) => (
+                <HomeView
+                    issues={store.issues}
+                    unreadInums={store.unreadInums}
+                    terminal={terminal}
+                    layout={layout}
+                />
             )}
         </AppShell>
     );

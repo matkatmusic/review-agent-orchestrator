@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Box } from 'ink';
-import { type View } from './views.js';
+import { type View, type TerminalProps, type LayoutProps } from './views.js';
 import { Header, HEADER_LINES } from './header.js';
 import { Footer, computeFooterLines, getFooterShortcuts } from './footer.js';
 import type { FooterOptions } from './footer.js';
@@ -13,7 +13,11 @@ export interface AppShellProps {
     maxAgents?: number;
     unreadCount?: number;
     threadInfo?: { inThread: boolean };
-    children: (setFooterOptions: (opts: FooterOptions) => void) => React.ReactNode;
+    children: (
+        setFooterOptions: (opts: FooterOptions) => void,
+        terminal: TerminalProps,
+        layout: LayoutProps,
+    ) => React.ReactNode;
 }
 
 export const AppShell: React.FC<AppShellProps> = ({
@@ -44,7 +48,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 threadInfo={threadInfo}
             />
             <Box flexDirection="column" height={contentHeight} flexGrow={1}>
-                {children(setFooterOptions)}
+                {children(setFooterOptions, { columns, rows }, { headerLines: HEADER_LINES, footerLines })}
             </Box>
             <Footer viewType={viewType} {...footerOptions} columns={columns} />
         </Box>

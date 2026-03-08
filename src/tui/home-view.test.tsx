@@ -35,14 +35,14 @@ const UNREAD_INUMS = new Set([3, 6]);
 describe('HomeView (Phase 1 — render only)', () => {
     it('renders without crashing', () => {
         const { lastFrame } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} terminal={{ columns: 80, rows: 24 }} layout={{ headerLines: 3, footerLines: 1 }} />
         );
         expect(lastFrame()).toBeDefined();
     });
 
     it('renders issue titles in the list', () => {
         const { lastFrame } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} terminal={{ columns: 80, rows: 24 }} layout={{ headerLines: 3, footerLines: 1 }} />
         );
         const plain = stripAnsi(lastFrame()!);
         expect(plain).toContain('migrate_ServerDerivedFields');
@@ -52,7 +52,7 @@ describe('HomeView (Phase 1 — render only)', () => {
 
     it('renders inum identifiers (I-N format)', () => {
         const { lastFrame } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} terminal={{ columns: 80, rows: 24 }} layout={{ headerLines: 3, footerLines: 1 }} />
         );
         const plain = stripAnsi(lastFrame()!);
         expect(plain).toContain('I-1');
@@ -62,7 +62,7 @@ describe('HomeView (Phase 1 — render only)', () => {
 
     it('renders status text for each issue', () => {
         const { lastFrame } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} terminal={{ columns: 80, rows: 24 }} layout={{ headerLines: 3, footerLines: 1 }} />
         );
         const plain = stripAnsi(lastFrame()!);
         const lines = plain.split('\n');
@@ -76,7 +76,7 @@ describe('HomeView (Phase 1 — render only)', () => {
 
     it('renders unread marker for unread issues', () => {
         const { lastFrame } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} terminal={{ columns: 80, rows: 24 }} layout={{ headerLines: 3, footerLines: 1 }} />
         );
         const plain = stripAnsi(lastFrame()!);
         const lines = plain.split('\n');
@@ -88,7 +88,7 @@ describe('HomeView (Phase 1 — render only)', () => {
 
     it('does not render unread marker for read issues', () => {
         const { lastFrame } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} terminal={{ columns: 80, rows: 24 }} layout={{ headerLines: 3, footerLines: 1 }} />
         );
         const plain = stripAnsi(lastFrame()!);
         const lines = plain.split('\n');
@@ -100,9 +100,91 @@ describe('HomeView (Phase 1 — render only)', () => {
 
     it('renders empty state when no issues', () => {
         const { lastFrame } = render(
-            <HomeView issues={[]} unreadInums={new Set()} />
+            <HomeView issues={[]} unreadInums={new Set()} terminal={{ columns: 80, rows: 24 }} layout={{ headerLines: 3, footerLines: 1 }} />
         );
         const plain = stripAnsi(lastFrame()!);
         expect(plain.toLowerCase()).toMatch(/no issues/);
+    });
+});
+
+const tick = () => new Promise(r => setTimeout(r, 0));
+
+function cursorLine(frame: string): string | undefined {
+    return stripAnsi(frame).split('\n').find(l => l.includes('\u25B8'));
+}
+
+function nonCursorIssueLines(frame: string): string[] {
+    return stripAnsi(frame).split('\n').filter(l => l.includes('I-') && !l.includes('\u25B8'));
+}
+
+describe('HomeView — cursor navigation', () => {
+    it('selected row shows \u25B8 indicator', () => {
+        const { lastFrame } = render(
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} terminal={{ columns: 80, rows: 24 }} layout={{ headerLines: 3, footerLines: 1 }} />
+        );
+        const frame = lastFrame()!;
+        expect(cursorLine(frame)).toBeDefined();
+    });
+
+    it('selected row inum matches first issue on initial render', () => {
+        const { lastFrame } = render(
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} terminal={{ columns: 80, rows: 24 }} layout={{ headerLines: 3, footerLines: 1 }} />
+        );
+        expect(cursorLine(lastFrame()!)).toContain('I-1');
+    });
+
+    it('non-selected rows show spaces instead of \u25B8', () => {
+        const { lastFrame } = render(
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} terminal={{ columns: 80, rows: 24 }} layout={{ headerLines: 3, footerLines: 1 }} />
+        );
+        const others = nonCursorIssueLines(lastFrame()!);
+        expect(others.length).toBe(MOCK_ISSUES.length - 1);
+        for (const line of others) {
+            expect(line).not.toContain('\u25B8');
+        }
+    });
+
+    it('down arrow moves cursor to next item', async () => {
+        const { lastFrame, stdin } = render(
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} terminal={{ columns: 80, rows: 24 }} layout={{ headerLines: 3, footerLines: 1 }} />
+        );
+        await tick();
+        stdin.write('\x1b[B');
+        await tick();
+        expect(cursorLine(lastFrame()!)).toContain('I-2');
+    });
+
+    it('up arrow moves cursor to previous item', async () => {
+        const { lastFrame, stdin } = render(
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} terminal={{ columns: 80, rows: 24 }} layout={{ headerLines: 3, footerLines: 1 }} />
+        );
+        await tick();
+        stdin.write('\x1b[B');
+        await tick();
+        stdin.write('\x1b[A');
+        await tick();
+        expect(cursorLine(lastFrame()!)).toContain('I-1');
+    });
+
+    it('cursor does not go above first item', async () => {
+        const { lastFrame, stdin } = render(
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} terminal={{ columns: 80, rows: 24 }} layout={{ headerLines: 3, footerLines: 1 }} />
+        );
+        await tick();
+        stdin.write('\x1b[A');
+        await tick();
+        expect(cursorLine(lastFrame()!)).toContain('I-1');
+    });
+
+    it('cursor does not go below last item', async () => {
+        const { lastFrame, stdin } = render(
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} terminal={{ columns: 80, rows: 24 }} layout={{ headerLines: 3, footerLines: 1 }} />
+        );
+        await tick();
+        for (let i = 0; i < 20; i++) {
+            stdin.write('\x1b[B');
+            await tick();
+        }
+        expect(cursorLine(lastFrame()!)).toContain('I-8');
     });
 });
