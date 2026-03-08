@@ -1042,6 +1042,26 @@ AP-011: threadStack as mutable instance array with .push()/.pop()
 AP-012: No-op callbacks (onActivate={() => {}})
         -> Wire to actual actions or make props optional
 
+AP-013: Destructured object parameters in callbacks and component signatures
+        -> When a function accepts a named interface/type as its parameter,
+           declare the parameter as a single typed variable and access members
+           via dot notation. Do NOT destructure in the parameter list.  The parameter variable's name should be identical to the interface name, with the first character written as lower-case (e.g. 'changedStatusProps: ChangedStatusProps')
+
+           CORRECT:
+             const handler = useCallback((changedStatusProps: ChangedStatusProps) => {
+                 doSomething(changedStatusProps.inum, changedStatusProps.newStatus);
+             }, []);
+
+             export const MyView: React.FunctionComponent<MyProps> = (myProps: MyProps) => {
+
+           WRONG:
+             const handler = useCallback(({ inum, newStatus }: ChangedStatusProps) => {
+             export const MyView: React.FunctionComponent<MyProps> = ({ issues, unreadInums }: MyProps) => {
+
+           Rationale: keeping the props object intact makes call sites
+           self-documenting (changedStatusProps.inum reads as "the inum from the changedStatusProps bag") and matches the C++ std::function mental model used by this project. 
+           Destructuring is fine inside the function body when it improves readability of complex expressions.
+
 
 ================================================================================
 PART 19: COMPONENT DEPENDENCY MAP (CURRENT -> REWRITE)

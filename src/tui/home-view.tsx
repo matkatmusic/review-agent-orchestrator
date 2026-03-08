@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
-import type { Issue } from '../types.js';
-import { IssueStatusStringsMap } from '../types.js';
+import type { Issue, ChangedStatusProps } from '../types.js';
+import { IssueStatus, IssueStatusStringsMap } from '../types.js';
 import { statusToColor } from './status-color.js';
 import type { TerminalProps, LayoutProps } from './views.js';
 
@@ -24,22 +24,39 @@ function center(text: string, width: number): string {
 export interface HomeViewProps {
     issues: Issue[];
     unreadInums: Set<number>;
-    terminal: TerminalProps;
-    layout: LayoutProps;
+    terminalProps: TerminalProps;
+    layoutProps: LayoutProps;
+    onStatusHotkeyPressed?: (changedStatusProps: ChangedStatusProps) => void;
 }
 
-export const HomeView: React.FC<HomeViewProps> = ({ issues, unreadInums, terminal }) => {
-    const [cursor, setCursor] = useState(0);
+/*
+equivalent to:
+const std::function<ReactElement(HomeViewProps>) HomeView = [](HomeViewProps homeViewProps)
+{
 
-    useInput((_input, key) => {
+}
+*/
+export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: HomeViewProps) => {
+    const [cursor, setCursor] = useState(0);
+    const cursorRef = useRef(cursor);
+    cursorRef.current = cursor;
+
+    useInput((input, key) => {
         if (key.downArrow) {
-            setCursor(c => Math.min(c + 1, issues.length - 1));
+            setCursor(c => Math.min(c + 1, homeViewProps.issues.length - 1));
         } else if (key.upArrow) {
             setCursor(c => Math.max(c - 1, 0));
         }
+
+        if (!homeViewProps.onStatusHotkeyPressed || homeViewProps.issues.length === 0) return;
+        const idx = Math.min(cursorRef.current, Math.max(0, homeViewProps.issues.length - 1));
+        const selectedIssue = homeViewProps.issues[idx];
+        if (input === 'a') homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.Active });
+        else if (input === 'd') homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.Deferred });
+        else if (input === 'r') homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.Resolved });
     });
 
-    if (issues.length === 0) {
+    if (homeViewProps.issues.length === 0) {
         return (
             <Box flexDirection="column">
                 <Text dimColor>  No issues in this view.</Text>
@@ -47,10 +64,10 @@ export const HomeView: React.FC<HomeViewProps> = ({ issues, unreadInums, termina
         );
     }
 
-    const clampedCursor = Math.min(cursor, Math.max(0, issues.length - 1));
+    const clampedCursor = Math.min(cursor, Math.max(0, homeViewProps.issues.length - 1));
 
     // 5 pipe/space separators between columns: |ID|Unread|Title|Status|
-    const titleWidth = terminal.columns - COL.cursor - COL.id - COL.unread - COL.status - 5;
+    const titleWidth = homeViewProps.terminalProps.columns - COL.cursor - COL.id - COL.unread - COL.status - 5;
     const sep = SHOW_COLUMN_SEPARATORS ? '|' : ' ';
 
     return (
@@ -61,9 +78,9 @@ export const HomeView: React.FC<HomeViewProps> = ({ issues, unreadInums, termina
                 <Text dimColor>|{center('ID', COL.id)}|{center('Unread', COL.unread)}|{center('Title', titleWidth)}|{center('Status', COL.status)}|</Text>
             </Box>
             {/* issue rows */}
-            {issues.map((issue, i) => {
+            {homeViewProps.issues.map((issue, i) => {
                 const selected = i === clampedCursor;
-                const unread = unreadInums.has(issue.inum);
+                const unread = homeViewProps.unreadInums.has(issue.inum);
                 const sColor = statusToColor(issue.status);
                 const statusLabel = IssueStatusStringsMap.get(issue.status) ?? '';
                 const titleText = issue.title.length > titleWidth

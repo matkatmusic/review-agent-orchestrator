@@ -11,6 +11,11 @@ export enum IssueStatus {
   Resolved
 }
 
+export interface ChangedStatusProps {
+    inum: number;
+    newStatus: IssueStatus;
+}
+
 export const IssueStatusStringsMap = new Map<IssueStatus, string>([
   [IssueStatus.Active, "Active"],
   [IssueStatus.Awaiting, "Awaiting"],

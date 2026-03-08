@@ -10,7 +10,7 @@
 
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resetMockData, loadMockData } from './mock-store.js';
+import { resetMockData, loadMockData, saveMockData } from './mock-store.js';
 
 export function processResetFlag(): void {
     if (process.argv.includes('--resetMockData')) {
@@ -29,15 +29,18 @@ const [
     { AppShell },
     { ViewType },
     { HomeView },
+    { IssueStatus },
 ] = await Promise.all([
     import('react'),
     import('ink'),
     import('./app-shell.js'),
     import('./views.js'),
     import('./home-view.js'),
+    import('../types.js'),
 ]);
 
 import type { View } from './views.js';
+import type { ChangedStatusProps } from '../types.js';
 import type { WriteStream } from 'node:tty';
 
 const DEFAULT_COLUMNS = 80;
@@ -60,6 +63,44 @@ export function AppWrapper() {
     });
 
     const [store] = useState(() => loadMockData());
+    const [, setTick] = useState(0);
+
+    const handleStatusChange = useCallback((changedStatusProps: ChangedStatusProps) => {
+        const issue = store.issues.find(i => i.inum === changedStatusProps.inum);
+        if (!issue) return;
+        issue.status = changedStatusProps.newStatus;
+        issue.resolved_at = changedStatusProps.newStatus === IssueStatus.Resolved
+            ? new Date().toISOString()
+            : null;
+
+        // Cascade: unblock issues whose blockers are all now resolved
+        if (changedStatusProps.newStatus === IssueStatus.Resolved) {
+            const blockedInums = store.dependencies
+                .filter(d => d.blocker_inum === changedStatusProps.inum)
+                .map(d => d.blocked_inum);
+
+            for (const blockedInum of blockedInums) {
+                const blockedIssue = store.issues.find(i => i.inum === blockedInum);
+                if (!blockedIssue || blockedIssue.status !== IssueStatus.Blocked) continue;
+
+                const allBlockerInums = store.dependencies
+                    .filter(d => d.blocked_inum === blockedInum)
+                    .map(d => d.blocker_inum);
+
+                const allResolved = allBlockerInums.every(bi => {
+                    const blocker = store.issues.find(i => i.inum === bi);
+                    return blocker && blocker.status === IssueStatus.Resolved;
+                });
+
+                if (allResolved) {
+                    blockedIssue.status = IssueStatus.Awaiting;
+                }
+            }
+        }
+
+        saveMockData(store);
+        setTick(t => t + 1);
+    }, [store]);
 
     const onResize = useCallback(() => {
         if (stream) {
@@ -88,8 +129,9 @@ export function AppWrapper() {
                 <HomeView
                     issues={store.issues}
                     unreadInums={store.unreadInums}
-                    terminal={terminal}
-                    layout={layout}
+                    terminalProps={terminal}
+                    layoutProps={layout}
+                    onStatusHotkeyPressed={handleStatusChange}
                 />
             )}
         </AppShell>

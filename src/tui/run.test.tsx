@@ -4,21 +4,14 @@ import { render } from 'ink-testing-library';
 import stripAnsi from 'strip-ansi';
 import { AppWrapper, processResetFlag } from './run.js';
 
-vi.mock('./mock-store.js', () => ({
-    resetMockData: vi.fn(),
-    loadMockData: vi.fn(() => ({
-        issues: [
-            { inum: 1, title: 'test_issue', description: '', status: 0, created_at: '2026-01-01T00:00:00Z', resolved_at: null, issue_revision: 1, agent_last_read_at: null, user_last_viewed_at: null },
-        ],
-        unreadInums: new Set<number>(),
-        maxAgents: 6,
-        detailData: {},
-        containers: [],
-        dependencies: [],
-        containerIssues: {},
-        nextResponseId: 1,
-    })),
-}));
+vi.mock('./mock-store.js', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('./mock-store.js')>();
+    return {
+        ...actual,
+        saveMockData: vi.fn(),
+        resetMockData: vi.fn(),
+    };
+});
 
 describe('run.tsx — AppWrapper', () => {
 
@@ -53,7 +46,7 @@ describe('run.tsx — AppWrapper', () => {
         const output = lastFrame()!;
         const plain = stripAnsi(output);
         expect(plain).toContain('I-1');
-        expect(plain).toContain('test_issue');
+        expect(plain).toContain('migrate_ServerDerivedFields');
     });
 
     // q → exit() verified manually in tmux; ESM prevents mocking useApp in tests.
@@ -87,5 +80,43 @@ describe('run.tsx — --resetMockData flag', () => {
         process.argv = ['node', 'run.js'];
         processResetFlag();
         expect(resetMock).not.toHaveBeenCalled();
+    });
+});
+
+const tick = () => new Promise(r => setTimeout(r, 0));
+
+describe('run.tsx — cascading unblock on resolve', () => {
+    it('resolving all blockers transitions blocked issue to Awaiting', async () => {
+        // I-6 is Blocked (status 2), blocked by I-3 and I-5 per mock-data.default.json
+        const { lastFrame, stdin } = render(<AppWrapper />);
+        await tick();
+
+        // Verify I-6 starts as Blocked
+        let plain = stripAnsi(lastFrame()!);
+        const i6Line = plain.split('\n').find(l => l.includes('I-6'));
+        expect(i6Line).toContain('Blocked');
+
+        // Navigate cursor down to I-3 (index 2: I-1=0, I-2=1, I-3=2)
+        stdin.write('\x1b[B'); await tick();
+        stdin.write('\x1b[B'); await tick();
+        // Press 'r' to resolve I-3
+        stdin.write('r'); await tick();
+
+        plain = stripAnsi(lastFrame()!);
+        // I-6 should still be Blocked (I-5 is not yet resolved)
+        const i6StillBlocked = plain.split('\n').find(l => l.includes('I-6'));
+        expect(i6StillBlocked).toContain('Blocked');
+
+        // Navigate cursor down to I-5 (index 4: currently at 2, need 2 more)
+        stdin.write('\x1b[B'); await tick(); // down to index 3
+        stdin.write('\x1b[B'); await tick(); // down to index 4
+        // Press 'r' to resolve I-5
+        stdin.write('r'); await tick();
+
+        plain = stripAnsi(lastFrame()!);
+        // I-6 should now be Awaiting (all blockers resolved)
+        const i6Now = plain.split('\n').find(l => l.includes('I-6'));
+        expect(i6Now).toContain('Awaiting');
+        expect(i6Now).not.toContain('Blocked');
     });
 });
