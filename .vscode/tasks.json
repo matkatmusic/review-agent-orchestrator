@@ -1,0 +1,23 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Spawn Claude Worktree",
+      "type": "shell",
+      "command": "${workspaceFolder}/spawnBGClaudeWT.sh",
+      "args": ["${input:worktreeName}"],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "worktreeName",
+      "type": "promptString",
+      "description": "Worktree name (used as branch name and folder name)"
+    }
+  ]
+}
