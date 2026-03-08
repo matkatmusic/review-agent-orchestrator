@@ -1062,6 +1062,51 @@ AP-013: Destructured object parameters in callbacks and component signatures
            self-documenting (changedStatusProps.inum reads as "the inum from the changedStatusProps bag") and matches the C++ std::function mental model used by this project. 
            Destructuring is fine inside the function body when it improves readability of complex expressions.
 
+AP-014: Inline rendering logic inside <Box> map callbacks
+        -> Extract each visual cell of a row into a small, named functional
+           component (e.g. SelectionCaret, IssueNum, UnreadMarker, Title,
+           Status). The parent <Box> should read as a self-documenting list
+           of named components, not a wall of ternary expressions and
+           <Text> nodes. This applies everywhere a <Box> iterates over data
+           to build rows — HomeView issue rows, AgentStatus rows,
+           BlockingMap tree nodes, GroupView container/issue rows,
+           IssueListPicker rows, and ResponseContainer border/body cells.
+           Cell components live in the same file as the parent view; they
+           are private helpers, not shared across views.
+
+AP-015: Inline conditional expressions in JSX return blocks
+        -> All ternary expressions, computed values, and conditional logic
+           MUST be resolved into named local variables before the return
+           statement. The JSX block should contain only simple variable
+           references — no ternaries, no function calls, no compound
+           expressions. This makes the JSX a pure template and keeps all
+           decision-making visible and named above the return.
+
+           CORRECT:
+             function SelectionCaret(selectionCaretProps: SelectionCaretProps): React.ReactElement {
+                 const colorToUse = selectionCaretProps.selected ? 'cyan' : undefined;
+                 const caret = selectionCaretProps.selected ? '\u25B8 ' : '  ';
+                 return (
+                     <Text color={colorToUse} bold={selectionCaretProps.selected}>
+                         {caret}
+                     </Text>
+                 );
+             }
+
+           WRONG:
+             function SelectionCaret(selectionCaretProps: SelectionCaretProps): React.ReactElement {
+                 return (
+                     <Text color={selectionCaretProps.selected ? 'cyan' : undefined} bold={selectionCaretProps.selected}>
+                         {selectionCaretProps.selected ? '\u25B8 ' : '  '}
+                     </Text>
+                 );
+             }
+
+           Rationale: separating computation from presentation makes each
+           line's intent immediately clear. Named variables document what a
+           value means; inline ternaries force the reader to parse logic
+           and layout simultaneously.
+
 
 ================================================================================
 PART 19: COMPONENT DEPENDENCY MAP (CURRENT -> REWRITE)
