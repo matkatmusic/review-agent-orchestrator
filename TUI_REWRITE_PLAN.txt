@@ -367,17 +367,17 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
   Note:
     - View-change-driven footer reset is introduced in Step 2.4 after NavigationContext exists.
 
-- [ ] Step 1.4: Entry Point (run.tsx)
+- [x] Step 1.4: Entry Point (run.tsx)
 ---------------------------------
   Write tests FIRST:
-    - [ ] test: "app renders without crashing"
-    - [ ] test: "--resetMockData flag is processed before render"
+    - [x] test: "app renders without crashing"
+    - [x] test: "--resetMockData flag is processed before render"
 
   Then implement:
-    - [ ] AppWrapper that tracks terminal dimensions via useStdout()
-    - [ ] No ANSI escape codes (REQ-INK-005)
-    - [ ] Passes dimensions to AppShell
-    - [ ] In Phase 1, AppShell reads a hardcoded ViewType.Home internally
+    - [x] AppWrapper that tracks terminal dimensions via useStdout()
+    - [x] No ANSI escape codes (REQ-INK-005)
+    - [x] Passes dimensions to AppShell
+    - [x] In Phase 1, AppShell reads a hardcoded ViewType.Home internally
           (replaced by NavigationContext's useNavigation() in Phase 2)
 
   Deliverable: Running app showing Header + empty content + Footer.

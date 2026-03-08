@@ -1,0 +1,81 @@
+DEBATE: Step 1.3 AppShell Component — TUI Rewrite (React/Ink)
+
+You are implementing Step 1.3 from a TDD rewrite plan. Your job is to produce:
+  1. The test file: src/tui/app-shell.test.tsx
+  2. The component file: src/tui/app-shell.tsx
+
+CONTEXT — What already exists:
+  - src/tui/header.tsx: exports Header (React.memo FC) and HEADER_LINES = 3
+    Props: { currentView: View, columns: number, activeAgents?, maxAgents?, unreadCount?, threadInfo? }
+  - src/tui/footer.tsx: exports Footer (React.memo FC), FooterOptions, computeFooterLines, getFooterShortcuts
+    FooterProps: { viewType: ViewType, inThread?, responseSelected?, hasReplies?, isQuoting?, focusedAction?, inputFocused?, threadResolved?, focusedIndex?, columns? }
+    FooterOptions: { inThread?, responseSelected?, hasReplies?, isQuoting?, focusedAction?, inputFocused? }
+  - src/tui/views.ts: ViewType enum (Home, Detail, NewIssue, AgentStatus, BlockingMap, GroupView, IssuePicker), View union type
+  - Tests use vitest + ink-testing-library. Pattern: import { render } from 'ink-testing-library'; const { lastFrame } = render(<Component />);
+  - Tests also use: import { renderToString } from 'ink'; and stripAnsi from 'strip-ansi'.
+  - ESM project: imports use .js extensions (e.g., './views.js')
+
+REQUIREMENTS for AppShell:
+
+  1. AppShell is a NEW functional component in src/tui/app-shell.tsx
+  2. It provides the 3-zone layout: Header (top), content area (middle), Footer (bottom)
+  3. Props:
+     - columns: number
+     - rows: number
+     - currentView: View (in Phase 1; Phase 2 will read from NavigationContext instead)
+     - activeAgents?: number
+     - maxAgents?: number
+     - unreadCount?: number
+     - threadInfo?: { inThread: boolean }
+     - children: (setFooterOptions: (opts: FooterOptions) => void) => React.ReactNode
+       (render prop pattern — children is a function that receives setFooterOptions)
+  4. AppShell owns footerOptions state: useState<FooterOptions>({})
+  5. AppShell passes setFooterOptions to children via the render prop
+  6. Layout:
+     <Box flexDirection="column" height={rows}>
+       <Header currentView={currentView} columns={columns} activeAgents={...} ... />
+       <Box flexDirection="column" flexGrow={1}>
+         {children(setFooterOptions)}
+       </Box>
+       <Footer viewType={currentView.type} {...footerOptions} columns={columns} />
+     </Box>
+  7. The content area gets remaining height = rows - HEADER_LINES - footerLines
+     where footerLines = computeFooterLines(getFooterShortcuts(viewType, footerOptions), columns)
+  8. Export the component and any types needed
+
+TESTS to write (Step 1.3 gate tests — all must pass):
+
+  test: "app shell renders header, content, footer vertically"
+    - Render AppShell with children that return <Text>CONTENT</Text>
+    - Verify output contains the header title, "CONTENT", and footer shortcuts
+
+  test: "app shell constrains height to rows prop"
+    - Render AppShell with rows=24
+    - Verify the outer Box has height={24}
+
+  test: "content area gets remaining height after header and footer"
+    - Render AppShell, check that content area height = rows - HEADER_LINES - footerLines
+    - Use computeFooterLines to calculate expected footer height
+
+  test: "resize updates dimensions" (Note: this may be tested at run.tsx level)
+    - If testable at AppShell level: re-render with different columns/rows, verify layout updates
+
+  test: "setFooterOptions state reaches Footer props"
+    - Render AppShell with children that call setFooterOptions({ inThread: true })
+    - Verify Footer receives inThread=true (check that thread shortcuts appear)
+
+CONSTRAINTS:
+  - TDD: Write tests first, then implement
+  - Functional component only (no class components)
+  - React.memo is optional for AppShell (it re-renders when state changes)
+  - Use ESM imports with .js extensions
+  - Do NOT use ANSI escape codes for clearing screen
+  - Do NOT import mock data — AppShell is data-agnostic
+  - Keep it minimal — no navigation logic (that's Phase 2)
+
+DELIVERABLES:
+  Provide the complete contents of:
+  1. src/tui/app-shell.test.tsx — all 5 tests
+  2. src/tui/app-shell.tsx — the component implementation
+
+  Make the tests pass. Explain any design decisions.

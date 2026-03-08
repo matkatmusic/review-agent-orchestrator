@@ -1,0 +1,230 @@
+=== TEST FILE: src/tui/run.test.tsx ===
+```tsx
+import { describe, it, expect, vi } from 'vitest';
+import React from 'react';
+import { render } from 'ink-testing-library';
+import { useStdout } from 'ink';
+import { AppShell } from './app-shell.js';
+import { ViewType } from './views.js';
+import { AppWrapper, startApp } from './run.js';
+
+describe('run.tsx', () => {
+    it('app renders without crashing', () => {
+        const { lastFrame } = render(
+            <AppWrapper
+                useStdoutHook={useStdout}
+                AppShellComponent={AppShell}
+                homeView={{ type: ViewType.Home }}
+            />
+        );
+
+        const output = lastFrame();
+        expect(output).toBeDefined();
+        expect(output).toContain('Review Agent Orchestrator');
+        expect(output).toContain('Home');
+        expect(output).toContain('All issues and orchestration state');
+        expect(output).toContain('View');
+        expect(output).toContain('Quit');
+    });
+
+    it('--resetMockData flag is processed before render', async () => {
+        const events: string[] = [];
+        const resetMockDataFn = vi.fn(() => {
+            events.push('reset');
+        });
+        const waitUntilExit = vi.fn(async () => {
+            events.push('wait');
+        });
+        const renderInk = vi.fn(() => {
+            events.push('render');
+            return { waitUntilExit };
+        });
+        const loadRuntimeModules = vi.fn(async () => {
+            events.push('load');
+            return {
+                render: renderInk,
+                useStdout: () => ({ stdout: undefined }),
+                AppShell: AppShell,
+                homeView: { type: ViewType.Home as const },
+            };
+        });
+        const logger = {
+            log: vi.fn(() => {
+                events.push('log');
+            }),
+        };
+
+        await startApp({
+            argv: ['node', 'dist/tui/run.js', '--resetMockData'],
+            resetMockDataFn,
+            logger,
+            loadRuntimeModules,
+        });
+
+        expect(resetMockDataFn).toHaveBeenCalledOnce();
+        expect(renderInk).toHaveBeenCalledOnce();
+        expect(waitUntilExit).toHaveBeenCalledOnce();
+        expect(logger.log).toHaveBeenCalledWith('Mock data reset to defaults.');
+        expect(events.indexOf('reset')).toBeLessThan(events.indexOf('load'));
+        expect(events.indexOf('reset')).toBeLessThan(events.indexOf('render'));
+    });
+});
+```
+
+=== IMPLEMENTATION FILE: src/tui/run.tsx ===
+```tsx
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { useEffect, useState, type ComponentType, type ReactElement } from 'react';
+import { resetMockData } from './mock-store.js';
+import type { AppShellProps } from './app-shell.js';
+import type { View } from './views.js';
+
+const DEFAULT_COLUMNS = 80;
+const DEFAULT_ROWS = 24;
+
+interface ResizeAwareStdout {
+    columns?: number;
+    rows?: number;
+    on?: (event: 'resize', listener: () => void) => void;
+    off?: (event: 'resize', listener: () => void) => void;
+}
+
+export interface AppWrapperProps {
+    useStdoutHook: () => { stdout?: unknown };
+    AppShellComponent: ComponentType<AppShellProps>;
+    homeView: View;
+}
+
+interface RenderInstance {
+    waitUntilExit: () => Promise<unknown>;
+}
+
+export interface RuntimeModules {
+    render: (tree: ReactElement) => RenderInstance;
+    useStdout: () => { stdout?: unknown };
+    AppShell: ComponentType<AppShellProps>;
+    homeView: View;
+}
+
+export interface StartAppOptions {
+    argv?: readonly string[];
+    resetMockDataFn?: () => void;
+    logger?: Pick<Console, 'log'>;
+    loadRuntimeModules?: () => Promise<RuntimeModules>;
+}
+
+function readTerminalDimensions(stdout?: ResizeAwareStdout): { columns: number; rows: number } {
+    return {
+        columns: typeof stdout?.columns === 'number' ? stdout.columns : DEFAULT_COLUMNS,
+        rows: typeof stdout?.rows === 'number' ? stdout.rows : DEFAULT_ROWS,
+    };
+}
+
+function supportsResize(stdout?: ResizeAwareStdout): stdout is Required<Pick<ResizeAwareStdout, 'on' | 'off'>> & ResizeAwareStdout {
+    return typeof stdout?.on === 'function' && typeof stdout?.off === 'function';
+}
+
+export function AppWrapper({ useStdoutHook, AppShellComponent, homeView }: AppWrapperProps) {
+    const { stdout } = useStdoutHook();
+    const stream = stdout as ResizeAwareStdout | undefined;
+    const [dimensions, setDimensions] = useState(() => readTerminalDimensions(stream));
+
+    useEffect(() => {
+        setDimensions(readTerminalDimensions(stream));
+    }, [stream]);
+
+    useEffect(() => {
+        if (!supportsResize(stream)) {
+            return;
+        }
+
+        const onResize = () => {
+            setDimensions(readTerminalDimensions(stream));
+        };
+
+        stream.on('resize', onResize);
+        return () => {
+            stream.off('resize', onResize);
+        };
+    }, [stream]);
+
+    return (
+        <AppShellComponent
+            columns={dimensions.columns}
+            rows={dimensions.rows}
+            currentView={homeView}
+        >
+            {() => null}
+        </AppShellComponent>
+    );
+}
+
+export function processResetMockDataFlag(
+    argv: readonly string[] = process.argv,
+    resetMockDataFn: () => void = resetMockData,
+    logger: Pick<Console, 'log'> = console,
+): boolean {
+    if (!argv.includes('--resetMockData')) {
+        return false;
+    }
+
+    resetMockDataFn();
+    logger.log('Mock data reset to defaults.');
+    return true;
+}
+
+export async function loadRuntimeModules(): Promise<RuntimeModules> {
+    const [{ render, useStdout }, { AppShell }, { ViewType }] = await Promise.all([
+        import('ink'),
+        import('./app-shell.js'),
+        import('./views.js'),
+    ]);
+
+    return {
+        render,
+        useStdout,
+        AppShell,
+        homeView: { type: ViewType.Home },
+    };
+}
+
+export async function startApp({
+    argv = process.argv,
+    resetMockDataFn = resetMockData,
+    logger = console,
+    loadRuntimeModules: loadRuntimeModulesFn = loadRuntimeModules,
+}: StartAppOptions = {}): Promise<void> {
+    processResetMockDataFlag(argv, resetMockDataFn, logger);
+
+    const runtime = await loadRuntimeModulesFn();
+    const instance = runtime.render(
+        <AppWrapper
+            useStdoutHook={runtime.useStdout}
+            AppShellComponent={runtime.AppShell}
+            homeView={runtime.homeView}
+        />
+    );
+
+    await instance.waitUntilExit();
+}
+
+function isDirectExecution(importMetaUrl: string, argvEntry?: string): boolean {
+    if (!argvEntry) {
+        return false;
+    }
+
+    return fileURLToPath(importMetaUrl) === resolve(argvEntry);
+}
+
+if (isDirectExecution(import.meta.url, process.argv[1])) {
+    await startApp();
+}
+```
+
+=== DESIGN DECISIONS ===
+- Kept reset handling separate in `processResetMockDataFlag()` so it can be tested directly through `startApp()` and guaranteed to run before runtime imports/render.
+- Preserved dynamic runtime imports for `ink`, `AppShell`, and `ViewType` so the `--resetMockData` path still executes before anything that may transitively touch mock data.
+- Made `AppWrapper` injectable via `useStdoutHook`, `AppShellComponent`, and `homeView` so `ink-testing-library` can exercise it without a real TTY and still verify fallback `80x24` behavior implicitly.
+- Removed all terminal clearing behavior; resize handling only updates state from `useStdout()` and never writes ANSI escape codes.
+- Wired Phase 1 to `currentView={{ type: ViewType.Home }}` and rendered `AppShell` directly rather than the legacy `App` component.

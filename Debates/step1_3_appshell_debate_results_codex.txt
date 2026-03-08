@@ -1,0 +1,1139 @@
+Debugger listening on ws://127.0.0.1:62538/d1ebfdb9-bf6c-4830-ba0a-02e70d7b35d6
+For help, see: https://nodejs.org/en/docs/inspector
+Debugger attached.
+Reading prompt from stdin...
+OpenAI Codex v0.111.0 (research preview)
+--------
+workdir: /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator
+model: gpt-5.4
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: high
+reasoning summaries: none
+session id: 019cca6d-c894-7850-9dab-4e381c100192
+--------
+user
+DEBATE: Step 1.3 AppShell Component — TUI Rewrite (React/Ink)
+
+You are implementing Step 1.3 from a TDD rewrite plan. Your job is to produce:
+  1. The test file: src/tui/app-shell.test.tsx
+  2. The component file: src/tui/app-shell.tsx
+
+CONTEXT — What already exists:
+  - src/tui/header.tsx: exports Header (React.memo FC) and HEADER_LINES = 3
+    Props: { currentView: View, columns: number, activeAgents?, maxAgents?, unreadCount?, threadInfo? }
+  - src/tui/footer.tsx: exports Footer (React.memo FC), FooterOptions, computeFooterLines, getFooterShortcuts
+    FooterProps: { viewType: ViewType, inThread?, responseSelected?, hasReplies?, isQuoting?, focusedAction?, inputFocused?, threadResolved?, focusedIndex?, columns? }
+    FooterOptions: { inThread?, responseSelected?, hasReplies?, isQuoting?, focusedAction?, inputFocused? }
+  - src/tui/views.ts: ViewType enum (Home, Detail, NewIssue, AgentStatus, BlockingMap, GroupView, IssuePicker), View union type
+  - Tests use vitest + ink-testing-library. Pattern: import { render } from 'ink-testing-library'; const { lastFrame } = render(<Component />);
+  - Tests also use: import { renderToString } from 'ink'; and stripAnsi from 'strip-ansi'.
+  - ESM project: imports use .js extensions (e.g., './views.js')
+
+REQUIREMENTS for AppShell:
+
+  1. AppShell is a NEW functional component in src/tui/app-shell.tsx
+  2. It provides the 3-zone layout: Header (top), content area (middle), Footer (bottom)
+  3. Props:
+     - columns: number
+     - rows: number
+     - currentView: View (in Phase 1; Phase 2 will read from NavigationContext instead)
+     - activeAgents?: number
+     - maxAgents?: number
+     - unreadCount?: number
+     - threadInfo?: { inThread: boolean }
+     - children: (setFooterOptions: (opts: FooterOptions) => void) => React.ReactNode
+       (render prop pattern — children is a function that receives setFooterOptions)
+  4. AppShell owns footerOptions state: useState<FooterOptions>({})
+  5. AppShell passes setFooterOptions to children via the render prop
+  6. Layout:
+     <Box flexDirection="column" height={rows}>
+       <Header currentView={currentView} columns={columns} activeAgents={...} ... />
+       <Box flexDirection="column" flexGrow={1}>
+         {children(setFooterOptions)}
+       </Box>
+       <Footer viewType={currentView.type} {...footerOptions} columns={columns} />
+     </Box>
+  7. The content area gets remaining height = rows - HEADER_LINES - footerLines
+     where footerLines = computeFooterLines(getFooterShortcuts(viewType, footerOptions), columns)
+  8. Export the component and any types needed
+
+TESTS to write (Step 1.3 gate tests — all must pass):
+
+  test: "app shell renders header, content, footer vertically"
+    - Render AppShell with children that return <Text>CONTENT</Text>
+    - Verify output contains the header title, "CONTENT", and footer shortcuts
+
+  test: "app shell constrains height to rows prop"
+    - Render AppShell with rows=24
+    - Verify the outer Box has height={24}
+
+  test: "content area gets remaining height after header and footer"
+    - Render AppShell, check that content area height = rows - HEADER_LINES - footerLines
+    - Use computeFooterLines to calculate expected footer height
+
+  test: "resize updates dimensions" (Note: this may be tested at run.tsx level)
+    - If testable at AppShell level: re-render with different columns/rows, verify layout updates
+
+  test: "setFooterOptions state reaches Footer props"
+    - Render AppShell with children that call setFooterOptions({ inThread: true })
+    - Verify Footer receives inThread=true (check that thread shortcuts appear)
+
+CONSTRAINTS:
+  - TDD: Write tests first, then implement
+  - Functional component only (no class components)
+  - React.memo is optional for AppShell (it re-renders when state changes)
+  - Use ESM imports with .js extensions
+  - Do NOT use ANSI escape codes for clearing screen
+  - Do NOT import mock data — AppShell is data-agnostic
+  - Keep it minimal — no navigation logic (that's Phase 2)
+
+DELIVERABLES:
+  Provide the complete contents of:
+  1. src/tui/app-shell.test.tsx — all 5 tests
+  2. src/tui/app-shell.tsx — the component implementation
+
+  Make the tests pass. Explain any design decisions.
+
+mcp startup: no servers
+codex
+I’m reading the existing TUI components and test patterns first so the proposed `AppShell` and tests match the repo’s actual APIs and Ink behavior.
+exec
+/bin/zsh -lc "sed -n '1,220p' src/tui/header.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,260p' src/tui/footer.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,220p' src/tui/views.ts" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "rg -n \"ink-testing-library|renderToString|strip-ansi|lastFrame\" src test . --glob '"'!node_modules'"'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 51ms:
+import React, { memo } from 'react';
+import { Box, Text } from 'ink';
+import { type View, ViewType, ViewTypeStringsMap } from './views.js';
+
+export const HEADER_LINES = 3;
+
+export interface HeaderProps {
+    currentView: View;
+    columns: number;
+    activeAgents?: number;
+    maxAgents?: number;
+    unreadCount?: number;
+    threadInfo?: { inThread: boolean };
+}
+
+const assertNever = (x: never): never => {
+    throw new Error(`Unhandled view: ${JSON.stringify(x)}`);
+};
+
+function getViewLabel(view: View, threadInfo?: { inThread: boolean }): string {
+ succeeded in 51ms:
+import React, { memo } from 'react';
+import { Box, Text } from 'ink';
+import { ViewType } from './views.js';
+import { Ink_keyofKeys_Choices, InkKeyOfKeysStringMap, KeyCombinations, getHotKeyLabel } from './hotkeys.js';
+
+export const FOOTER_LINES = 1; // deprecated — use computeFooterLines()
+
+export interface Shortcut {
+    readonly key: string;
+    readonly label: string;
+    readonly disabled?: boolean;
+    readonly action?: string;
+}
+
+export interface FooterOptions {
+    readonly inThread?: boolean;
+    readonly responseSelected?: boolean;
+    readonly hasReplies?: boolean;
+    readonly isQuoting?: boolean;
+    readonly focusedAction?: string;
+ succeeded in 51ms:
+export enum ViewType {
+    Home,
+    Detail,
+    NewIssue,
+    AgentStatus,
+    BlockingMap,
+    GroupView,
+    IssuePicker,
+}
+
+export const ViewTypeStringsMap = new Map<ViewType, string>([
+    [ViewType.Home, "Home"],
+    [ViewType.Detail, "Detail"],
+    [ViewType.NewIssue, "New Issue"],
+    [ViewType.AgentStatus, "Agent Status"],
+    [ViewType.BlockingMap, "Blocking Map"],
+    [ViewType.GroupView, "Group View"],
+    [ViewType.IssuePicker, "Issue Picker"],
+]);
+
+ exited 2 in 51ms:
+Total output lines: 1015
+
+rg: test: No such file or directory (os error 2)
+./TUI_REWRITE_REQUIREMENTS.txt:979:REQ-TEST-001: All TUI components MUST have tests using ink-testing-library.
+./TUI_REWRITE_REQUIREMENTS.txt:983:REQ-TEST-003: Input simulation via lastFrame() and stdin.write().
+src/tui/group-view.test.tsx:3:import { render } from 'ink-testing-library';
+src/tui/group-view.test.tsx:19:        const { lastFrame } = render(<GroupView />);
+src/tui/group-view.test.tsx:20:        expect(lastFrame()).toBeDefined();
+src/tui/group-view.test.tsx:24:        const { lastFrame } = render(<GroupView />);
+src/tui/group-view.test.tsx:25:        const frame = lastFrame()!;
+src/tui/group-view.test.tsx:32:        const { lastFrame } = render(<GroupView />);
+src/tui/group-view.test.tsx:33:        const frame = lastFrame()!;
+src/tui/group-view.test.tsx:41:        const { lastFrame } = render(<GroupView />);
+src/tui/group-view.test.tsx:42:        const frame = lastFrame()!;
+src/tui/group-view.test.tsx:49:        const { lastFrame } = render(<GroupView />);
+src/tui/group-view.test.tsx:50:        const frame = lastFrame()!;
+src/tui/group-view.test.tsx:56:        const { lastFrame } = render(<GroupView />);
+src/tui/group-view.test.tsx:57:        const frame = lastFrame()!;
+src/tui/group-view.test.tsx:66:        const { lastFrame } = render(<GroupView />);
+src/tui/group-view.test.tsx:67:        const frame = lastFrame()!;
+codex
+I’ve got the component APIs. Next I’m checking the existing header/footer tests so the new assertions line up with how this repo inspects Ink output.
+exec
+/bin/zsh -lc "sed -n '1,320p' src/tui/footer.test.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,260p' src/tui/header.test.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc 'ls src/tui' in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+import { describe, it, expect } from 'vitest';
+import React from 'react';
+import { render } from 'ink-testing-library';
+import { renderToString } from 'ink';
+import chalk from 'chalk';
+import stripAnsi from 'strip-ansi';
+import {
+    Footer,
+    VIEW_SHORTCUTS,
+    FOOTER_LINES,
+    getFooterShortcuts,
+    getFocusableShortcuts,
+    computeFooterLines,
+} from './footer.js';
+import type { Shortcut } from './footer.js';
+import { ViewType } from './views.js';
+
+const cols = 80;
+const rts = (el: React.JSX.Element) => renderToString(el, { columns: cols });
+
+ succeeded in 51ms:
+import { describe, it, expect } from 'vitest';
+import React from 'react';
+import { renderToString } from 'ink';
+import chalk from 'chalk';
+import stripAnsi from 'strip-ansi';
+import { Header, HEADER_LINES } from './header.js';
+import { ViewType } from './views.js';
+
+const cols = 80;
+const rts = (el: React.JSX.Element) => renderToString(el, { columns: cols });
+
+describe('Header', () => {
+
+    // ---- Constants ----
+
+    it('HEADER_LINES is 3', () => {
+        expect(HEADER_LINES).toBe(3);
+    });
+
+    // ---- Renders exactly 3 lines ----
+ succeeded in 52ms:
+DetailViewRefactor.md
+DetailViewRefactor.txt
+DetailViewRewrite.md
+agent-status.test.tsx
+agent-status.tsx
+app-shell.test.tsx
+app-shell.tsx
+app.test.tsx
+app.tsx
+blocking-map.test.tsx
+blocking-map.tsx
+ctrl-r-fix.md
+detail.test.tsx
+detail.tsx
+detail_analysis.txt
+footer.test.tsx
+footer.tsx
+global-keys.tsx
+group-picker.tsx
+group-view.test.tsx
+codex
+`app-shell` already exists in the tree, so I’m reading that implementation before drafting replacements. That lets me preserve any repo-specific choices and only change what Step 1.3 requires.
+exec
+/bin/zsh -lc "sed -n '1,260p' src/tui/app-shell.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,320p' src/tui/app-shell.test.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,260p' src/tui/app.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+import React, { useState } from 'react';
+import { Box } from 'ink';
+import { type View } from './views.js';
+import { Header, HEADER_LINES } from './header.js';
+import { Footer, computeFooterLines, getFooterShortcuts } from './footer.js';
+import type { FooterOptions } from './footer.js';
+
+export interface AppShellProps {
+    columns: number;
+    rows: number;
+    currentView: View;
+    activeAgents?: number;
+    maxAgents?: number;
+    unreadCount?: number;
+    threadInfo?: { inThread: boolean };
+    children: (setFooterOptions: (opts: FooterOptions) => void) => React.ReactNode;
+}
+
+export const AppShell: React.FC<AppShellProps> = ({
+    columns,
+ succeeded in 52ms:
+import { describe, it, expect } from 'vitest';
+import React, { useEffect } from 'react';
+import { render } from 'ink-testing-library';
+import { renderToString } from 'ink';
+import stripAnsi from 'strip-ansi';
+import { Text } from 'ink';
+import { AppShell } from './app-shell.js';
+import { ViewType } from './views.js';
+import { HEADER_LINES } from './header.js';
+import { computeFooterLines, getFooterShortcuts } from './footer.js';
+import type { FooterOptions } from './footer.js';
+
+const cols = 80;
+const rows = 24;
+const homeView = { type: ViewType.Home as const };
+
+describe('AppShell', () => {
+
+    // ---- Test 1: renders header, content, footer vertically ----
+
+ succeeded in 52ms:
+import React from 'react';
+import { Box, Text } from 'ink';
+import { type View, ViewType } from './views.js';
+import { Header, HEADER_LINES } from './header.js';
+import { Footer } from './footer.js';
+import { NewIssue } from './newissue.js';
+import type { NewIssueData } from './newissue.js';
+import { HomeView } from './home-view.js';
+import { MOCK_ISSUES, MOCK_UNREAD_INUMS, MOCK_MAX_AGENTS, MOCK_DETAIL_DATA, MOCK_CONTAINERS } from './mock-data.js';
+import { DetailView } from './detail.js';
+import { AgentStatus } from './agent-status.js';
+import { BlockingMap } from './blocking-map.js';
+import { GroupView, GROUP_MODE_INITIAL } from './group-view.js';
+import type { GroupMode } from './group-view.js';
+import { IssueStatus } from '../types.js';
+import { IssueListPicker } from './issue-list-picker.js';
+
+function pushViewOntoStack(viewStack: View[], view: View): View[] {
+    let newStack: View[] = [];
+    for (let i = 0; i < viewStack.length; i++) {
+codex
+The current `app-shell` is already close to the requested shape. I’m checking whether the tests can inspect Ink element props directly, because two of the requested assertions are about `Box` height rather than just rendered text.
+exec
+/bin/zsh -lc 'cat package.json' in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "rg -n \"react-test-renderer|renderer\\.root|findAllByType|findByType|lastFrame\\(\\).*split|renderToString\\(\" src/tui --glob '*.test.tsx'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+{
+    "name": "review-agent-orchestrator",
+    "version": "2.1.0",
+    "type": "module",
+    "bin": {
+        "aidi": "./dist/cli/aidi.js",
+        "agent-issue-db-interface": "./dist/cli/aidi.js"
+    },
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsc --watch",
+        "test": "vitest run",
+        "test:watch": "vitest"
+    },
+    "dependencies": {
+        "better-sqlite3": "^12.6.2",
+        "commander": "^14.0.3",
+        "ink": "^6.8.0",
+        "ink-text-input": "^6.0.0",
+        "react": "^19.2.4"
+ succeeded in 50ms:
+src/tui/header.test.tsx:10:const rts = (el: React.JSX.Element) => renderToString(el, { columns: cols });
+src/tui/header.test.tsx:129:        const output = renderToString(
+src/tui/header.test.tsx:138:        const output = renderToString(
+src/tui/app-shell.test.tsx:43:        const output = renderToString(
+src/tui/app-shell.test.tsx:66:        const output = renderToString(
+src/tui/footer.test.tsx:19:const rts = (el: React.JSX.Element) => renderToString(el, { columns: cols });
+src/tui/footer.test.tsx:169:        const output = renderToString(
+src/tui/footer.test.tsx:200:        const output = renderToString(
+src/tui/footer.test.tsx:212:            const output = renderToString(
+src/tui/footer.test.tsx:232:            const lines = lastFrame()!.split('\n');
+src/tui/group-view.test.tsx:233:        const cursorLine = lastFrame()!.split('\n').find(l => l.includes('\u25B8'));
+src/tui/group-view.test.tsx:246:        const restoredLine = lastFrame()!.split('\n').find(l => l.includes('\u25B8'));
+exec
+/bin/zsh -lc "node -p \"require.resolve('ink-testing-library')\"" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 51ms:
+Starting inspector on 127.0.0.1:0 failed: operation not permitted
+Error: connect EPERM /var/folders/fy/wg2tzrv957sg2vqjcvdkdzvm0000gn/T/node-cdp.58709-b145075c-0.sock.deferred
+    at PipeConnectWrap.afterConnect [as oncomplete] (node:net:1634:16) {
+  errno: -1,
+  code: 'EPERM',
+  syscall: 'connect',
+  address: '/var/folders/fy/wg2tzrv957sg2vqjcvdkdzvm0000gn/T/node-cdp.58709-b145075c-0.sock.deferred'
+}
+
+Error activating auto attach, please report to https://aka.ms/js-dbg-issue
+/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/node_modules/ink-testing-library/build/index.js
+codex
+`ink-testing-library` is installed, but direct Node introspection is noisy in this sandbox. I’m reading its type surface locally instead so the test code uses supported APIs.
+exec
+/bin/zsh -lc "sed -n '1,260p' node_modules/ink-testing-library/build/index.d.ts" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,260p' node_modules/ink-testing-library/build/index.js" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,240p' node_modules/ink/build/index.d.ts" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+/// <reference types="node" resolution-mode="require"/>
+import { EventEmitter } from 'node:events';
+import type { ReactElement } from 'react';
+declare class Stdout extends EventEmitter {
+    get columns(): number;
+    readonly frames: string[];
+    private _lastFrame?;
+    write: (frame: string) => void;
+    lastFrame: () => string | undefined;
+}
+declare class Stderr extends EventEmitter {
+    readonly frames: string[];
+    private _lastFrame?;
+    write: (frame: string) => void;
+    lastFrame: () => string | undefined;
+}
+declare class Stdin extends EventEmitter {
+    isTTY: boolean;
+    data: string | null;
+    constructor(options?: {
+ succeeded in 51ms:
+import { EventEmitter } from 'node:events';
+import { render as inkRender } from 'ink';
+class Stdout extends EventEmitter {
+    get columns() {
+        return 100;
+    }
+    frames = [];
+    _lastFrame;
+    write = (frame) => {
+        this.frames.push(frame);
+        this._lastFrame = frame;
+    };
+    lastFrame = () => this._lastFrame;
+}
+class Stderr extends EventEmitter {
+    frames = [];
+    _lastFrame;
+    write = (frame) => {
+        this.frames.push(frame);
+        this._lastFrame = frame;
+ succeeded in 52ms:
+export type { RenderOptions, Instance } from './render.js';
+export { default as render } from './render.js';
+export type { RenderToStringOptions } from './render-to-string.js';
+export { default as renderToString } from './render-to-string.js';
+export type { Props as BoxProps } from './components/Box.js';
+export { default as Box } from './components/Box.js';
+export type { Props as TextProps } from './components/Text.js';
+export { default as Text } from './components/Text.js';
+export type { Props as AppProps } from './components/AppContext.js';
+export type { Props as StdinProps } from './components/StdinContext.js';
+export type { Props as StdoutProps } from './components/StdoutContext.js';
+export type { Props as StderrProps } from './components/StderrContext.js';
+export type { Props as StaticProps } from './components/Static.js';
+export { default as Static } from './components/Static.js';
+export type { Props as TransformProps } from './components/Transform.js';
+export { default as Transform } from './components/Transform.js';
+export type { Props as NewlineProps } from './components/Newline.js';
+export { default as Newline } from './components/Newline.js';
+export { default as Spacer } from './components/Spacer.js';
+export type { Key } from './hooks/use-input.js';
+codex
+I’ve narrowed the gap: the existing tests are too indirect for the height assertions. I’m running the focused test file once to see current behavior and whether any runtime issue needs to be handled in the replacement.
+exec
+/bin/zsh -lc 'npm test -- src/tui/app-shell.test.tsx' in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator exited 1 in 340ms:
+
+> review-agent-orchestrator@2.1.0 test
+> vitest run src/tui/app-shell.test.tsx
+
+Starting inspector on 127.0.0.1:0 failed: operation not permitted
+Error: connect EPERM /var/folders/fy/wg2tzrv957sg2vqjcvdkdzvm0000gn/T/node-cdp.58709-b145075c-0.sock.deferred
+    at PipeConnectWrap.afterConnect [as oncomplete] (node:net:1634:16) {
+  errno: -1,
+  code: 'EPERM',
+  syscall: 'connect',
+  address: '/var/folders/fy/wg2tzrv957sg2vqjcvdkdzvm0000gn/T/node-cdp.58709-b145075c-0.sock.deferred'
+}
+
+Error activating auto attach, please report to https://aka.ms/js-dbg-issue
+failed to load config from /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/vitest.config.ts
+
+⎯⎯⎯⎯⎯⎯⎯ Startup Error ⎯⎯⎯⎯⎯⎯⎯⎯
+Error: EPERM: operation not permitted, open '/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/node_modules/.vite-temp/vitest.config.ts.timestamp-1772922766617-94ce82a1c2455.mjs'
+    at async open (node:internal/fs/promises:634:25)
+    at async Object.writeFile (node:internal/fs/promises:1208:14)
+codex
+I can’t execute Vitest end-to-end here because the workspace is read-only and Vite needs to write temp config bundles. I’m still validating the replacement against the local component signatures and TypeScript setup so the file contents are internally consistent.
+exec
+/bin/zsh -lc 'cat tsconfig.json' in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc 'cat vitest.config.ts' in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,240p' src/tui/home-view.test.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 51ms:
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+    test: {
+        include: ['src/**/*.test.{ts,tsx}'],
+        testTimeout: 10000,
+        env: {
+            FORCE_COLOR: 'true',
+        },
+    },
+});
+ succeeded in 52ms:
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+        "outDir": "./dist",
+        "rootDir": "./src",
+        "strict": true,
+        "esModuleInterop": true,
+        "resolveJsonModule": true,
+        "declaration": true,
+        "sourceMap": true,
+        "declarationMap": true,
+        "jsx": "react-jsx",
+        "skipLibCheck": true
+    },
+    "include": ["src/**/*"]
+}
+ succeeded in 52ms:
+import { describe, it, expect, vi } from 'vitest';
+import React from 'react';
+import { render } from 'ink-testing-library';
+import { HomeView } from './home-view.js';
+import type { Issue } from '../types.js';
+import { IssueStatus } from "../types.js";
+
+const tick = () => new Promise(r => setTimeout(r, 0));
+
+function makeIssue(overrides: Partial<Issue> & { inum: number; title: string }): Issue {
+    return {
+        description: '',
+        status: IssueStatus.Awaiting,
+        created_at: '2026-01-01T00:00:00Z',
+        resolved_at: null,
+        issue_revision: 1,
+        agent_last_read_at: null,
+        user_last_viewed_at: null,
+        ...overrides,
+    };
+exec
+/bin/zsh -lc "rg -n \"vi\\.mock\\(\" src/tui --glob '*.test.tsx'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+src/tui/detail.test.tsx:11:vi.mock('./mock-data.js', () => ({
+src/tui/detail.test.tsx:16:vi.mock('./mock-store.js', () => ({
+exec
+/bin/zsh -lc "sed -n '1,120p' src/tui/detail.test.tsx" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+import { describe, it, expect, vi } from 'vitest';
+import React from 'react';
+import { render } from 'ink-testing-library';
+import { DetailView } from './detail.js';
+import { ResponseContainer } from './response-container.js';
+import type { Issue, Response, Message } from '../types.js';
+import { IssueStatus, ResponseType, AuthorType } from '../types.js';
+import { createMessage, buildResponseChain, buildMixedChain } from './thread-builders.js';
+
+let mockNextId = 100;
+vi.mock('./mock-data.js', () => ({
+    getMockStore: () => ({ nextResponseId: mockNextId }),
+    saveMockStore: vi.fn(),
+    MOCK_DETAIL_DATA: {} as Record<number, unknown>,
+}));
+vi.mock('./mock-store.js', () => ({
+    getNextResponseId: (store: { nextResponseId: number }) => {
+        const id = store.nextResponseId;
+        store.nextResponseId = id + 1;
+        mockNextId = store.nextResponseId;
+exec
+/bin/zsh -lc "rg -n \"measureElement|measure\" src node_modules/ink/build --glob '"'!node_modules/**/README*'"'" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+node_modules/ink/build/measure-element.js:4:const measureElement = (node) => ({
+node_modules/ink/build/measure-element.js:8:export default measureElement;
+node_modules/ink/build/measure-element.js:9://# sourceMappingURL=measure-element.js.map
+node_modules/ink/build/measure-text.js:3:const measureText = (text) => {
+node_modules/ink/build/measure-text.js:20:export default measureText;
+node_modules/ink/build/measure-text.js:21://# sourceMappingURL=measure-text.js.map
+src/tui/app-shell.test.tsx:65:        // Render with a child that fills its area so we can measure
+node_modules/ink/build/measure-text.d.ts:5:declare const measureText: (text: string) => Output;
+node_modules/ink/build/measure-text.d.ts:6:export default measureText;
+node_modules/ink/build/experimental/dom.js:10:var _measureText = _interopRequireDefault(require("../measure-text"));
+node_modules/ink/build/experimental/dom.js:107:    const dimensions = (0, _measureText.default)(text);
+node_modules/ink/build/calculate-wrapped-text.js:8:var _measureText = _interopRequireDefault(require("./measure-text"));
+node_modules/ink/build/calculate-wrapped-text.js:37:      } = (0, _measureText.default)(wrappedText);
+node_modules/ink/build/dom.js:2:import measureText from './measure-text.js';
+node_modules/ink/build/dom.js:17:        node.yogaNode?.setMeasureFunc(measureTextNode.bind(null, node));
+node_modules/ink/build/dom.js:90:const measureTextNode = function (node, width) {
+node_modules/ink/build/dom.js:92:    const dimensions = measureText(text);
+node_modules/ink/build/dom.js:104:    return measureText(wrappedText);
+node_modules/ink/build/dom.js:113:    // Mark closest Yoga node as dirty to measure text dimensions again
+node_modules/ink/build/index.d.ts:31:export { default as measureElement } from './measure-element.js';
+exec
+/bin/zsh -lc "sed -n '1,220p' node_modules/ink/build/components/Box.d.ts" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,200p' node_modules/ink/build/measure-element.d.ts" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestratorexec
+/bin/zsh -lc "sed -n '1,220p' node_modules/ink/build/dom.d.ts" in /Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator succeeded in 52ms:
+import { type Node as YogaNode } from 'yoga-layout';
+import { type Styles } from './styles.js';
+import { type OutputTransformer } from './render-node-to-output.js';
+type InkNode = {
+    parentNode: DOMElement | undefined;
+    yogaNode?: YogaNode;
+    internal_static?: boolean;
+    style: Styles;
+};
+export type TextName = '#text';
+export type ElementNames = 'ink-root' | 'ink-box' | 'ink-text' | 'ink-virtual-text';
+export type NodeNames = ElementNames | TextName;
+export type DOMElement = {
+    nodeName: ElementNames;
+    attributes: Record<string, DOMNodeAttribute>;
+    childNodes: DOMNode[];
+    internal_transform?: OutputTransformer;
+    internal_accessibility?: {
+        role?: 'button' | 'checkbox' | 'combobox' | 'list' | 'listbox' | 'listitem' | 'menu' | 'menuitem' | 'option' | 'progressbar' | 'radio' | 'radiogroup' | 'tab' | 'tablist' | 'table' | 'textbox' | 'timer' | 'toolbar';
+        state?: {
+ succeeded in 52ms:
+import { type DOMElement } from './dom.js';
+type Output = {
+    /**
+    Element width.
+    */
+    width: number;
+    /**
+    Element height.
+    */
+    height: number;
+};
+/**
+Measure the dimensions of a particular `<Box>` element.
+*/
+declare const measureElement: (node: DOMElement) => Output;
+export default measureElement;
+ succeeded in 52ms:
+import React from 'react';
+import { type Except } from 'type-fest';
+import { type Styles } from '../styles.js';
+import { type DOMElement } from '../dom.js';
+export type Props = Except<Styles, 'textWrap'> & {
+    /**
+    A label for the element for screen readers.
+    */
+    readonly 'aria-label'?: string;
+    /**
+    Hide the element from screen readers.
+    */
+    readonly 'aria-hidden'?: boolean;
+    /**
+    The role of the element.
+    */
+    readonly 'aria-role'?: 'button' | 'checkbox' | 'combobox' | 'list' | 'listbox' | 'listitem' | 'menu' | 'menuitem' | 'option' | 'progressbar' | 'radio' | 'radiogroup' | 'tab' | 'tablist' | 'table' | 'textbox' | 'timer' | 'toolbar';
+    /**
+    The state of the element.
+    */
+codex
+The workspace is read-only here, so I couldn’t write or run these files directly. These are the complete contents.
+
+`src/tui/app-shell.test.tsx`
+```tsx
+import { describe, it, expect, vi } from 'vitest';
+import React, { useEffect } from 'react';
+import { render } from 'ink-testing-library';
+import { renderToString, Text } from 'ink';
+import stripAnsi from 'strip-ansi';
+import { AppShell as RealAppShell } from './app-shell.js';
+import { HEADER_LINES } from './header.js';
+import {
+    computeFooterLines,
+    getFooterShortcuts,
+} from './footer.js';
+import type { FooterOptions, FooterProps } from './footer.js';
+import { ViewType } from './views.js';
+
+const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+const homeView = { type: ViewType.Home as const };
+
+async function loadInstrumentedAppShell() {
+    vi.resetModules();
+
+    const boxCalls: Array<Record<string, unknown>> = [];
+
+    vi.doMock('ink', async () => {
+        const actual = await vi.importActual<typeof import('ink')>('ink');
+
+        return {
+            ...actual,
+            Box: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => {
+                boxCalls.push(props);
+                return <>{children}</>;
+            },
+        };
+    });
+
+    vi.doMock('./header.js', async () => {
+        const { Text } = await vi.importActual<typeof import('ink')>('ink');
+
+        return {
+            HEADER_LINES,
+            Header: () => <Text>HEADER</Text>,
+        };
+    });
+
+    vi.doMock('./footer.js', async () => {
+        const { Text } = await vi.importActual<typeof import('ink')>('ink');
+
+        return {
+            Footer: (props: FooterProps) => (
+                <Text>{props.inThread ? 'THREAD FOOTER' : 'FOOTER'}</Text>
+            ),
+            computeFooterLines,
+            getFooterShortcuts,
+        };
+    });
+
+    const { AppShell } = await import('./app-shell.js');
+    return { AppShell, boxCalls };
+}
+
+describe('AppShell', () => {
+    it('app shell renders header, content, footer vertically', () => {
+        const columns = 120;
+        const rows = 12;
+        const output = stripAnsi(renderToString(
+            <RealAppShell columns={columns} rows={rows} currentView={homeView}>
+                {() => <Text>CONTENT</Text>}
+            </RealAppShell>,
+            { columns },
+        ));
+
+        const lines = output.split('\n');
+        const headerIndex = lines.findIndex(line => line.includes('Review Agent Orchestrator'));
+        const contentIndex = lines.findIndex(line => line.includes('CONTENT'));
+        const footerIndex = lines.findIndex(line => line.includes('View') && line.includes('Quit'));
+
+        expect(headerIndex).toBeGreaterThanOrEqual(0);
+        expect(contentIndex).toBeGreaterThanOrEqual(0);
+        expect(footerIndex).toBeGreaterThanOrEqual(0);
+        expect(headerIndex).toBeLessThan(contentIndex);
+        expect(contentIndex).toBeLessThan(footerIndex);
+    });
+
+    it('app shell constrains height to rows prop', async () => {
+        const { AppShell, boxCalls } = await loadInstrumentedAppShell();
+
+        render(
+            <AppShell columns={80} rows={24} currentView={homeView}>
+                {() => <Text>BODY</Text>}
+            </AppShell>
+        );
+
+        expect(boxCalls).toHaveLength(2);
+        expect(boxCalls[0]).toMatchObject({ flexDirection: 'column', height: 24 });
+    });
+
+    it('content area gets remaining height after header and footer', async () => {
+        const columns = 80;
+        const rows = 30;
+        const expectedFooterLines = computeFooterLines(
+            getFooterShortcuts(ViewType.Home),
+            columns,
+        );
+        const { AppShell, boxCalls } = await loadInstrumentedAppShell();
+
+        render(
+            <AppShell columns={columns} rows={rows} currentView={homeView}>
+                {() => <Text>BODY</Text>}
+            </AppShell>
+        );
+
+        expect(boxCalls).toHaveLength(2);
+        expect(boxCalls[1]).toMatchObject({
+            flexDirection: 'column',
+            flexGrow: 1,
+            height: rows - HEADER_LINES - expectedFooterLines,
+        });
+    });
+
+    it('resize updates dimensions', async () => {
+        const initialColumns = 120;
+        const initialRows = 24;
+        const nextColumns = 40;
+        const nextRows = 30;
+        const { AppShell, boxCalls } = await loadInstrumentedAppShell();
+        const { rerender } = render(
+            <AppShell columns={initialColumns} rows={initialRows} currentView={homeView}>
+                {() => <Text>BODY</Text>}
+            </AppShell>
+        );
+
+        rerender(
+            <AppShell columns={nextColumns} rows={nextRows} currentView={homeView}>
+                {() => <Text>BODY</Text>}
+            </AppShell>
+        );
+
+        expect(boxCalls.at(-2)).toMatchObject({ flexDirection: 'column', height: nextRows });
+        expect(boxCalls.at(-1)).toMatchObject({
+            flexDirection: 'column',
+            flexGrow: 1,
+            height: nextRows - HEADER_LINES - computeFooterLines(
+                getFooterShortcuts(ViewType.Home),
+                nextColumns,
+            ),
+        });
+    });
+
+    it('setFooterOptions state reaches Footer props', async () => {
+        const ChildThatSetsFooterOptions: React.FC<{
+            setFooterOptions: (opts: FooterOptions) => void;
+        }> = ({ setFooterOptions }) => {
+            useEffect(() => {
+                setFooterOptions({ inThread: true });
+            }, [setFooterOptions]);
+
+            return <Text>THREAD CONTENT</Text>;
+        };
+
+        const { lastFrame } = render(
+            <RealAppShell
+                columns={200}
+                rows={24}
+                currentView={{ type: ViewType.Detail, inum: 1 }}
+            >
+                {(setFooterOptions) => (
+                    <ChildThatSetsFooterOptions setFooterOptions={setFooterOptions} />
+                )}
+            </RealAppShell>
+        );
+
+        await tick();
+        await tick();
+
+        const frame = stripAnsi(lastFrame()!);
+
+        expect(frame).toContain('THREAD CONTENT');
+        expect(frame).toContain('Sub-thread');
+        expect(frame).toContain('Exit thread');
+        expect(frame).not.toContain('Show pane');
+    });
+});
+```
+
+`src/tui/app-shell.tsx`
+```tsx
+import React, { useState } from 'react';
+import { Box } from 'ink';
+import { type View } from './views.js';
+import { Header, HEADER_LINES } from './header.js';
+import { Footer, computeFooterLines, getFooterShortcuts } from './footer.js';
+import type { FooterOptions } from './footer.js';
+
+export type SetFooterOptions = (opts: FooterOptions) => void;
+
+export interface AppShellProps {
+    columns: number;
+    rows: number;
+    currentView: View;
+    activeAgents?: number;
+    maxAgents?: number;
+    unreadCount?: number;
+    threadInfo?: { inThread: boolean };
+    children: (setFooterOptions: SetFooterOptions) => React.ReactNode;
+}
+
+export const AppShell: React.FC<AppShellProps> = ({
+    columns,
+    rows,
+    currentView,
+    activeAgents,
+    maxAgents,
+    unreadCount,
+    threadInfo,
+    children,
+}) => {
+    const [footerOptions, setFooterOptions] = useState<FooterOptions>({});
+
+    const viewType = currentView.type;
+    const footerLines = computeFooterLines(
+        getFooterShortcuts(viewType, footerOptions),
+        columns,
+    );
+    const contentHeight = rows - HEADER_LINES - footerLines;
+
+    return (
+        <Box flexDirection="column" height={rows}>
+            <Header
+                currentView={currentView}
+                columns={columns}
+                activeAgents={activeAgents}
+                maxAgents={maxAgents}
+                unreadCount={unreadCount}
+                threadInfo={threadInfo}
+            />
+            <Box flexDirection="column" flexGrow={1} height={contentHeight}>
+                {children(setFooterOptions as SetFooterOptions)}
+            </Box>
+            <Footer viewType={viewType} {...footerOptions} columns={columns} />
+        </Box>
+    );
+};
+```
+
+Design choices:
+- `AppShell` passes the raw `useState` setter through the render prop, cast to the narrower `(opts: FooterOptions) => void` type. That preserves stable function identity, which matters for child `useEffect` dependencies.
+- The height tests instrument `Box` with mocks because Ink’s rendered text output doesn’t expose layout props directly. The visible-layout tests still use the real component path.
+tokens used
+83,171
+The workspace is read-only here, so I couldn’t write or run these files directly. These are the complete contents.
+
+`src/tui/app-shell.test.tsx`
+```tsx
+import { describe, it, expect, vi } from 'vitest';
+import React, { useEffect } from 'react';
+import { render } from 'ink-testing-library';
+import { renderToString, Text } from 'ink';
+import stripAnsi from 'strip-ansi';
+import { AppShell as RealAppShell } from './app-shell.js';
+import { HEADER_LINES } from './header.js';
+import {
+    computeFooterLines,
+    getFooterShortcuts,
+} from './footer.js';
+import type { FooterOptions, FooterProps } from './footer.js';
+import { ViewType } from './views.js';
+
+const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+const homeView = { type: ViewType.Home as const };
+
+async function loadInstrumentedAppShell() {
+    vi.resetModules();
+
+    const boxCalls: Array<Record<string, unknown>> = [];
+
+    vi.doMock('ink', async () => {
+        const actual = await vi.importActual<typeof import('ink')>('ink');
+
+        return {
+            ...actual,
+            Box: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => {
+                boxCalls.push(props);
+                return <>{children}</>;
+            },
+        };
+    });
+
+    vi.doMock('./header.js', async () => {
+        const { Text } = await vi.importActual<typeof import('ink')>('ink');
+
+        return {
+            HEADER_LINES,
+            Header: () => <Text>HEADER</Text>,
+        };
+    });
+
+    vi.doMock('./footer.js', async () => {
+        const { Text } = await vi.importActual<typeof import('ink')>('ink');
+
+        return {
+            Footer: (props: FooterProps) => (
+                <Text>{props.inThread ? 'THREAD FOOTER' : 'FOOTER'}</Text>
+            ),
+            computeFooterLines,
+            getFooterShortcuts,
+        };
+    });
+
+    const { AppShell } = await import('./app-shell.js');
+    return { AppShell, boxCalls };
+}
+
+describe('AppShell', () => {
+    it('app shell renders header, content, footer vertically', () => {
+        const columns = 120;
+        const rows = 12;
+        const output = stripAnsi(renderToString(
+            <RealAppShell columns={columns} rows={rows} currentView={homeView}>
+                {() => <Text>CONTENT</Text>}
+            </RealAppShell>,
+            { columns },
+        ));
+
+        const lines = output.split('\n');
+        const headerIndex = lines.findIndex(line => line.includes('Review Agent Orchestrator'));
+        const contentIndex = lines.findIndex(line => line.includes('CONTENT'));
+        const footerIndex = lines.findIndex(line => line.includes('View') && line.includes('Quit'));
+
+        expect(headerIndex).toBeGreaterThanOrEqual(0);
+        expect(contentIndex).toBeGreaterThanOrEqual(0);
+        expect(footerIndex).toBeGreaterThanOrEqual(0);
+        expect(headerIndex).toBeLessThan(contentIndex);
+        expect(contentIndex).toBeLessThan(footerIndex);
+    });
+
+    it('app shell constrains height to rows prop', async () => {
+        const { AppShell, boxCalls } = await loadInstrumentedAppShell();
+
+        render(
+            <AppShell columns={80} rows={24} currentView={homeView}>
+                {() => <Text>BODY</Text>}
+            </AppShell>
+        );
+
+        expect(boxCalls).toHaveLength(2);
+        expect(boxCalls[0]).toMatchObject({ flexDirection: 'column', height: 24 });
+    });
+
+    it('content area gets remaining height after header and footer', async () => {
+        const columns = 80;
+        const rows = 30;
+        const expectedFooterLines = computeFooterLines(
+            getFooterShortcuts(ViewType.Home),
+            columns,
+        );
+        const { AppShell, boxCalls } = await loadInstrumentedAppShell();
+
+        render(
+            <AppShell columns={columns} rows={rows} currentView={homeView}>
+                {() => <Text>BODY</Text>}
+            </AppShell>
+        );
+
+        expect(boxCalls).toHaveLength(2);
+        expect(boxCalls[1]).toMatchObject({
+            flexDirection: 'column',
+            flexGrow: 1,
+            height: rows - HEADER_LINES - expectedFooterLines,
+        });
+    });
+
+    it('resize updates dimensions', async () => {
+        const initialColumns = 120;
+        const initialRows = 24;
+        const nextColumns = 40;
+        const nextRows = 30;
+        const { AppShell, boxCalls } = await loadInstrumentedAppShell();
+        const { rerender } = render(
+            <AppShell columns={initialColumns} rows={initialRows} currentView={homeView}>
+                {() => <Text>BODY</Text>}
+            </AppShell>
+        );
+
+        rerender(
+            <AppShell columns={nextColumns} rows={nextRows} currentView={homeView}>
+                {() => <Text>BODY</Text>}
+            </AppShell>
+        );
+
+        expect(boxCalls.at(-2)).toMatchObject({ flexDirection: 'column', height: nextRows });
+        expect(boxCalls.at(-1)).toMatchObject({
+            flexDirection: 'column',
+            flexGrow: 1,
+            height: nextRows - HEADER_LINES - computeFooterLines(
+                getFooterShortcuts(ViewType.Home),
+                nextColumns,
+            ),
+        });
+    });
+
+    it('setFooterOptions state reaches Footer props', async () => {
+        const ChildThatSetsFooterOptions: React.FC<{
+            setFooterOptions: (opts: FooterOptions) => void;
+        }> = ({ setFooterOptions }) => {
+            useEffect(() => {
+                setFooterOptions({ inThread: true });
+            }, [setFooterOptions]);
+
+            return <Text>THREAD CONTENT</Text>;
+        };
+
+        const { lastFrame } = render(
+            <RealAppShell
+                columns={200}
+                rows={24}
+                currentView={{ type: ViewType.Detail, inum: 1 }}
+            >
+                {(setFooterOptions) => (
+                    <ChildThatSetsFooterOptions setFooterOptions={setFooterOptions} />
+                )}
+            </RealAppShell>
+        );
+
+        await tick();
+        await tick();
+
+        const frame = stripAnsi(lastFrame()!);
+
+        expect(frame).toContain('THREAD CONTENT');
+        expect(frame).toContain('Sub-thread');
+        expect(frame).toContain('Exit thread');
+        expect(frame).not.toContain('Show pane');
+    });
+});
+```
+
+`src/tui/app-shell.tsx`
+```tsx
+import React, { useState } from 'react';
+import { Box } from 'ink';
+import { type View } from './views.js';
+import { Header, HEADER_LINES } from './header.js';
+import { Footer, computeFooterLines, getFooterShortcuts } from './footer.js';
+import type { FooterOptions } from './footer.js';
+
+export type SetFooterOptions = (opts: FooterOptions) => void;
+
+export interface AppShellProps {
+    columns: number;
+    rows: number;
+    currentView: View;
+    activeAgents?: number;
+    maxAgents?: number;
+    unreadCount?: number;
+    threadInfo?: { inThread: boolean };
+    children: (setFooterOptions: SetFooterOptions) => React.ReactNode;
+}
+
+export const AppShell: React.FC<AppShellProps> = ({
+    columns,
+    rows,
+    currentView,
+    activeAgents,
+    maxAgents,
+    unreadCount,
+    threadInfo,
+    children,
+}) => {
+    const [footerOptions, setFooterOptions] = useState<FooterOptions>({});
+
+    const viewType = currentView.type;
+    const footerLines = computeFooterLines(
+        getFooterShortcuts(viewType, footerOptions),
+        columns,
+    );
+    const contentHeight = rows - HEADER_LINES - footerLines;
+
+    return (
+        <Box flexDirection="column" height={rows}>
+            <Header
+                currentView={currentView}
+                columns={columns}
+                activeAgents={activeAgents}
+                maxAgents={maxAgents}
+                unreadCount={unreadCount}
+                threadInfo={threadInfo}
+            />
+            <Box flexDirection="column" flexGrow={1} height={contentHeight}>
+                {children(setFooterOptions as SetFooterOptions)}
+            </Box>
+            <Footer viewType={viewType} {...footerOptions} columns={columns} />
+        </Box>
+    );
+};
+```
+
+Design choices:
+- `AppShell` passes the raw `useState` setter through the render prop, cast to the narrower `(opts: FooterOptions) => void` type. That preserves stable function identity, which matters for child `useEffect` dependencies.
+- The height tests instrument `Box` with mocks because Ink’s rendered text output doesn’t expose layout props directly. The visible-layout tests still use the real component path.
+Waiting for the debugger to disconnect...

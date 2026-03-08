@@ -1,0 +1,181 @@
+Claude (frontend-developer persona) — Step 1.4 Entry Point Debate Results
+
+=== TEST FILE: src/tui/run.test.tsx ===
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import React from 'react';
+import { render } from 'ink-testing-library';
+import stripAnsi from 'strip-ansi';
+import { AppWrapper } from './run.js';
+
+vi.mock('./mock-store.js', () => ({
+    resetMockData: vi.fn(),
+}));
+
+describe('run.tsx — AppWrapper', () => {
+
+    it('app renders without crashing', () => {
+        const { lastFrame } = render(<AppWrapper />);
+        const output = lastFrame()!;
+        const plain = stripAnsi(output);
+        expect(plain).toContain('Review Agent Orchestrator');
+        expect(plain).toContain('Home');
+    });
+
+    it('renders header, content area, and footer in vertical order', () => {
+        const { lastFrame } = render(<AppWrapper />);
+        const output = lastFrame()!;
+        const plain = stripAnsi(output);
+        expect(plain).toContain('Review Agent Orchestrator');
+        expect(plain).toContain('Quit');
+        expect(plain).toContain('View');
+        const titlePos = plain.indexOf('Review Agent Orchestrator');
+        const quitPos = plain.indexOf('Quit');
+        expect(titlePos).toBeLessThan(quitPos);
+    });
+
+    it('falls back to 80x24 when stdout has no dimensions', () => {
+        const { lastFrame } = render(<AppWrapper />);
+        const output = lastFrame()!;
+        const lines = output.split('\n');
+        expect(lines).toHaveLength(24);
+    });
+
+    it('does not emit raw ANSI escape codes (REQ-INK-005)', () => {
+        const writeSpy = vi.spyOn(process.stdout, 'write');
+        const { lastFrame } = render(<AppWrapper />);
+        expect(lastFrame()).toBeDefined();
+        for (const call of writeSpy.mock.calls) {
+            const arg = call[0];
+            if (typeof arg === 'string') {
+                expect(arg).not.toContain('\x1B[2J');
+                expect(arg).not.toContain('\x1B[H');
+            }
+        }
+        writeSpy.mockRestore();
+    });
+
+    it('content area is empty (Phase 1 placeholder)', () => {
+        const { lastFrame } = render(<AppWrapper />);
+        const output = lastFrame()!;
+        const plain = stripAnsi(output);
+        const lines = plain.split('\n');
+        const subtitleIdx = lines.findIndex(l => l.includes('All issues and orchestration state'));
+        const footerIdx = lines.findIndex(l => l.includes('['));
+        expect(subtitleIdx).toBeGreaterThanOrEqual(0);
+        expect(footerIdx).toBeGreaterThan(subtitleIdx);
+        for (let i = subtitleIdx + 1; i < footerIdx; i++) {
+            expect(lines[i].trim()).toBe('');
+        }
+    });
+});
+
+describe('run.tsx — --resetMockData flag', () => {
+    let originalArgv: string[];
+
+    beforeEach(() => {
+        originalArgv = process.argv;
+    });
+
+    afterEach(() => {
+        process.argv = originalArgv;
+        vi.restoreAllMocks();
+    });
+
+    it('--resetMockData flag triggers resetMockData() call', async () => {
+        const { resetMockData } = await import('./mock-store.js');
+        const resetMock = vi.mocked(resetMockData);
+        resetMock.mockClear();
+        const { processResetFlag } = await import('./run.js');
+        process.argv = ['node', 'run.js', '--resetMockData'];
+        processResetFlag();
+        expect(resetMock).toHaveBeenCalledOnce();
+    });
+
+    it('resetMockData is NOT called when flag is absent', async () => {
+        const { resetMockData } = await import('./mock-store.js');
+        const resetMock = vi.mocked(resetMockData);
+        resetMock.mockClear();
+        const { processResetFlag } = await import('./run.js');
+        process.argv = ['node', 'run.js'];
+        processResetFlag();
+        expect(resetMock).not.toHaveBeenCalled();
+    });
+});
+
+=== IMPLEMENTATION FILE: src/tui/run.tsx ===
+
+import { resetMockData } from './mock-store.js';
+
+export function processResetFlag(): void {
+    if (process.argv.includes('--resetMockData')) {
+        resetMockData();
+        console.log('Mock data reset to defaults.');
+    }
+}
+
+processResetFlag();
+
+const [
+    { default: React, useState, useEffect, useCallback },
+    { render, useStdout },
+    { AppShell },
+    { ViewType },
+] = await Promise.all([
+    import('react'),
+    import('ink'),
+    import('./app-shell.js'),
+    import('./views.js'),
+]);
+
+import type { View } from './views.js';
+import type { WriteStream } from 'node:tty';
+
+const DEFAULT_COLUMNS = 80;
+const DEFAULT_ROWS = 24;
+
+export function AppWrapper() {
+    const { stdout } = useStdout();
+    const stream = stdout as WriteStream | undefined;
+
+    const [dims, setDims] = useState({
+        columns: stream?.columns ?? DEFAULT_COLUMNS,
+        rows: stream?.rows ?? DEFAULT_ROWS,
+    });
+
+    const onResize = useCallback(() => {
+        if (stream) {
+            setDims({ columns: stream.columns, rows: stream.rows });
+        }
+    }, [stream]);
+
+    useEffect(() => {
+        if (stream) {
+            stream.on('resize', onResize);
+            return () => { stream.off('resize', onResize); };
+        }
+    }, [stream, onResize]);
+
+    const currentView: View = { type: ViewType.Home };
+
+    return (
+        <AppShell columns={dims.columns} rows={dims.rows} currentView={currentView}>
+            {(_setFooterOptions) => null}
+        </AppShell>
+    );
+}
+
+const instance = render(<AppWrapper />);
+await instance.waitUntilExit();
+
+=== DESIGN DECISIONS ===
+1. Exported processResetFlag() — extracted from inline code for testability
+2. Exported AppWrapper — so tests can render it directly via ink-testing-library
+3. Removed all ANSI escape codes (REQ-INK-005) — Ink manages its own output
+4. Replaced App with AppShell, hardcoded ViewType.Home
+5. Empty content returns null (cleaner than placeholder Text)
+6. Default dimensions 80x24 via constants
+7. Dynamic import pattern preserved for mock-data ordering
+8. Static type-only imports for View and WriteStream (erased at compile time)
+9. Tests verify observable behavior: header text, footer shortcuts, line count, no ANSI escapes
+10. processResetFlag tests use manipulated process.argv

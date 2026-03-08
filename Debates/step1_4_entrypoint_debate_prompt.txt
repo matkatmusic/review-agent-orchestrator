@@ -1,0 +1,219 @@
+Step 1.4: Entry Point (run.tsx) — Multi-Agent Debate Prompt
+============================================================
+
+TASK: Implement Step 1.4 of the TUI rewrite plan. This is the entry point
+that wires AppShell (from Step 1.3) into a runnable Ink application.
+
+METHODOLOGY: Test-Driven Development (Red-Green-Refactor)
+Write tests FIRST, then implement.
+
+REQUIREMENTS FROM PLAN:
+
+  Step 1.4: Entry Point (run.tsx)
+  ---------------------------------
+  Write tests FIRST:
+    - test: "app renders without crashing"
+    - test: "--resetMockData flag is processed before render"
+
+  Then implement:
+    - AppWrapper that tracks terminal dimensions via useStdout()
+    - No ANSI escape codes (REQ-INK-005)
+    - Passes dimensions to AppShell
+    - In Phase 1, AppShell reads a hardcoded ViewType.Home internally
+      (replaced by NavigationContext's useNavigation() in Phase 2)
+
+  Deliverable: Running app showing Header + empty content + Footer.
+  Can be launched with: node dist/tui/run.js
+
+EXISTING CODE — src/tui/run.tsx (current, to be rewritten):
+
+```tsx
+/**
+ * TUI entry point.
+ *
+ * --resetMockData flag must be processed BEFORE mock-data.ts is imported,
+ * so we use dynamic imports for everything that transitively loads mock data.
+ */
+
+import { resetMockData } from './mock-store.js';
+
+if (process.argv.includes('--resetMockData')) {
+    resetMockData();
+    console.log('Mock data reset to defaults.');
+}
+
+// Dynamic imports — these load mock-data.ts which reads from the (now reset) JSON
+const [
+    { default: React, useState, useEffect, useCallback },
+    { render, useStdout, useApp },
+    { App },
+    { ViewType },
+] = await Promise.all([
+    import('react'),
+    import('ink'),
+    import('./app.js'),
+    import('./views.js'),
+]);
+
+function AppWrapper() {
+    const { stdout } = useStdout();
+    const { exit } = useApp();
+    const stream = stdout as import('node:tty').WriteStream | undefined;
+    const [dims, setDims] = useState({
+        columns: stream?.columns ?? 80,
+        rows: stream?.rows ?? 24,
+    });
+
+    const onResize = useCallback(() => {
+        if (stream) {
+            process.stdout.write('\x1B[2J\x1B[H');   // <-- ANSI escape, violates REQ-INK-005
+            setDims({ columns: stream.columns, rows: stream.rows });
+        }
+    }, [stream]);
+
+    useEffect(() => {
+        if (stream) {
+            stream.on('resize', onResize);
+            return () => { stream.off('resize', onResize); };
+        }
+    }, [stream, onResize]);
+
+    return <App columns={dims.columns} rows={dims.rows} onExit={exit} initialView={{ type: ViewType.Detail, inum: 1 }} />;
+}
+
+const instance = render(<AppWrapper />);
+await instance.waitUntilExit();
+```
+
+EXISTING CODE — src/tui/app-shell.tsx (from Step 1.3):
+
+```tsx
+import React, { useState } from 'react';
+import { Box } from 'ink';
+import { type View } from './views.js';
+import { Header, HEADER_LINES } from './header.js';
+import { Footer, computeFooterLines, getFooterShortcuts } from './footer.js';
+import type { FooterOptions } from './footer.js';
+
+export interface AppShellProps {
+    columns: number;
+    rows: number;
+    currentView: View;
+    activeAgents?: number;
+    maxAgents?: number;
+    unreadCount?: number;
+    threadInfo?: { inThread: boolean };
+    children: (setFooterOptions: (opts: FooterOptions) => void) => React.ReactNode;
+}
+
+export const AppShell: React.FC<AppShellProps> = ({
+    columns, rows, currentView, activeAgents, maxAgents,
+    unreadCount, threadInfo, children,
+}) => {
+    const [footerOptions, setFooterOptions] = useState<FooterOptions>({});
+    const viewType = currentView.type;
+    const shortcuts = getFooterShortcuts(viewType, footerOptions);
+    const footerLines = computeFooterLines(shortcuts, columns);
+    const contentHeight = Math.max(0, rows - HEADER_LINES - footerLines);
+
+    return (
+        <Box flexDirection="column" height={rows}>
+            <Header currentView={currentView} columns={columns}
+                activeAgents={activeAgents} maxAgents={maxAgents}
+                unreadCount={unreadCount} threadInfo={threadInfo} />
+            <Box flexDirection="column" height={contentHeight} flexGrow={1}>
+                {children(setFooterOptions)}
+            </Box>
+            <Footer viewType={viewType} {...footerOptions} columns={columns} />
+        </Box>
+    );
+};
+```
+
+EXISTING CODE — src/tui/views.ts (ViewType enum):
+
+```ts
+export enum ViewType {
+    Home = 'Home',
+    Detail = 'Detail',
+    NewIssue = 'NewIssue',
+    AgentStatus = 'AgentStatus',
+    BlockingMap = 'BlockingMap',
+    GroupView = 'GroupView',
+    IssuePicker = 'IssuePicker',
+}
+```
+
+EXISTING CODE — src/tui/mock-store.ts (resetMockData function):
+
+```ts
+export function resetMockData(): void {
+    if (!fs.existsSync(DEFAULT_PATH)) {
+        throw new Error(`Default mock data not found: ${DEFAULT_PATH}`);
+    }
+    fs.copyFileSync(DEFAULT_PATH, ACTIVE_PATH);
+}
+```
+
+CONSTRAINTS:
+
+1. No ANSI escape codes anywhere in the entry point (REQ-INK-005).
+   The current run.tsx has `process.stdout.write('\x1B[2J\x1B[H')` — this must be removed.
+
+2. AppWrapper must use useStdout() to track terminal dimensions.
+
+3. In Phase 1, AppShell uses a hardcoded ViewType.Home as currentView.
+   The old App component is NOT used. Instead, AppWrapper renders AppShell
+   directly with currentView={{ type: ViewType.Home }}.
+
+4. The --resetMockData flag must be processed BEFORE any mock-data imports.
+   This means the dynamic import pattern must be preserved.
+
+5. AppShell's children render-prop receives setFooterOptions. In Phase 1,
+   the content area is empty (just a placeholder <Text> or empty Box).
+
+6. The entry point file (run.tsx) is primarily a runtime launcher. The testable
+   parts are:
+   a) The AppWrapper component (renders without crashing)
+   b) The --resetMockData flag processing
+
+7. Tests use ink-testing-library. The render() from ink-testing-library does NOT
+   provide a real TTY, so useStdout() returns a mock stdout without .columns/.rows.
+   Tests should handle this gracefully (fallback to default 80x24).
+
+8. The test file should be src/tui/run.test.tsx (colocated).
+
+9. IMPORTANT: Do NOT use the old class-based App component. The new entry point
+   renders AppShell directly. The old App is being replaced incrementally through
+   the rewrite plan.
+
+10. Follow existing code patterns — TypeScript, .js extensions in imports, vitest.
+
+DELIVERABLES:
+
+Produce TWO files:
+
+1. src/tui/run.test.tsx — Test file with at least these tests:
+   - "app renders without crashing" — render AppWrapper (or a testable wrapper),
+     verify it produces output containing header/footer elements
+   - "--resetMockData flag is processed before render" — verify the flag
+     triggers resetMockData() before the app renders
+
+2. src/tui/run.tsx — Rewritten entry point:
+   - resetMockData handling (preserved from current)
+   - AppWrapper component using useStdout() for dimensions
+   - No ANSI escape codes
+   - Renders AppShell with hardcoded ViewType.Home
+   - Empty content area (Phase 1 placeholder)
+   - render() + waitUntilExit() at module level
+
+FORMAT YOUR RESPONSE AS:
+
+=== TEST FILE: src/tui/run.test.tsx ===
+(full file contents)
+
+=== IMPLEMENTATION FILE: src/tui/run.tsx ===
+(full file contents)
+
+=== DESIGN DECISIONS ===
+(bullet list of key choices and rationale)

@@ -1,0 +1,185 @@
+Debugger listening on ws://127.0.0.1:62529/b183f3c6-5a70-4c4a-851d-10637637e4f0
+For help, see: https://nodejs.org/en/docs/inspector
+Debugger attached.
+Debugger listening on ws://127.0.0.1:62549/3fafdc85-6cc5-4332-8a4a-c6827fcf4219
+For help, see: https://nodejs.org/en/docs/inspector
+Debugger attached.
+Loaded cached credentials.
+[ERROR] [IDEClient] Failed to connect to IDE companion extension. Please ensure the extension is running. To install the extension, run /ide install.
+[LocalAgentExecutor] Skipping subagent tool 'codebase_investigator' for agent 'generalist' to prevent recursion.
+[LocalAgentExecutor] Skipping subagent tool 'cli_help' for agent 'generalist' to prevent recursion.
+[LocalAgentExecutor] Skipping subagent tool 'generalist' for agent 'generalist' to prevent recursion.
+I have designed and implemented the `AppShell` component along with its complete test suite. Here are the contents of the files along with an explanation of the design decisions.
+
+### 1. `src/tui/app-shell.test.tsx`
+```tsx
+import { describe, it, expect } from 'vitest';
+import React, { useEffect } from 'react';
+import { render } from 'ink-testing-library';
+import stripAnsi from 'strip-ansi';
+import { Text } from 'ink';
+import { AppShell } from './app-shell.js';
+import { ViewType } from './views.js';
+
+describe('AppShell', () => {
+    const defaultProps = {
+        columns: 80,
+        rows: 24,
+        currentView: { type: ViewType.Home as const },
+    };
+
+    it('app shell renders header, content, footer vertically', () => {
+        const { lastFrame } = render(
+            <AppShell {...defaultProps}>
+                {() => <Text>CONTENT_AREA</Text>}
+            </AppShell>
+        );
+        const text = stripAnsi(lastFrame() || '');
+        
+        expect(text).toContain('Review Agent Orchestrator'); // Header
+        expect(text).toContain('CONTENT_AREA');              // Content
+        expect(text).toContain('[Return]');                  // Footer
+    });
+
+    it('app shell constrains height to rows prop', () => {
+        const rows = 12;
+        const { lastFrame } = render(
+            <AppShell {...defaultProps} rows={rows}>
+                {() => <Text>Content</Text>}
+            </AppShell>
+        );
+        
+        const frame = lastFrame() || '';
+        const lines = frame.split('\n');
+        // Ink will typically pad the output to exactly the requested height
+        expect(lines.length).toBeLessThanOrEqual(rows);
+    });
+
+    it('content area gets remaining height after header and footer', () => {
+        let setFooterOptionsCalled = false;
+        const { lastFrame } = render(
+            <AppShell {...defaultProps}>
+                {(setOpts) => {
+                    setFooterOptionsCalled = !!setOpts;
+                    return <Text>Middle Content</Text>;
+                }}
+            </AppShell>
+        );
+        
+        expect(setFooterOptionsCalled).toBe(true);
+        expect(stripAnsi(lastFrame() || '')).toContain('Middle Content');
+    });
+
+    it('resize updates dimensions', () => {
+        const { lastFrame, rerender } = render(
+            <AppShell {...defaultProps} columns={40} rows={10}>
+                {() => <Text>Content</Text>}
+            </AppShell>
+        );
+        const narrowFrame1 = stripAnsi(lastFrame() || '').split('\n')[0] || '';
+
+        rerender(
+            <AppShell {...defaultProps} columns={80} rows={24}>
+                {() => <Text>Content</Text>}
+            </AppShell>
+        );
+        const wideFrame1 = stripAnsi(lastFrame() || '').split('\n')[0] || '';
+
+        // The centered rule width in the Header increases with column count
+        expect(wideFrame1.length).toBeGreaterThan(narrowFrame1.length);
+    });
+
+    it('setFooterOptions state reaches Footer props', () => {
+        const TestComponent = () => {
+            return (
+                <AppShell columns={80} rows={24} currentView={{ type: ViewType.Detail, inum: 1 }}>
+                    {(setFooterOptions) => {
+                        useEffect(() => {
+                            setFooterOptions({ inThread: true });
+                        }, [setFooterOptions]);
+                        return <Text>Detail Content</Text>;
+                    }}
+                </AppShell>
+            );
+        };
+
+        const { lastFrame } = render(<TestComponent />);
+        const text = stripAnsi(lastFrame() || '');
+        
+        // In the Detail view, marking inThread=true changes shortcuts 
+        // to show Thread-specific options like "Sub-thread".
+        expect(text).toContain('Sub-thread');
+    });
+});
+```
+
+### 2. `src/tui/app-shell.tsx`
+```tsx
+import React, { useState } from 'react';
+import { Box } from 'ink';
+import { Header, HEADER_LINES } from './header.js';
+import { Footer, computeFooterLines, getFooterShortcuts } from './footer.js';
+import type { FooterOptions } from './footer.js';
+import type { View } from './views.js';
+
+export interface AppShellProps {
+    columns: number;
+    rows: number;
+    currentView: View;
+    activeAgents?: number;
+    maxAgents?: number;
+    unreadCount?: number;
+    threadInfo?: { inThread: boolean };
+    children: (setFooterOptions: (opts: FooterOptions) => void) => React.ReactNode;
+}
+
+export const AppShell: React.FC<AppShellProps> = ({
+    columns,
+    rows,
+    currentView,
+    activeAgents,
+    maxAgents,
+    unreadCount,
+    threadInfo,
+    children,
+}) => {
+    const [footerOptions, setFooterOptions] = useState<FooterOptions>({});
+
+    const shortcuts = getFooterShortcuts(currentView.type, footerOptions);
+    const footerLines = computeFooterLines(shortcuts, columns);
+    
+    // Calculate the remaining content area height, constrained to zero to avoid crashing in small terminals
+    const contentHeight = Math.max(0, rows - HEADER_LINES - footerLines);
+
+    return (
+        <Box flexDirection="column" height={rows}>
+            <Header
+                currentView={currentView}
+                columns={columns}
+                activeAgents={activeAgents}
+                maxAgents={maxAgents}
+                unreadCount={unreadCount}
+                threadInfo={threadInfo}
+            />
+            
+            <Box flexDirection="column" height={contentHeight}>
+                {children(setFooterOptions)}
+            </Box>
+            
+            <Footer
+                viewType={currentView.type}
+                columns={columns}
+                {...footerOptions}
+            />
+        </Box>
+    );
+};
+```
+
+### Design Decisions & Implementation Details
+- **Render Props**: The component adheres to the requirement by exposing `children: (setFooterOptions) => ReactNode`. This cleanly inverses control over the localized footer state while maintaining global layout structure.
+- **Dynamic Content Bounds**: Content area height relies entirely on available dimensions after factoring in `HEADER_LINES` and the dynamically expanding `footerLines` via `computeFooterLines`. Added safety fallback (`Math.max(0, ... )`) prevents negative heights if the terminal shrinks substantially.
+- **ESM Conventions**: Strict imports utilizing relative `.js` suffixes (`'./header.js'`, `'./footer.js'`, `'./views.js'`) per module resolution guidelines within this package.
+- **Testing Approach**: Tests utilize standard assertion of terminal strings, ensuring robust visual checks (like the dynamically rendered `Sub-thread` footer shortcut after `useEffect` state alteration), without trying to query internal React context/states which ink manages opaquely. Length logic is resilient to basic whitespace pads depending on versioning differences in the `ink-testing-library`.
+Waiting for the debugger to disconnect...
+Waiting for the debugger to disconnect...
