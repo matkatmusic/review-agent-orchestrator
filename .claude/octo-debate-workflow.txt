@@ -30,4 +30,4 @@ Step: Summarize
   Read all 3 result files and produce a unified summary of the debate.
 
 Gemini preferred model: gemini-3.1-pro-preview
-Codex preferred model: gpt-5.4-codex
+Codex preferred model: gpt-5.4
