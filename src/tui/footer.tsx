@@ -20,7 +20,6 @@ export interface FooterOptions {
     readonly isQuoting?: boolean;
     readonly focusedAction?: string;
     readonly inputFocused?: boolean;
-    readonly selectedIssueStatus?: IssueStatus;
 }
 
 export interface FooterProps extends FooterOptions {
@@ -28,6 +27,7 @@ export interface FooterProps extends FooterOptions {
     readonly threadResolved?: boolean;
     readonly focusedIndex?: number | null;
     readonly columns?: number;
+    readonly shortcutOverrides?: readonly Shortcut[];
 }
 
 const inkKey = (k: Ink_keyofKeys_Choices) => InkKeyOfKeysStringMap.get(k)!;
@@ -35,14 +35,6 @@ const comboKey = (k: KeyCombinations) => getHotKeyLabel(k);
 
 export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
     [ViewType.Home]: [
-        // { key: inkKey(Ink_keyofKeys_Choices.RETURN), label: 'View' },
-        // { key: 'n',     label: 'New' },
-        { key: 'a',     label: 'Activate' },
-        { key: 'd',     label: 'Defer' },
-        { key: 'r',     label: 'Resolve' },
-        // { key: 's',     label: 'Agents' },
-        // { key: 'b',     label: 'Blocking' },
-        // { key: 'g',     label: 'Groups' },
         { key: 'q',     label: 'Quit' },
     ],
     [ViewType.Detail]: [
@@ -89,13 +81,13 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
     ],
 };
 
-export const HOME_ALLOWED_KEYS_BY_STATUS: ReadonlyMap<IssueStatus, ReadonlySet<string>> = new Map([
-    [IssueStatus.Active,   new Set(['d', 'r', 'q'])],
-    [IssueStatus.Awaiting, new Set(['a', 'd', 'r', 'q'])],
-    [IssueStatus.Blocked,  new Set(['a', 'd', 'r', 'q'])],
-    [IssueStatus.Deferred, new Set(['a', 'r', 'q'])],
-    [IssueStatus.Resolved, new Set(['a', 'd', 'q'])],
-]);
+export const STATUS_SHORTCUTS: Record<IssueStatus, readonly Shortcut[]> = {
+    [IssueStatus.Active]:   [{ key: 'd', label: 'Defer' }, { key: 'r', label: 'Resolve' }, { key: 'q', label: 'Quit' }],
+    [IssueStatus.InQueue]:  [{ key: 'd', label: 'Defer' }, { key: 'r', label: 'Resolve' }, { key: 'f', label: 'Force active' }, { key: 'q', label: 'Quit' }],
+    [IssueStatus.Blocked]:  [{ key: 'd', label: 'Defer' }, { key: 'r', label: 'Resolve' }, { key: 'e', label: 'Enqueue' }, { key: 'q', label: 'Quit' }],
+    [IssueStatus.Deferred]: [{ key: 'e', label: 'Enqueue' }, { key: 'r', label: 'Resolve' }, { key: 'q', label: 'Quit' }],
+    [IssueStatus.Resolved]: [{ key: 'e', label: 'Add comment to re-enqueue' }, { key: 'q', label: 'Quit' }],
+};
 
 const THREAD_SHORTCUTS: readonly Shortcut[] = [
     { key: inkKey(Ink_keyofKeys_Choices.RETURN), label: 'Send' },
@@ -110,13 +102,7 @@ const THREAD_SHORTCUTS: readonly Shortcut[] = [
 /** Get the full shortcut list for the given view/thread state. */
 export function getFooterShortcuts(viewType: ViewType, options?: FooterOptions | boolean): readonly Shortcut[] {
     const inThread = typeof options === 'boolean' ? options : options?.inThread ?? false;
-    const base = (viewType === ViewType.Detail && inThread) ? THREAD_SHORTCUTS : VIEW_SHORTCUTS[viewType];
-    if (viewType !== ViewType.Home || typeof options === 'boolean') return base;
-    const status = (options as FooterOptions | undefined)?.selectedIssueStatus;
-    if (status === undefined) return base;
-    const allowed = HOME_ALLOWED_KEYS_BY_STATUS.get(status);
-    if (!allowed) return base;
-    return base.filter(s => allowed.has(s.key));
+    return (viewType === ViewType.Detail && inThread) ? THREAD_SHORTCUTS : VIEW_SHORTCUTS[viewType];
 }
 
 /** Get only the shortcuts that participate in the Tab focus ring. */
@@ -174,9 +160,8 @@ const FooterComponent: React.FC<FooterProps> = (footerProps: FooterProps) => {
         isQuoting: footerProps.isQuoting,
         focusedAction: footerProps.focusedAction,
         inputFocused: footerProps.inputFocused,
-        selectedIssueStatus: footerProps.selectedIssueStatus,
     };
-    const shortcuts = getFooterShortcuts(footerProps.viewType, options);
+    const shortcuts = footerProps.shortcutOverrides ?? getFooterShortcuts(footerProps.viewType, options);
 
     const focusable = getFocusableShortcuts(footerProps.viewType, options);
     const rows = computeRows(shortcuts, columns);

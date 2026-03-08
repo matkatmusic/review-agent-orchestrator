@@ -57,7 +57,7 @@ export function getIssuesInContainer(db: DB, containerId: number): Issue[] {
          ORDER BY
              CASE i.status
                  WHEN 'Active' THEN 1
-                 WHEN 'Awaiting' THEN 2
+                 WHEN 'In Queue' THEN 2
                  WHEN 'Blocked' THEN 3
                  WHEN 'Deferred' THEN 4
                  WHEN 'Resolved' THEN 5

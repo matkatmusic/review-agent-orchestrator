@@ -11,7 +11,7 @@ import {
     getFooterShortcuts,
     getFocusableShortcuts,
     computeFooterLines,
-    HOME_ALLOWED_KEYS_BY_STATUS,
+    STATUS_SHORTCUTS,
 } from './footer.js';
 import type { Shortcut } from './footer.js';
 import { ViewType } from './views.js';
@@ -274,69 +274,66 @@ describe('Footer — footer shows correct shortcuts for each non-Detail ViewType
     });
 });
 
-// ---- Status-filtered Home shortcuts ----
+// ---- STATUS_SHORTCUTS per-status shortcut lists ----
 
-describe('Footer — status-filtered Home shortcuts', () => {
+describe('Footer — STATUS_SHORTCUTS', () => {
     const keys = (shortcuts: readonly Shortcut[]) => shortcuts.map(s => s.key);
 
-    it('no selectedIssueStatus returns all Home shortcuts', () => {
-        const result = getFooterShortcuts(ViewType.Home, {});
-        expect(result).toBe(VIEW_SHORTCUTS[ViewType.Home]);
+    it('Active has d, r, q', () => {
+        const k = keys(STATUS_SHORTCUTS[IssueStatus.Active]);
+        expect(k).toEqual(['d', 'r', 'q']);
     });
 
-    it('Active status excludes "a"', () => {
-        const result = getFooterShortcuts(ViewType.Home, { selectedIssueStatus: IssueStatus.Active });
-        const k = keys(result);
-        expect(k).not.toContain('a');
-        expect(k).toContain('d');
-        expect(k).toContain('r');
+    it('InQueue has d, r, f, q', () => {
+        const k = keys(STATUS_SHORTCUTS[IssueStatus.InQueue]);
+        expect(k).toEqual(['d', 'r', 'f', 'q']);
     });
 
-    it('Awaiting status includes all action keys', () => {
-        const result = getFooterShortcuts(ViewType.Home, { selectedIssueStatus: IssueStatus.Awaiting });
-        const k = keys(result);
-        expect(k).toContain('a');
-        expect(k).toContain('d');
-        expect(k).toContain('r');
+    it('Blocked has d, r, e, q', () => {
+        const k = keys(STATUS_SHORTCUTS[IssueStatus.Blocked]);
+        expect(k).toEqual(['d', 'r', 'e', 'q']);
     });
 
-    it('Blocked status includes all action keys', () => {
-        const result = getFooterShortcuts(ViewType.Home, { selectedIssueStatus: IssueStatus.Blocked });
-        const k = keys(result);
-        expect(k).toContain('a');
-        expect(k).toContain('d');
-        expect(k).toContain('r');
+    it('Deferred has e, r, q', () => {
+        const k = keys(STATUS_SHORTCUTS[IssueStatus.Deferred]);
+        expect(k).toEqual(['e', 'r', 'q']);
     });
 
-    it('Deferred status excludes "d"', () => {
-        const result = getFooterShortcuts(ViewType.Home, { selectedIssueStatus: IssueStatus.Deferred });
-        const k = keys(result);
-        expect(k).not.toContain('d');
-        expect(k).toContain('a');
-        expect(k).toContain('r');
+    it('Resolved has e, q', () => {
+        const k = keys(STATUS_SHORTCUTS[IssueStatus.Resolved]);
+        expect(k).toEqual(['e', 'q']);
     });
 
-    it('Resolved status excludes "r"', () => {
-        const result = getFooterShortcuts(ViewType.Home, { selectedIssueStatus: IssueStatus.Resolved });
-        const k = keys(result);
-        expect(k).not.toContain('r');
-        expect(k).toContain('a');
-        expect(k).toContain('d');
-    });
-
-    it('"q" is always present for every status', () => {
-        for (const status of [IssueStatus.Active, IssueStatus.Awaiting, IssueStatus.Blocked, IssueStatus.Deferred, IssueStatus.Resolved]) {
-            const result = getFooterShortcuts(ViewType.Home, { selectedIssueStatus: status });
-            expect(keys(result)).toContain('q');
+    it('"q" is present for every status', () => {
+        for (const status of [IssueStatus.Active, IssueStatus.InQueue, IssueStatus.Blocked, IssueStatus.Deferred, IssueStatus.Resolved]) {
+            expect(keys(STATUS_SHORTCUTS[status])).toContain('q');
         }
     });
 
-    it('non-Home views are unaffected by selectedIssueStatus', () => {
-        const nonHomeViews = [ViewType.Detail, ViewType.NewIssue, ViewType.AgentStatus, ViewType.BlockingMap, ViewType.GroupView];
-        for (const vt of nonHomeViews) {
-            const without = getFooterShortcuts(vt, {});
-            const with_ = getFooterShortcuts(vt, { selectedIssueStatus: IssueStatus.Active });
-            expect(with_).toBe(without);
+    it('every shortcut has non-empty key and label', () => {
+        for (const status of [IssueStatus.Active, IssueStatus.InQueue, IssueStatus.Blocked, IssueStatus.Deferred, IssueStatus.Resolved]) {
+            for (const s of STATUS_SHORTCUTS[status]) {
+                expect(s.key.length).toBeGreaterThan(0);
+                expect(s.label.length).toBeGreaterThan(0);
+            }
         }
+    });
+});
+
+// ---- shortcutOverrides prop ----
+
+describe('Footer — shortcutOverrides', () => {
+    it('shortcutOverrides overrides default shortcuts', () => {
+        const overrides: Shortcut[] = [{ key: 'x', label: 'Custom' }, { key: 'q', label: 'Quit' }];
+        const { lastFrame } = render(<Footer viewType={ViewType.Home} shortcutOverrides={overrides} columns={120} />);
+        const plain = stripAnsi(lastFrame()!);
+        expect(plain).toContain('Custom');
+        expect(plain).toContain('[x]');
+    });
+
+    it('without shortcutOverrides falls back to VIEW_SHORTCUTS', () => {
+        const { lastFrame } = render(<Footer viewType={ViewType.Home} columns={120} />);
+        const plain = stripAnsi(lastFrame()!);
+        expect(plain).toContain('Quit');
     });
 });

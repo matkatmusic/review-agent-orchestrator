@@ -84,12 +84,13 @@ describe('run.tsx — --resetMockData flag', () => {
 });
 
 const tick = () => new Promise(r => setTimeout(r, 0));
+const settle = () => new Promise(r => setTimeout(r, 50));
 
 describe('run.tsx — cascading unblock on resolve', () => {
-    it('resolving all blockers transitions blocked issue to Awaiting', async () => {
+    it('resolving all blockers transitions blocked issue to In Queue', async () => {
         // I-6 is Blocked (status 2), blocked by I-3 and I-5 per mock-data.default.json
         const { lastFrame, stdin } = render(<AppWrapper />);
-        await tick();
+        await settle();
 
         // Verify I-6 starts as Blocked
         let plain = stripAnsi(lastFrame()!);
@@ -97,10 +98,11 @@ describe('run.tsx — cascading unblock on resolve', () => {
         expect(i6Line).toContain('Blocked');
 
         // Navigate cursor down to I-3 (index 2: I-1=0, I-2=1, I-3=2)
+        // Each arrow that crosses a status boundary triggers setFooterShortcuts → AppShell re-render
         stdin.write('\x1b[B'); await tick();
-        stdin.write('\x1b[B'); await tick();
+        stdin.write('\x1b[B'); await settle();
         // Press 'r' to resolve I-3
-        stdin.write('r'); await tick();
+        stdin.write('r'); await settle();
 
         plain = stripAnsi(lastFrame()!);
         // I-6 should still be Blocked (I-5 is not yet resolved)
@@ -109,14 +111,14 @@ describe('run.tsx — cascading unblock on resolve', () => {
 
         // Navigate cursor down to I-5 (index 4: currently at 2, need 2 more)
         stdin.write('\x1b[B'); await tick(); // down to index 3
-        stdin.write('\x1b[B'); await tick(); // down to index 4
+        stdin.write('\x1b[B'); await settle(); // down to index 4
         // Press 'r' to resolve I-5
-        stdin.write('r'); await tick();
+        stdin.write('r'); await settle();
 
         plain = stripAnsi(lastFrame()!);
-        // I-6 should now be Awaiting (all blockers resolved)
+        // I-6 should now be In Queue (all blockers resolved)
         const i6Now = plain.split('\n').find(l => l.includes('I-6'));
-        expect(i6Now).toContain('Awaiting');
+        expect(i6Now).toContain('In Queue');
         expect(i6Now).not.toContain('Blocked');
     });
 });

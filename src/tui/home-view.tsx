@@ -4,6 +4,8 @@ import type { Issue, ChangedStatusProps, Dependency } from '../types.js';
 import { IssueStatus, IssueStatusStringsMap } from '../types.js';
 import { statusToColor } from './status-color.js';
 import type { TerminalProps, LayoutProps } from './views.js';
+import type { Shortcut } from './footer.js';
+import { STATUS_SHORTCUTS } from './footer.js';
 
 const COL = {
     cursor: 2,
@@ -91,10 +93,11 @@ export interface HomeViewProps {
     issues: Issue[];
     dependencies: Dependency[];
     unreadInums: Set<number>;
+    maxAgents: number;
     terminalProps: TerminalProps;
     layoutProps: LayoutProps;
     onStatusHotkeyPressed?: (changedStatusProps: ChangedStatusProps) => void;
-    onSelectedStatusChange?: (status: IssueStatus | undefined) => void;
+    setFooterShortcuts?: (shortcuts: readonly Shortcut[]) => void;
 }
 
 /*
@@ -126,8 +129,18 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
     }, [flashingBlockerInums]);
 
     useEffect(() => {
-        homeViewProps.onSelectedStatusChange?.(selectedIssueStatus);
+        if (homeViewProps.setFooterShortcuts && selectedIssueStatus !== undefined) {
+            homeViewProps.setFooterShortcuts(STATUS_SHORTCUTS[selectedIssueStatus]);
+        }
     }, [selectedIssueStatus]);
+
+    function flashBlockers(inum: number) {
+        const blockerInums = homeViewProps.dependencies
+            .filter(d => d.blocked_inum === inum)
+            .map(d => d.blocker_inum);
+        setFlashingBlockerInums(new Set(blockerInums));
+        setFlashOn(true);
+    }
 
     useInput((input, key) => {
         if (key.downArrow || key.upArrow) {
@@ -142,25 +155,32 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
         if (!homeViewProps.onStatusHotkeyPressed || homeViewProps.issues.length === 0) return;
         const idx = Math.min(cursorRef.current, Math.max(0, homeViewProps.issues.length - 1));
         const selectedIssue = homeViewProps.issues[idx];
-        if (input === 'a' || input === 'd' || input === 'r') {
-            if (selectedIssue.status === IssueStatus.Blocked) {
-                const blockerInums = homeViewProps.dependencies
-                    .filter(d => d.blocked_inum === selectedIssue.inum)
-                    .map(d => d.blocker_inum);
-                setFlashingBlockerInums(new Set(blockerInums));
-                setFlashOn(true);
-                return;
+        const status = selectedIssue.status;
+
+        if (input === 'e') {
+            if (status === IssueStatus.Blocked) {
+                flashBlockers(selectedIssue.inum);
+            } else if (status === IssueStatus.Deferred) {
+                homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.InQueue });
+            } else if (status === IssueStatus.Resolved) {
+                // Phase 3: open Detail, enqueue on submit. Stub: direct enqueue.
+                homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.InQueue });
             }
-        }
-        if (input === 'a') {
-            if (selectedIssue.status === IssueStatus.Active) return;
-            homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.Active });
         } else if (input === 'd') {
-            if (selectedIssue.status === IssueStatus.Deferred) return;
-            homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.Deferred });
+            if (status === IssueStatus.Active || status === IssueStatus.InQueue || status === IssueStatus.Blocked) {
+                homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.Deferred });
+            }
         } else if (input === 'r') {
-            if (selectedIssue.status === IssueStatus.Resolved) return;
-            homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.Resolved });
+            if (status === IssueStatus.Blocked) {
+                flashBlockers(selectedIssue.inum);
+            } else if (status === IssueStatus.Active || status === IssueStatus.InQueue || status === IssueStatus.Deferred) {
+                homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.Resolved });
+            }
+        } else if (input === 'f') {
+            if (status === IssueStatus.InQueue) {
+                // Phase 2: capacity gate + swap modal. Stub: direct activate.
+                homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.Active });
+            }
         }
     });
 

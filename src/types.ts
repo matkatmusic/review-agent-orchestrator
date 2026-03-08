@@ -5,7 +5,7 @@
 
 export enum IssueStatus {
   Active,
-  Awaiting,
+  InQueue,
   Blocked,
   Deferred,
   Resolved
@@ -18,7 +18,7 @@ export interface ChangedStatusProps {
 
 export const IssueStatusStringsMap = new Map<IssueStatus, string>([
   [IssueStatus.Active, "Active"],
-  [IssueStatus.Awaiting, "Awaiting"],
+  [IssueStatus.InQueue, "In Queue"],
   [IssueStatus.Blocked, "Blocked"],
   [IssueStatus.Deferred, "Deferred"],
   [IssueStatus.Resolved, "Resolved"],

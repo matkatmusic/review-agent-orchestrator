@@ -82,9 +82,9 @@ describe('containers', () => {
     it.skip('getIssuesInContainer sorts by status then sort_order then inum', () => {
         const containerId = containers.createContainer(db, 'Sprint', 'sprint');
 
-        const i1 = issues.createIssue(db, 'Awaiting 1', '');
+        const i1 = issues.createIssue(db, 'In Queue 1', '');
         const i2 = issues.createIssue(db, 'Active', '');
-        const i3 = issues.createIssue(db, 'Awaiting 2', '');
+        const i3 = issues.createIssue(db, 'In Queue 2', '');
 
         issues.updateStatus(db, i2, IssueStatus.Active);
 
@@ -94,10 +94,10 @@ describe('containers', () => {
 
         const sorted = containers.getIssuesInContainer(db, containerId);
         expect(sorted).toHaveLength(3);
-        // Active first, then Awaiting sorted by sort_order then inum
+        // Active first, then In Queue sorted by sort_order then inum
         expect(sorted[0].inum).toBe(i2); // Active
-        expect(sorted[1].inum).toBe(i3); // Awaiting, sort_order=1
-        expect(sorted[2].inum).toBe(i1); // Awaiting, sort_order=2
+        expect(sorted[1].inum).toBe(i3); // In Queue, sort_order=1
+        expect(sorted[2].inum).toBe(i1); // In Queue, sort_order=2
     });
 
     it('adding same issue to container twice is idempotent', () => {

@@ -125,7 +125,7 @@ export function getStatusCounts(db: DB): Record<IssueStatus, number> {
         'SELECT status, COUNT(*) AS count FROM issues GROUP BY status'
     );
     const counts: Record<IssueStatus, number> = {
-        [IssueStatus.Awaiting]: 0,
+        [IssueStatus.InQueue]: 0,
         [IssueStatus.Active]: 0,
         [IssueStatus.Blocked]: 0,
         [IssueStatus.Deferred]: 0,

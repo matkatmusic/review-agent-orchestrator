@@ -86,17 +86,16 @@ export function AppWrapper() {
             maxAgents={mockStoreWithUpdater.mockDataStore.maxAgents}
             unreadCount={mockStoreWithUpdater.mockDataStore.unreadInums.size}
         >
-            {(setFooterOptions, terminal, layout) => (
+            {(setFooterOptions, setFooterShortcuts, terminal, layout) => (
                 <HomeView
                     issues={mockStoreWithUpdater.mockDataStore.issues}
                     dependencies={mockStoreWithUpdater.mockDataStore.dependencies}
                     unreadInums={mockStoreWithUpdater.mockDataStore.unreadInums}
+                    maxAgents={mockStoreWithUpdater.mockDataStore.maxAgents}
                     terminalProps={terminal}
                     layoutProps={layout}
                     onStatusHotkeyPressed={mockStoreWithUpdater.updateIssueStatusCallback}
-                    onSelectedStatusChange={(status) => {
-                        setFooterOptions({ selectedIssueStatus: status });
-                    }}
+                    setFooterShortcuts={setFooterShortcuts}
                 />
             )}
         </AppShell>

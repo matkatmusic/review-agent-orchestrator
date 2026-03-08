@@ -388,7 +388,7 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
 Bugs
 - [ ] Initial Frame Flash: on first render, footer shows all shortcuts for ~1 frame before useEffect reports selectedIssueStatus and filters them.
 - [ ] No way of deleting an issue, or if you delete an issue that blocks other issues, having the removal cascade through the blocked issues, changing their status.
-- [ ]
+- [ ] Blocked issues can be deferred and then enqueued to get around being blocked.
 
 ================================================================================
 PHASE 2: NAVIGATION SYSTEM

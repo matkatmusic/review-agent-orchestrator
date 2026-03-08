@@ -48,7 +48,7 @@ export function useMockStore(): MockStoreWithUpdater {
                             return blocker && blocker.status === IssueStatus.Resolved;
                         });
 
-                        return allResolved ? { ...issue, status: IssueStatus.Awaiting } : issue;
+                        return allResolved ? { ...issue, status: IssueStatus.InQueue } : issue;
                     });
                 }
 

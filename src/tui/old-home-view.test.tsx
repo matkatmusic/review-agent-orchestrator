@@ -10,7 +10,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
 function makeIssue(overrides: Partial<Issue> & { inum: number; title: string }): Issue {
     return {
         description: '',
-        status: IssueStatus.Awaiting,
+        status: IssueStatus.InQueue,
         created_at: '2026-01-01T00:00:00Z',
         resolved_at: null,
         issue_revision: 1,
@@ -23,9 +23,9 @@ function makeIssue(overrides: Partial<Issue> & { inum: number; title: string }):
 const MOCK_ISSUES: Issue[] = [
     makeIssue({ inum: 1, title: 'migrate_ServerDerivedFields', status: IssueStatus.Active }),
     makeIssue({ inum: 2, title: 'migrate_SessionCredentials', status: IssueStatus.Active }),
-    makeIssue({ inum: 3, title: 'rate_limiting_design', status: IssueStatus.Awaiting }),
-    makeIssue({ inum: 4, title: 'payload_encryption_flow', status: IssueStatus.Awaiting }),
-    makeIssue({ inum: 5, title: 'docker_healthcheck', status: IssueStatus.Awaiting }),
+    makeIssue({ inum: 3, title: 'rate_limiting_design', status: IssueStatus.InQueue }),
+    makeIssue({ inum: 4, title: 'payload_encryption_flow', status: IssueStatus.InQueue }),
+    makeIssue({ inum: 5, title: 'docker_healthcheck', status: IssueStatus.InQueue }),
     makeIssue({ inum: 6, title: 'stale_session_cleanup', status: IssueStatus.Blocked }),
     makeIssue({ inum: 7, title: 'legacy_api_removal', status: IssueStatus.Deferred }),
     makeIssue({ inum: 8, title: 'initial_setup_task', status: IssueStatus.Resolved }),
@@ -77,7 +77,7 @@ describe('HomeView', () => {
         const { lastFrame } = render(<HomeView {...defaultProps} />);
         const frame = lastFrame()!;
         expect(frame).toContain('Active');
-        expect(frame).toContain('Awaiting');
+        expect(frame).toContain('In Queue');
         expect(frame).toContain('Blocked');
         expect(frame).toContain('Deferred');
         expect(frame).toContain('Resolved');
@@ -89,10 +89,10 @@ describe('HomeView', () => {
         expect(lastFrame()!).toMatch(/Active\s*\(?2\)?/);
     });
 
-    it('shows correct count for Awaiting tab', () => {
+    it('shows correct count for In Queue tab', () => {
         const { lastFrame } = render(<HomeView {...defaultProps} />);
         // 3 awaiting issues
-        expect(lastFrame()!).toMatch(/Awaiting\s*\(?3\)?/);
+        expect(lastFrame()!).toMatch(/In Queue\s*\(?3\)?/);
     });
 
     it('shows correct count for Blocked tab', () => {
@@ -156,7 +156,7 @@ describe('HomeView', () => {
     it('tab wraps around from last to first filter', async () => {
         const { lastFrame, stdin } = render(<HomeView {...defaultProps} />);
         await tick();
-        // Tab through all: All → Active → Awaiting → Blocked → Deferred → Resolved → All
+        // Tab through all: All → Active → In Queue → Blocked → Deferred → Resolved → All
         for (let i = 0; i < 6; i++) {
             stdin.write('\t');
             await tick();
@@ -170,7 +170,7 @@ describe('HomeView', () => {
     it('filtering to Blocked shows only blocked issues', async () => {
         const { lastFrame, stdin } = render(<HomeView {...defaultProps} />);
         await tick();
-        // Tab: All → Active → Awaiting → Blocked
+        // Tab: All → Active → In Queue → Blocked
         stdin.write('\t');
         await tick();
         stdin.write('\t');
@@ -423,7 +423,7 @@ describe('HomeView', () => {
         const i1Line = lines.find(l => l.includes('I-1'));
         expect(i1Line).toContain('Active');
         const i3Line = lines.find(l => l.includes('I-3'));
-        expect(i3Line).toContain('Awaiting');
+        expect(i3Line).toContain('In Queue');
         const i6Line = lines.find(l => l.includes('I-6'));
         expect(i6Line).toContain('Blocked');
     });

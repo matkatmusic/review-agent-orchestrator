@@ -3,7 +3,7 @@ import { Box } from 'ink';
 import { type View, type TerminalProps, type LayoutProps } from './views.js';
 import { Header, HEADER_LINES } from './header.js';
 import { Footer, computeFooterLines, getFooterShortcuts } from './footer.js';
-import type { FooterOptions } from './footer.js';
+import type { FooterOptions, Shortcut } from './footer.js';
 
 export interface AppShellProps {
     columns: number;
@@ -15,6 +15,7 @@ export interface AppShellProps {
     threadInfo?: { inThread: boolean };
     children: (
         setFooterOptions: (opts: FooterOptions) => void,
+        setFooterShortcuts: (shortcuts: readonly Shortcut[]) => void,
         terminal: TerminalProps,
         layout: LayoutProps,
     ) => React.ReactNode;
@@ -31,9 +32,10 @@ export const AppShell: React.FC<AppShellProps> = ({
     children,
 }) => {
     const [footerOptions, setFooterOptions] = useState<FooterOptions>({});
+    const [footerShortcuts, setFooterShortcuts] = useState<readonly Shortcut[] | undefined>(undefined);
 
     const viewType = currentView.type;
-    const shortcuts = getFooterShortcuts(viewType, footerOptions);
+    const shortcuts = footerShortcuts ?? getFooterShortcuts(viewType, footerOptions);
     const footerLines = computeFooterLines(shortcuts, columns);
     const contentHeight = Math.max(0, rows - HEADER_LINES - footerLines);
 
@@ -48,9 +50,9 @@ export const AppShell: React.FC<AppShellProps> = ({
                 threadInfo={threadInfo}
             />
             <Box flexDirection="column" height={contentHeight} flexGrow={1}>
-                {children(setFooterOptions, { columns, rows }, { headerLines: HEADER_LINES, footerLines })}
+                {children(setFooterOptions, setFooterShortcuts, { columns, rows }, { headerLines: HEADER_LINES, footerLines })}
             </Box>
-            <Footer viewType={viewType} {...footerOptions} columns={columns} />
+            <Footer viewType={viewType} {...footerOptions} shortcutOverrides={footerShortcuts} columns={columns} />
         </Box>
     );
 };

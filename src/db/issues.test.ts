@@ -44,7 +44,7 @@ describe('issues', () => {
         expect(issue).toBeDefined();
         expect(issue!.title).toBe('Test');
         expect(issue!.description).toBe('Description');
-        expect(issue!.status).toBe(IssueStatus.Awaiting);
+        expect(issue!.status).toBe(IssueStatus.InQueue);
         expect(issue!.issue_revision).toBe(0);
     });
 
@@ -70,7 +70,7 @@ describe('issues', () => {
         expect(active).toHaveLength(1);
         expect(active[0].title).toBe('A');
 
-        const awaiting = issues.list(db, IssueStatus.Awaiting);
+        const awaiting = issues.list(db, IssueStatus.InQueue);
         expect(awaiting).toHaveLength(1);
         expect(awaiting[0].title).toBe('B');
     });
@@ -95,9 +95,9 @@ describe('issues', () => {
     it.skip('updateStatus away from Resolved clears resolved_at', () => {
         const inum = issues.createIssue(db, 'Test', '');
         issues.updateStatus(db, inum, IssueStatus.Resolved);
-        issues.updateStatus(db, inum, IssueStatus.Awaiting);
+        issues.updateStatus(db, inum, IssueStatus.InQueue);
         const issue = issues.getByInum(db, inum)!;
-        expect(issue.status).toBe(IssueStatus.Awaiting);
+        expect(issue.status).toBe(IssueStatus.InQueue);
         expect(issue.resolved_at).toBeNull();
     });
 
@@ -159,7 +159,7 @@ describe('issues', () => {
         issues.updateStatus(db, inum3, IssueStatus.Resolved);
 
         const counts = issues.getStatusCounts(db);
-        expect(counts[IssueStatus.Awaiting]).toBe(2);
+        expect(counts[IssueStatus.InQueue]).toBe(2);
         expect(counts[IssueStatus.Resolved]).toBe(1);
         expect(counts[IssueStatus.Active]).toBe(0);
         expect(counts[IssueStatus.Blocked]).toBe(0);

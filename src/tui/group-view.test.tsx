@@ -189,17 +189,17 @@ describe('GroupView', () => {
         const { lastFrame, stdin } = render(<GroupView />);
         await tick();
 
-        // Drill into Inbox (Active, Awaiting, Resolved)
+        // Drill into Inbox (Active, In Queue, Resolved)
         stdin.write('\r');
         await tick();
         const frame = lastFrame()!;
 
-        // Verify status order: Active appears before Awaiting, Awaiting before Resolved
+        // Verify status order: Active appears before In Queue, In Queue before Resolved
         const activeIdx = frame.indexOf('Active');
-        const awaitingIdx = frame.indexOf('Awaiting');
+        const inQueueIdx = frame.indexOf('In Queue');
         const resolvedIdx = frame.indexOf('Resolved');
-        expect(activeIdx).toBeLessThan(awaitingIdx);
-        expect(awaitingIdx).toBeLessThan(resolvedIdx);
+        expect(activeIdx).toBeLessThan(inQueueIdx);
+        expect(inQueueIdx).toBeLessThan(resolvedIdx);
     });
 
     // SKIPPED: pre-existing failure, predates Step 1.3
