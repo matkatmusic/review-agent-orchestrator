@@ -146,9 +146,9 @@ class App extends React.Component<AppProps> {
                             inum={inum}
                             issue={mockData.issue}
                             rootResponse={mockData.rootResponse}
-                            blockedBy={mockData.blockedBy}
-                            blocks={mockData.blocks}
-                            group={mockData.group}
+                            blockedBy={mockData.issue.blocked_by}
+                            blocks={MOCK_ISSUES.filter(i => i.blocked_by.includes(inum)).map(i => i.inum)}
+                            group={''}
                             columns={this.columns}
                             rows={this.rows}
                             containers={MOCK_CONTAINERS}
@@ -182,9 +182,10 @@ class App extends React.Component<AppProps> {
                 const mockData = MOCK_DETAIL_DATA[pickerView.inum];
                 if (mockData) {
                     const otherIssues = MOCK_ISSUES.filter(i => i.inum !== pickerView.inum);
-                    const selectedSet = new Set(
-                        pickerView.mode === 'blockedBy' ? mockData.blockedBy : mockData.blocks
-                    );
+                    const blockedByArr = mockData.issue.blocked_by;
+                    const blocksArr = MOCK_ISSUES.filter(i => i.blocked_by.includes(pickerView.inum)).map(i => i.inum);
+                    const sourceArr = pickerView.mode === 'blockedBy' ? blockedByArr : blocksArr;
+                    const selectedSet: Set<number> = new Set(sourceArr);
                     content = (
                         <Box flexDirection="column" height={this.rows - HEADER_LINES}>
                             <IssueListPicker
@@ -193,14 +194,23 @@ class App extends React.Component<AppProps> {
                                 selected={selectedSet}
                                 unreadInums={MOCK_UNREAD_INUMS}
                                 onToggle={(toggledInum) => {
-                                    const arr = pickerView.mode === 'blockedBy'
-                                        ? mockData.blockedBy
-                                        : mockData.blocks;
-                                    const idx = arr.indexOf(toggledInum);
-                                    if (idx >= 0) {
-                                        arr.splice(idx, 1);
+                                    if (pickerView.mode === 'blockedBy') {
+                                        const idx = mockData.issue.blocked_by.indexOf(toggledInum);
+                                        if (idx >= 0) {
+                                            mockData.issue.blocked_by.splice(idx, 1);
+                                        } else {
+                                            mockData.issue.blocked_by.push(toggledInum);
+                                        }
                                     } else {
-                                        arr.push(toggledInum);
+                                        const targetIssue = MOCK_ISSUES.find(i => i.inum === toggledInum);
+                                        if (targetIssue) {
+                                            const idx = targetIssue.blocked_by.indexOf(pickerView.inum);
+                                            if (idx >= 0) {
+                                                targetIssue.blocked_by.splice(idx, 1);
+                                            } else {
+                                                targetIssue.blocked_by.push(pickerView.inum);
+                                            }
+                                        }
                                     }
                                     this.forceUpdate();
                                 }}

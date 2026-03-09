@@ -89,7 +89,6 @@ export function AppWrapper() {
             {(setFooterOptions, setFooterShortcuts, terminal, layout) => (
                 <HomeView
                     issues={mockStoreWithUpdater.mockDataStore.issues}
-                    dependencies={mockStoreWithUpdater.mockDataStore.dependencies}
                     unreadInums={mockStoreWithUpdater.mockDataStore.unreadInums}
                     maxAgents={mockStoreWithUpdater.mockDataStore.maxAgents}
                     terminalProps={terminal}

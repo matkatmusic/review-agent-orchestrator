@@ -37,6 +37,7 @@ const TEST_ISSUE: Issue = {
     issue_revision: 3,
     agent_last_read_at: '2025-01-15T12:00:00Z',
     user_last_viewed_at: '2025-01-15T11:00:00Z',
+    blocked_by: [],
 };
 
 const TEST_MESSAGES: Message[] = [

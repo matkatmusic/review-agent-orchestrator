@@ -10,15 +10,10 @@ Removed: details, dependencies, containers, containerIssues, groups, groupDetail
 
 The TS types, load/save logic, and Home View still reference the old format.
 
-## Step 1: Delete mock-data.json
-
-data/mock-data.json still has the old format. Delete it — loadMockData() falls back
-to DEFAULT_PATH when ACTIVE_PATH doesn't exist (mock-store.ts:201).
 
 ## Step 2: Update Issue interface
 
 File: src/types.ts (lines 27-37)
-- Add blocked_by: number[] to Issue interface
 - Remove Dependency interface (dependencies removed from JSON)
 - Remove Container / IssueContainer interfaces (containers removed from JSON)
 

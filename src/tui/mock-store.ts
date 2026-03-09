@@ -10,7 +10,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Issue, Response, Message, Dependency, Container } from '../types.js';
+import type { Issue, Response, Message } from '../types.js';
 import { IssueStatus, ResponseType, AuthorType } from '../types.js';
 import type { DetailMockData } from './mock-data.js';
 
@@ -31,19 +31,9 @@ export interface MockResponseRow {
     quoted_response_id: number | null;
 }
 
-export interface MockDetailJson {
-    blockedBy: number[];
-    blocks: number[];
-    group: string;
-}
-
 export interface MockDataJson {
     issues: Issue[];
     responses: MockResponseRow[];
-    details: Record<string, MockDetailJson>;
-    dependencies: Dependency[];
-    containers: Container[];
-    containerIssues: Record<string, number[]>;
     unreadInums: number[];
     maxAgents: number;
     nextResponseId: number;
@@ -191,9 +181,6 @@ export interface MockStore {
     unreadInums: Set<number>;
     maxAgents: number;
     detailData: Record<number, DetailMockData>;
-    containers: Container[];
-    dependencies: Dependency[];
-    containerIssues: Record<number, Issue[]>;
     nextResponseId: number;
 }
 
@@ -205,23 +192,11 @@ export function loadMockData(): MockStore {
     const nodeMap = hydrateResponses(data.responses);
 
     const detailData: Record<number, DetailMockData> = {};
-    for (const [inumStr, detail] of Object.entries(data.details)) {
-        const inum = Number(inumStr);
-        const issue = data.issues.find(i => i.inum === inum)!;
-        detailData[inum] = {
+    for (const issue of data.issues) {
+        detailData[issue.inum] = {
             issue,
-            rootResponse: findRootForInum(data.responses, inum, nodeMap),
-            blockedBy: detail.blockedBy,
-            blocks: detail.blocks,
-            group: detail.group,
+            rootResponse: findRootForInum(data.responses, issue.inum, nodeMap),
         };
-    }
-
-    const containerIssues: Record<number, Issue[]> = {};
-    for (const [cidStr, inums] of Object.entries(data.containerIssues)) {
-        containerIssues[Number(cidStr)] = inums.map(
-            inum => data.issues.find(i => i.inum === inum)!
-        ).filter(Boolean);
     }
 
     return {
@@ -229,9 +204,6 @@ export function loadMockData(): MockStore {
         unreadInums: new Set(data.unreadInums),
         maxAgents: data.maxAgents,
         detailData,
-        containers: data.containers,
-        dependencies: data.dependencies,
-        containerIssues,
         nextResponseId: data.nextResponseId,
     };
 }
@@ -247,27 +219,9 @@ export function saveMockData(store: MockStore): void {
         }
     }
 
-    const details: Record<string, MockDetailJson> = {};
-    for (const [inumStr, detail] of Object.entries(store.detailData)) {
-        details[inumStr] = {
-            blockedBy: detail.blockedBy,
-            blocks: detail.blocks,
-            group: detail.group,
-        };
-    }
-
-    const containerIssues: Record<string, number[]> = {};
-    for (const [cidStr, issues] of Object.entries(store.containerIssues)) {
-        containerIssues[cidStr] = issues.map(i => i.inum);
-    }
-
     const data: MockDataJson = {
         issues: store.issues,
         responses: allRows,
-        details,
-        dependencies: store.dependencies,
-        containers: store.containers,
-        containerIssues,
         unreadInums: [...store.unreadInums],
         maxAgents: store.maxAgents,
         nextResponseId: store.nextResponseId,

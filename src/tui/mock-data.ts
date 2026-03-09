@@ -16,9 +16,6 @@ import { loadMockData, saveMockData, resetMockData, type MockStore } from './moc
 export interface DetailMockData {
     issue: Issue;
     rootResponse: import('../types.js').Response | null;
-    blockedBy: number[];
-    blocks: number[];
-    group: string;
 }
 
 // ---- Load from JSON on import ----
@@ -31,9 +28,13 @@ export const MOCK_ISSUES: Issue[] = store.issues;
 export const MOCK_UNREAD_INUMS: Set<number> = store.unreadInums;
 export const MOCK_MAX_AGENTS: number = store.maxAgents;
 export const MOCK_DETAIL_DATA: Record<number, DetailMockData> = store.detailData;
-export const MOCK_CONTAINERS: Container[] = store.containers;
-export const MOCK_DEPS: Dependency[] = store.dependencies;
-export const MOCK_CONTAINER_ISSUES: Record<number, Issue[]> = store.containerIssues;
+
+// Derived from issue.blocked_by for backward compat with blocking-map, group-view, etc.
+export const MOCK_DEPS: Dependency[] = store.issues.flatMap(issue =>
+    issue.blocked_by.map(blockerInum => ({ blocker_inum: blockerInum, blocked_inum: issue.inum }))
+);
+export const MOCK_CONTAINERS: Container[] = [];
+export const MOCK_CONTAINER_ISSUES: Record<number, Issue[]> = {};
 
 // ---- Save & store access ----
 
@@ -66,15 +67,6 @@ export function reloadMockStore(): void {
     // Replace object contents in-place
     for (const key of Object.keys(MOCK_DETAIL_DATA)) delete MOCK_DETAIL_DATA[Number(key)];
     Object.assign(MOCK_DETAIL_DATA, fresh.detailData);
-
-    MOCK_CONTAINERS.length = 0;
-    MOCK_CONTAINERS.push(...fresh.containers);
-
-    MOCK_DEPS.length = 0;
-    MOCK_DEPS.push(...fresh.dependencies);
-
-    for (const key of Object.keys(MOCK_CONTAINER_ISSUES)) delete MOCK_CONTAINER_ISSUES[Number(key)];
-    Object.assign(MOCK_CONTAINER_ISSUES, fresh.containerIssues);
 
     store.nextResponseId = fresh.nextResponseId;
     store.maxAgents = fresh.maxAgents;
