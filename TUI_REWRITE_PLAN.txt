@@ -412,53 +412,48 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
     Implications:
       - No cascading unblock logic needed. When a blocker is resolved or trashed,
         blocked issues automatically recompute on next render.
-      - The existing cascading unblock code in use-mock-store.ts (lines 32-53)
-        is removed.
-      - Dependencies (edges) are NEVER mutated on trash, resolve, or any status
-        change. They persist permanently.
+      - The cascading unblock code in use-mock-store.ts was rewritten (commit
+        405065a) to use issue.blocked_by instead of dependencies[]. It will be
+        fully removed once getStatus() replaces stored Blocked status.
       - issue.blocked_by is the source of truth for what blocks an issue.
-      - 24 files currently reference IssueStatus.Blocked — all must be updated.
-      - HomeView's flash-blockers logic continues to work: it reads blocked_by[]
-        to find which issues to flash.
+        blocked_by[] is NEVER mutated on trash, resolve, or any status change.
+      - HomeView's flash-blockers logic already uses issue.blocked_by (done).
       - Footer shortcuts: when getStatus() returns Blocked, show blocked-
         specific shortcuts (e.g., [b] Show blockers) regardless of stored status.
         A separate BLOCKED_SHORTCUTS constant replaces the old Blocked entry in
         STATUS_SHORTCUTS.
 
-  Data model migration
-  ....................
-    blocked_by moves onto Issue; blocks is removed; Groups becomes top-level.
+  Data model migration (DONE — commit 405065a)
+  .............................................
+    blocked_by moved onto Issue. blocks, details, dependencies, containers,
+    containerIssues all removed from JSON. Groups deferred to a later step.
 
-    JSON changes (mock-data.json + mock-data.default.json):
-      1. Each issue in "issues" array gets "blocked_by": []
-         Values migrate from details[inum].blockedBy.
-      2. "blocks" removed from details (derived: scan all issues where
-         blocked_by includes this inum).
-      3. "blockedBy" removed from details (moved to issue.blocked_by).
-      4. "group" removed from details.
-      5. New top-level "groups" map replaces per-issue group string:
-           "groups": {
-             "Inbox": [1, 3, 8],
-             "Backend Sprint 1": [2, 6, 7],
-             "Frontend": [4],
-             "Backlog": [5]
-           }
-      6. "details" section: if nothing remains, remove entirely. Responses
-         are already stored flat in "responses". In memory, DetailMockData
-         retains issue ref + rootResponse; group is looked up from Groups.
+    JSON (mock-data.default.json) now has 5 top-level keys:
+      { issues (with blocked_by), responses, unreadInums, maxAgents, nextResponseId }
 
-    Type changes:
-      - Issue interface (src/types.ts): add blocked_by: number[]
-      - DetailMockData (src/tui/mock-data.ts): remove blockedBy, blocks, group
-      - MockDetailJson (src/tui/mock-store.ts): remove or delete if empty
-      - MockDataJson: add groups: Record<string, number[]>
-      - MockStore: add groups: Record<string, number[]>
+    What was done:
+      [x] Each issue has "blocked_by": number[] (migrated from details.blockedBy)
+      [x] "details" section removed entirely
+      [x] "dependencies" section removed (derived from issue.blocked_by)
+      [x] "containers" and "containerIssues" removed
+      [x] Issue interface (src/types.ts): blocked_by: number[] added
+      [x] DetailMockData (src/tui/mock-data.ts): blockedBy, blocks, group removed
+      [x] MockDetailJson deleted from mock-store.ts
+      [x] MockDataJson simplified (issues, responses, unreadInums, maxAgents, nextResponseId)
+      [x] MockStore simplified (removed containers, dependencies, containerIssues)
+      [x] loadMockData(): iterates data.issues directly to build detailData
+      [x] saveMockData(): writes only the 5 top-level keys
+      [x] MOCK_DEPS derived from issue.blocked_by (backward compat shim)
+      [x] MOCK_CONTAINERS / MOCK_CONTAINER_ISSUES set to empty (shims)
+      [x] reloadMockStore() no longer refreshes containers/deps/containerIssues
+      [x] HomeView: dependencies prop removed, flashBlockers/hasUnresolvedBlockers
+          rewritten to use issue.blocked_by
+      [x] run.tsx: dependencies prop removed from HomeView
+      [x] use-mock-store.ts: cascade uses issue.blocked_by, containerIssues sync removed
 
-    Load/save changes (src/tui/mock-store.ts):
-      - loadMockData(): read issue.blocked_by from each issue, read groups
-        from top-level map, no longer read details.blockedBy/blocks/group
-      - saveMockData(): write issue.blocked_by on each issue, write groups
-        map, no longer write details.blockedBy/blocks/group
+    Still TODO:
+      - [ ] Groups map (deferred — needs design for where groups live)
+      - [ ] trashed_at field on Issue
 
   Two new IssueStatus values (Blocked removed from stored enum):
     Active = 0, InQueue = 1, Deferred = 2, Resolved = 3, Trashed = 4, Inactive = 5
@@ -477,9 +472,9 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
       Header's bottom line hint: "Confirm delete with 'x', any other key cancels"
     - On trash:
       1. Set status → Trashed, trashed_at → now
-      2. Dependencies are NOT modified (edges persist)
+      2. blocked_by[] is NOT modified (edges persist)
       3. Remove inum from unreadInums
-      4. Issue stays in issues[], detailData, containerIssues (filtered from views)
+      4. Issue stays in issues[], detailData (filtered from views by status)
       5. Blocked status of other issues recomputes automatically on next render
          (getStatus skips Trashed blockers)
     - Cursor adjustment after trash:
@@ -503,14 +498,14 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
   ........................................
     - [v] View issue — readonly detail view (requires DetailViewer, Phase 3+)
     - [r] Restore selected — status → Inactive, trashed_at → null.
-          Dependencies are NOT modified (they were never removed).
+          blocked_by[] is NOT modified (was never removed).
           Issue reappears in Home view with Inactive status.
           getStatus() will re-evaluate: if the restored issue has
           unresolved blockers, it will show as blocked again.
     - [d] Delete selected permanently — two-press confirmation.
-          Removes issue from issues[], detailData, containerIssues, unreadInums.
-          Also removes all dependency edges involving this inum (since the issue
-          no longer exists, edges are meaningless).
+          Removes issue from issues[], detailData, unreadInums.
+          Also removes this inum from all other issues' blocked_by[]
+          (since the issue no longer exists, edges are meaningless).
     - [e] Empty trash — double-confirm (two presses of 'e').
           Permanently deletes ALL trashed issues. Same cleanup as [d] per issue.
     - [Esc] Back — return to Home
@@ -518,75 +513,43 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
 
   Substep 1.5d: Data model migration + blocks picker refactor
   ...........................................................
-    Current state: detailData[inum] stores blockedBy[], blocks[], group.
-    The Blocks picker (app.tsx onToggle, lines 195-206) only mutates the
-    current issue's array — it never touches the target issue's reciprocal
-    array or the dependencies[] array. Relationships are one-directional.
+    Data model migration is DONE (commit 405065a). blocked_by lives on
+    Issue, details/dependencies/containers/containerIssues removed from JSON,
+    TS types and load/save updated. See "Data model migration" section above.
 
-    This substep migrates to the new data model (blocked_by on Issue, no
-    blocks, top-level Groups) and fixes the picker to maintain consistency.
+    Remaining work: blocks picker refactor and status-utils.
 
     Write tests FIRST:
       - [ ] test: "Blocks picker toggle ON adds source inum to target's blocked_by"
       - [ ] test: "Blocks picker toggle OFF removes source inum from target's blocked_by"
       - [ ] test: "BlockedBy picker toggle ON adds target inum to source's blocked_by"
       - [ ] test: "BlockedBy picker toggle OFF removes target inum from source's blocked_by"
-      - [ ] test: "toggle ON adds Dependency edge"
-      - [ ] test: "toggle OFF removes Dependency edge"
       - [ ] test: "Blocks picker selected set derived from scanning all issues' blocked_by"
-      - [ ] test: "getStatus returns stored status when not blocked"
-      - [ ] test: "getStatus returns Blocked when unresolved non-trashed blockers exist"
-      - [ ] test: "groups map correctly associates issues with group names"
-      - [ ] test: "loadMockData reads blocked_by from issue, groups from top-level"
-      - [ ] test: "saveMockData writes blocked_by on issue, groups to top-level"
+      - [x] test: "getStatus returns stored status when not blocked"
+      - [x] test: "getStatus returns Blocked when unresolved non-trashed blockers exist"
+      - [x] test: "loadMockData reads blocked_by from issue"
+      - [x] test: "saveMockData writes blocked_by on issue"
 
     Then implement:
 
-      File: data/mock-data.json + data/mock-data.default.json
-        - [ ] Add "blocked_by" to each issue (migrate from details)
-        - [ ] Add top-level "groups" map (migrate from details[inum].group)
-        - [ ] Remove "blocks", "blockedBy", "group" from details
-        - [ ] Remove "details" section if empty
-
-      File: src/types.ts
-        - [ ] Add blocked_by: number[] to Issue interface
-        - [ ] Add trashed_at: string | null to Issue interface
-
-      File: src/tui/mock-data.ts
-        - [ ] Remove blockedBy, blocks, group from DetailMockData
-
-      File: src/tui/mock-store.ts
-        - [ ] Remove MockDetailJson (or gut it if details section retained)
-        - [ ] Add groups: Record<string, number[]> to MockDataJson
-        - [ ] Add groups: Record<string, number[]> to MockStore
-        - [ ] Update loadMockData(): read issue.blocked_by, read groups map
-        - [ ] Update saveMockData(): write issue.blocked_by, write groups map
-
       File: src/tui/status-utils.ts (NEW)
-        - [ ] getStatus(issue: Issue, allIssues: Issue[]): IssueStatus
-        - [ ] getColorForStatus(issue: Issue, allIssues: Issue[]): string | undefined
+        - [x] getStatus(issue: Issue, allIssues: Issue[]): IssueStatus
+        - [x] getColorForStatus(issue: Issue, allIssues: Issue[]): string | undefined
         - [ ] getBlocksForIssue(inum: number, allIssues: Issue[]): number[]
               (derives "what does inum block?" by scanning allIssues' blocked_by)
 
       File: src/tui/app.tsx
-        - [ ] Replace inline onToggle mutation (lines 195-206):
-              Blocks picker (I-X blocks I-Y): toggle I-Y.blocked_by (add/remove I-X),
-                update dependencies[] edge
-              BlockedBy picker (I-X blocked by I-Y): toggle I-X.blocked_by (add/remove I-Y),
-                update dependencies[] edge
+        - [ ] Replace inline onToggle mutation:
+              Blocks picker (I-X blocks I-Y): toggle I-Y.blocked_by (add/remove I-X)
+              BlockedBy picker (I-X blocked by I-Y): toggle I-X.blocked_by (add/remove I-Y)
         - [ ] Blocks picker selected set: derive via getBlocksForIssue(currentInum, allIssues)
-              instead of reading detailData[currentInum].blocks
 
       File: src/tui/detail.tsx
-        - [ ] Remove blockedBySet/blocksSet from constructor (were from props)
         - [ ] Derive blocked-by display from issue.blocked_by
         - [ ] Derive blocks display via getBlocksForIssue()
 
       File: src/tui/issue-header.tsx
         - [ ] Update blockedByStr source to use issue.blocked_by
-
-      All files referencing detailData[x].blockedBy, .blocks, or .group:
-        - [ ] Update to use issue.blocked_by, getBlocksForIssue(), or groups map
 
   Substep 1.5e: Inactive status integration
   ..........................................
@@ -630,8 +593,8 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
     - [ ] test: "Blocks picker untoggle removes source from target's blocked_by"
     - [ ] test: "BlockedBy picker toggle adds target to source's blocked_by"
     - [ ] test: "BlockedBy picker untoggle removes target from source's blocked_by"
-    - [ ] test: "loadMockData reads blocked_by from issue, groups from top-level"
-    - [ ] test: "saveMockData writes blocked_by on issue, groups to top-level"
+    - [x] test: "loadMockData reads blocked_by from issue"
+    - [x] test: "saveMockData writes blocked_by on issue"
 
 
 Bugs
