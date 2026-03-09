@@ -84,7 +84,7 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
 export const STATUS_SHORTCUTS: Record<IssueStatus, readonly Shortcut[]> = {
     [IssueStatus.Active]:   [{ key: 'd', label: 'Defer' }, { key: 'r', label: 'Resolve' }, { key: 'q', label: 'Quit' }],
     [IssueStatus.InQueue]:  [{ key: 'd', label: 'Defer' }, { key: 'r', label: 'Resolve' }, { key: 'f', label: 'Force active' }, { key: 'q', label: 'Quit' }],
-    [IssueStatus.Blocked]:  [{ key: 'd', label: 'Defer' }, { key: 'r', label: 'Resolve' }, { key: 'e', label: 'Enqueue' }, { key: 'q', label: 'Quit' }],
+    [IssueStatus.Blocked]:  [{ key: 'b', label: 'Show blockers' }, { key: 'q', label: 'Quit' }],
     [IssueStatus.Deferred]: [{ key: 'e', label: 'Enqueue' }, { key: 'r', label: 'Resolve' }, { key: 'q', label: 'Quit' }],
     [IssueStatus.Resolved]: [{ key: 'e', label: 'Add comment to re-enqueue' }, { key: 'q', label: 'Quit' }],
 };
