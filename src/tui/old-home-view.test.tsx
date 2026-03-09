@@ -16,6 +16,7 @@ function makeIssue(overrides: Partial<Issue> & { inum: number; title: string }):
         issue_revision: 1,
         agent_last_read_at: null,
         user_last_viewed_at: null,
+        blocked_by: [],
         ...overrides,
     };
 }

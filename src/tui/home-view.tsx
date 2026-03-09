@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
-import type { Issue, ChangedStatusProps, Dependency } from '../types.js';
+import type { Issue, ChangedStatusProps } from '../types.js';
 import { IssueStatus, IssueStatusStringsMap } from '../types.js';
 import { statusToColor } from './status-color.js';
 import type { TerminalProps, LayoutProps } from './views.js';
@@ -91,7 +91,6 @@ function Status(statusProps: StatusProps): React.ReactElement {
 
 export interface HomeViewProps {
     issues: Issue[];
-    dependencies: Dependency[];
     unreadInums: Set<number>;
     maxAgents: number;
     terminalProps: TerminalProps;
@@ -135,20 +134,19 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
     }, [selectedIssueStatus]);
 
     function flashBlockers(inum: number) {
-        const blockerInums = homeViewProps.dependencies
-            .filter(d => d.blocked_inum === inum)
-            .map(d => d.blocker_inum);
-        setFlashingBlockerInums(new Set(blockerInums));
+        const issue = homeViewProps.issues.find(i => i.inum === inum);
+        if (!issue) return;
+        setFlashingBlockerInums(new Set(issue.blocked_by));
         setFlashOn(true);
     }
 
     function hasUnresolvedBlockers(inum: number): boolean {
-        return homeViewProps.dependencies
-            .filter(d => d.blocked_inum === inum)
-            .some(d => {
-                const blocker = homeViewProps.issues.find(i => i.inum === d.blocker_inum);
-                return blocker !== undefined && blocker.status !== IssueStatus.Resolved;
-            });
+        const issue = homeViewProps.issues.find(i => i.inum === inum);
+        if (!issue) return false;
+        return issue.blocked_by.some(blockerInum => {
+            const blocker = homeViewProps.issues.find(i => i.inum === blockerInum);
+            return blocker !== undefined && blocker.status !== IssueStatus.Resolved;
+        });
     }
 
     useInput((input, key) => {

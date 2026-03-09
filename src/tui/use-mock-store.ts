@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { loadMockData, saveMockData } from './mock-store.js';
 import type { MockStore } from './mock-store.js';
 import { IssueStatus } from '../types.js';
-import type { Issue, ChangedStatusProps } from '../types.js';
+import type { ChangedStatusProps } from '../types.js';
 
 export interface MockStoreWithUpdater {
     mockDataStore: MockStore;
@@ -31,19 +31,11 @@ export function useMockStore(): MockStoreWithUpdater {
 
                 // 2. Cascade: unblock issues whose blockers are all now resolved
                 if (changedStatusProps.newStatus === IssueStatus.Resolved) {
-                    const blockedInums = prev.dependencies
-                        .filter((d) => d.blocker_inum === changedStatusProps.inum)
-                        .map((d) => d.blocked_inum);
-
                     updatedIssues = updatedIssues.map((issue) => {
-                        if (!blockedInums.includes(issue.inum) || issue.status !== IssueStatus.Blocked)
-                            return issue;
+                        if (issue.status !== IssueStatus.Blocked) return issue;
+                        if (!issue.blocked_by.includes(changedStatusProps.inum)) return issue;
 
-                        const allBlockerInums = prev.dependencies
-                            .filter((d) => d.blocked_inum === issue.inum)
-                            .map((d) => d.blocker_inum);
-
-                        const allResolved = allBlockerInums.every((bi) => {
+                        const allResolved = issue.blocked_by.every((bi) => {
                             const blocker = updatedIssues.find((i) => i.inum === bi);
                             return blocker && blocker.status === IssueStatus.Resolved;
                         });
@@ -63,20 +55,10 @@ export function useMockStore(): MockStoreWithUpdater {
                     }
                 }
 
-                // 4. Sync containerIssues references
-                const updatedContainerIssues: Record<number, Issue[]> = {};
-                for (const [cid, cIssues] of Object.entries(prev.containerIssues)) {
-                    updatedContainerIssues[Number(cid)] = cIssues.map((ci) => {
-                        const updated = updatedIssues.find((i) => i.inum === ci.inum);
-                        return updated ?? ci;
-                    });
-                }
-
                 const next: MockStore = {
                     ...prev,
                     issues: updatedIssues,
                     detailData: updatedDetailData,
-                    containerIssues: updatedContainerIssues,
                 };
 
                 saveMockData(next);
