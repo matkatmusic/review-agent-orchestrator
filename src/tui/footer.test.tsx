@@ -12,6 +12,7 @@ import {
     getFocusableShortcuts,
     computeFooterLines,
     STATUS_SHORTCUTS,
+    CONFIRM_TRASH_SHORTCUTS,
 } from './footer.js';
 import type { Shortcut } from './footer.js';
 import { ViewType } from './views.js';
@@ -279,44 +280,59 @@ describe('Footer — footer shows correct shortcuts for each non-Detail ViewType
 describe('Footer — STATUS_SHORTCUTS', () => {
     const keys = (shortcuts: readonly Shortcut[]) => shortcuts.map(s => s.key);
 
-    it('Active has d, r, q', () => {
+    it('Active has d, r, x, q', () => {
         const k = keys(STATUS_SHORTCUTS[IssueStatus.Active]);
-        expect(k).toEqual(['d', 'r', 'q']);
+        expect(k).toEqual(['d', 'r', 'x', 'q']);
     });
 
-    it('InQueue has d, r, f, q', () => {
+    it('InQueue has d, r, f, x, q', () => {
         const k = keys(STATUS_SHORTCUTS[IssueStatus.InQueue]);
-        expect(k).toEqual(['d', 'r', 'f', 'q']);
+        expect(k).toEqual(['d', 'r', 'f', 'x', 'q']);
     });
 
-    it('Blocked has b, q', () => {
+    it('Blocked has b, x, q', () => {
         const k = keys(STATUS_SHORTCUTS[IssueStatus.Blocked]);
-        expect(k).toEqual(['b', 'q']);
+        expect(k).toEqual(['b', 'x', 'q']);
     });
 
-    it('Deferred has e, r, q', () => {
+    it('Deferred has e, r, x, q', () => {
         const k = keys(STATUS_SHORTCUTS[IssueStatus.Deferred]);
-        expect(k).toEqual(['e', 'r', 'q']);
+        expect(k).toEqual(['e', 'r', 'x', 'q']);
     });
 
-    it('Resolved has e, q', () => {
+    it('Resolved has e, x, q', () => {
         const k = keys(STATUS_SHORTCUTS[IssueStatus.Resolved]);
-        expect(k).toEqual(['e', 'q']);
+        expect(k).toEqual(['e', 'x', 'q']);
+    });
+
+    it('Trashed has q', () => {
+        const k = keys(STATUS_SHORTCUTS[IssueStatus.Trashed]);
+        expect(k).toEqual(['q']);
     });
 
     it('"q" is present for every status', () => {
-        for (const status of [IssueStatus.Active, IssueStatus.InQueue, IssueStatus.Blocked, IssueStatus.Deferred, IssueStatus.Resolved]) {
+        for (const status of [IssueStatus.Active, IssueStatus.InQueue, IssueStatus.Blocked, IssueStatus.Deferred, IssueStatus.Resolved, IssueStatus.Trashed]) {
             expect(keys(STATUS_SHORTCUTS[status])).toContain('q');
         }
     });
 
     it('every shortcut has non-empty key and label', () => {
-        for (const status of [IssueStatus.Active, IssueStatus.InQueue, IssueStatus.Blocked, IssueStatus.Deferred, IssueStatus.Resolved]) {
+        for (const status of [IssueStatus.Active, IssueStatus.InQueue, IssueStatus.Blocked, IssueStatus.Deferred, IssueStatus.Resolved, IssueStatus.Trashed]) {
             for (const s of STATUS_SHORTCUTS[status]) {
                 expect(s.key.length).toBeGreaterThan(0);
                 expect(s.label.length).toBeGreaterThan(0);
             }
         }
+    });
+});
+
+// ---- CONFIRM_TRASH_SHORTCUTS ----
+
+describe('Footer — CONFIRM_TRASH_SHORTCUTS', () => {
+    it('has exactly x and Esc keys', () => {
+        expect(CONFIRM_TRASH_SHORTCUTS).toHaveLength(2);
+        const k = CONFIRM_TRASH_SHORTCUTS.map(s => s.key);
+        expect(k).toEqual(['x', 'Esc']);
     });
 });
 

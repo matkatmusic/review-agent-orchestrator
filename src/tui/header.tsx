@@ -11,6 +11,7 @@ export interface HeaderProps {
     maxAgents?: number;
     unreadCount?: number;
     threadInfo?: { inThread: boolean };
+    subtitleOverride?: string;
 }
 
 const assertNever = (x: never): never => {
@@ -63,6 +64,7 @@ const HeaderComponent: React.FC<HeaderProps> = ({
     maxAgents,
     unreadCount,
     threadInfo,
+    subtitleOverride,
 }) => {
     const title = `Review Agent Orchestrator - ${getViewLabel(currentView, threadInfo)}`;
     const line1 = centeredRule(title, columns);
@@ -75,7 +77,7 @@ const HeaderComponent: React.FC<HeaderProps> = ({
     if (unreadCount !== undefined) statusParts.push(`Unread: ${unreadCount}`);
     const line2 = statusParts.length > 0 ? statusParts.join('  |  ') : ' ';
 
-    const line3 = getSubtitle(currentView, threadInfo);
+    const line3 = subtitleOverride ?? getSubtitle(currentView, threadInfo);
 
     return (
         <Box flexDirection="column" height={HEADER_LINES}>

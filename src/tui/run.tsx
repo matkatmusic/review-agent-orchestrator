@@ -11,6 +11,7 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resetMockData } from './mock-store.js';
+import { IssueStatus } from '../types.js';
 
 export function processResetFlag(): void {
     if (process.argv.includes('--resetMockData')) {
@@ -86,15 +87,17 @@ export function AppWrapper() {
             maxAgents={mockStoreWithUpdater.mockDataStore.maxAgents}
             unreadCount={mockStoreWithUpdater.mockDataStore.unreadInums.size}
         >
-            {(setFooterOptions, setFooterShortcuts, terminal, layout) => (
+            {(setFooterOptions, setFooterShortcuts, terminal, layout, setHeaderSubtitleOverride) => (
                 <HomeView
-                    issues={mockStoreWithUpdater.mockDataStore.issues}
+                    issues={mockStoreWithUpdater.mockDataStore.issues.filter(i => i.status !== IssueStatus.Trashed)}
                     unreadInums={mockStoreWithUpdater.mockDataStore.unreadInums}
                     maxAgents={mockStoreWithUpdater.mockDataStore.maxAgents}
                     terminalProps={terminal}
                     layoutProps={layout}
                     onStatusHotkeyPressed={mockStoreWithUpdater.updateIssueStatusCallback}
                     setFooterShortcuts={setFooterShortcuts}
+                    onTrashIssue={mockStoreWithUpdater.trashIssueCallback}
+                    setHeaderSubtitleOverride={setHeaderSubtitleOverride}
                 />
             )}
         </AppShell>

@@ -13,6 +13,7 @@ function makeIssue(overrides: Partial<Issue> & { inum: number; title: string }):
         status: IssueStatus.InQueue,
         created_at: '2026-01-01T00:00:00Z',
         resolved_at: null,
+        trashed_at: null,
         issue_revision: 1,
         agent_last_read_at: null,
         user_last_viewed_at: null,
@@ -157,8 +158,8 @@ describe('HomeView', () => {
     it('tab wraps around from last to first filter', async () => {
         const { lastFrame, stdin } = render(<HomeView {...defaultProps} />);
         await tick();
-        // Tab through all: All → Active → In Queue → Blocked → Deferred → Resolved → All
-        for (let i = 0; i < 6; i++) {
+        // Tab through all: All → Active → In Queue → Blocked → Deferred → Resolved → Trashed → All
+        for (let i = 0; i < 7; i++) {
             stdin.write('\t');
             await tick();
         }

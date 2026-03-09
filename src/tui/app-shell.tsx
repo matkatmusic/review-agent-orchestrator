@@ -18,6 +18,7 @@ export interface AppShellProps {
         setFooterShortcuts: (shortcuts: readonly Shortcut[]) => void,
         terminal: TerminalProps,
         layout: LayoutProps,
+        setHeaderSubtitleOverride: (s: string | undefined) => void,
     ) => React.ReactNode;
 }
 
@@ -33,6 +34,7 @@ export const AppShell: React.FC<AppShellProps> = ({
 }) => {
     const [footerOptions, setFooterOptions] = useState<FooterOptions>({});
     const [footerShortcuts, setFooterShortcuts] = useState<readonly Shortcut[] | undefined>(undefined);
+    const [headerSubtitleOverride, setHeaderSubtitleOverride] = useState<string | undefined>(undefined);
 
     const viewType = currentView.type;
     const shortcuts = footerShortcuts ?? getFooterShortcuts(viewType, footerOptions);
@@ -48,9 +50,10 @@ export const AppShell: React.FC<AppShellProps> = ({
                 maxAgents={maxAgents}
                 unreadCount={unreadCount}
                 threadInfo={threadInfo}
+                subtitleOverride={headerSubtitleOverride}
             />
             <Box flexDirection="column" height={contentHeight} flexGrow={1}>
-                {children(setFooterOptions, setFooterShortcuts, { columns, rows }, { headerLines: HEADER_LINES, footerLines })}
+                {children(setFooterOptions, setFooterShortcuts, { columns, rows }, { headerLines: HEADER_LINES, footerLines }, setHeaderSubtitleOverride)}
             </Box>
             <Footer viewType={viewType} {...footerOptions} shortcutOverrides={footerShortcuts} columns={columns} />
         </Box>

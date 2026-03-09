@@ -8,7 +8,8 @@ export enum IssueStatus {
   InQueue,
   Blocked,
   Deferred,
-  Resolved
+  Resolved,
+  Trashed = 5
 }
 
 export interface ChangedStatusProps {
@@ -22,6 +23,7 @@ export const IssueStatusStringsMap = new Map<IssueStatus, string>([
   [IssueStatus.Blocked, "Blocked"],
   [IssueStatus.Deferred, "Deferred"],
   [IssueStatus.Resolved, "Resolved"],
+  [IssueStatus.Trashed, "Trashed"],
 ]);
 
 export interface Issue {
@@ -31,6 +33,7 @@ export interface Issue {
     status: IssueStatus;
     created_at: string;
     resolved_at: string | null;
+    trashed_at: string | null;
     issue_revision: number;
     agent_last_read_at: string | null;
     user_last_viewed_at: string | null;

@@ -5,7 +5,7 @@ import { IssueStatus, IssueStatusStringsMap } from '../types.js';
 import { statusToColor } from './status-color.js';
 import type { TerminalProps, LayoutProps } from './views.js';
 import type { Shortcut } from './footer.js';
-import { STATUS_SHORTCUTS } from './footer.js';
+import { STATUS_SHORTCUTS, CONFIRM_TRASH_SHORTCUTS } from './footer.js';
 
 const COL = {
     cursor: 2,
@@ -30,9 +30,9 @@ function bracketCenter(text: string, width: number, arrows: boolean): string {
 
 const columnSeparator = SHOW_COLUMN_SEPARATORS ? '|' : ' ';
 
-interface SelectionCaretProps { selected: boolean; }
+interface SelectionCaretProps { selected: boolean; confirmHighlight?: boolean; }
 function SelectionCaret(selectionCaretProps: SelectionCaretProps): React.ReactElement {
-    const colorToUse = selectionCaretProps.selected ? 'cyan' : undefined;
+    const colorToUse = selectionCaretProps.confirmHighlight ? 'red' : selectionCaretProps.selected ? 'cyan' : undefined;
     const selectionCaret = selectionCaretProps.selected ? '\u25B8 ' : '  ';
     return (
         <Text color={colorToUse} bold={selectionCaretProps.selected}>
@@ -41,9 +41,9 @@ function SelectionCaret(selectionCaretProps: SelectionCaretProps): React.ReactEl
     );
 }
 
-interface IssueNumProps { inum: number; selected: boolean; }
+interface IssueNumProps { inum: number; selected: boolean; confirmHighlight?: boolean; }
 function IssueNum(issueNumProps: IssueNumProps): React.ReactElement {
-    const colorToUse = issueNumProps.selected ? 'cyan' : undefined;
+    const colorToUse = issueNumProps.confirmHighlight ? 'red' : issueNumProps.selected ? 'cyan' : undefined;
     const idLabel = center(`I-${issueNumProps.inum}`, COL.id);
     return (
         <Text color={colorToUse} bold={issueNumProps.selected}>
@@ -97,6 +97,8 @@ export interface HomeViewProps {
     layoutProps: LayoutProps;
     onStatusHotkeyPressed?: (changedStatusProps: ChangedStatusProps) => void;
     setFooterShortcuts?: (shortcuts: readonly Shortcut[]) => void;
+    onTrashIssue?: (inum: number) => void;
+    setHeaderSubtitleOverride?: (s: string | undefined) => void;
 }
 
 /*
@@ -113,6 +115,7 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
 
     const [flashingBlockerInums, setFlashingBlockerInums] = useState<Set<number>>(new Set());
     const [flashOn, setFlashOn] = useState(false);
+    const [confirmTrashInum, setConfirmTrashInum] = useState<number | null>(null);
 
     const clampedCursor = homeViewProps.issues.length > 0
         ? Math.min(cursor, homeViewProps.issues.length - 1)
@@ -128,10 +131,22 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
     }, [flashingBlockerInums]);
 
     useEffect(() => {
-        if (homeViewProps.setFooterShortcuts && selectedIssueStatus !== undefined) {
+        if (!homeViewProps.setFooterShortcuts) return;
+        if (confirmTrashInum !== null) {
+            homeViewProps.setFooterShortcuts(CONFIRM_TRASH_SHORTCUTS);
+        } else if (selectedIssueStatus !== undefined) {
             homeViewProps.setFooterShortcuts(STATUS_SHORTCUTS[selectedIssueStatus]);
         }
-    }, [selectedIssueStatus]);
+    }, [selectedIssueStatus, confirmTrashInum]);
+
+    useEffect(() => {
+        if (!homeViewProps.setHeaderSubtitleOverride) return;
+        homeViewProps.setHeaderSubtitleOverride(
+            confirmTrashInum !== null
+                ? "Confirm delete with 'x', Esc to cancel"
+                : undefined
+        );
+    }, [confirmTrashInum]);
 
     function flashBlockers(inum: number) {
         const issue = homeViewProps.issues.find(i => i.inum === inum);
@@ -150,6 +165,22 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
     }
 
     useInput((input, key) => {
+        // Confirmation state machine for trash
+        if (confirmTrashInum !== null) {
+            if (input === 'x') {
+                homeViewProps.onTrashIssue?.(confirmTrashInum);
+                setConfirmTrashInum(null);
+            } else if (key.escape) {
+                setConfirmTrashInum(null);
+            }
+            return;
+        }
+        if (input === 'x' && homeViewProps.issues.length > 0) {
+            const idx = Math.min(cursorRef.current, Math.max(0, homeViewProps.issues.length - 1));
+            setConfirmTrashInum(homeViewProps.issues[idx].inum);
+            return;
+        }
+
         if (key.downArrow || key.upArrow) {
             setFlashingBlockerInums(new Set());
         }
@@ -224,18 +255,19 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
                 const selected = i === clampedCursor;
                 const isFlashing = flashingBlockerInums.has(issue.inum);
                 const showArrows = isFlashing && flashOn;
+                const isConfirmTarget = confirmTrashInum === issue.inum;
                 const innerWidth = titleWidth - 2;
                 const titleText = issue.title.length > innerWidth
                     ? issue.title.slice(0, innerWidth - 3) + '...'
                     : issue.title;
                 const unread = homeViewProps.unreadInums.has(issue.inum);
-                const flashColor = showArrows ? 'red' : undefined;
+                const flashColor = isConfirmTarget ? 'red' : showArrows ? 'red' : undefined;
                 const statusLabel = IssueStatusStringsMap.get(issue.status) ?? '';
-                const statusColor = statusToColor(issue.status);
+                const statusColor = isConfirmTarget ? 'red' : statusToColor(issue.status);
                 return (
                     <Box key={issue.inum}>
-                        <SelectionCaret selected={selected} />
-                        <IssueNum inum={issue.inum} selected={selected} />
+                        <SelectionCaret selected={selected} confirmHighlight={isConfirmTarget} />
+                        <IssueNum inum={issue.inum} selected={selected} confirmHighlight={isConfirmTarget} />
                         <UnreadMarker unread={unread} />
                         <Title text={titleText} width={titleWidth} selected={selected} showArrows={showArrows} flashColor={flashColor} />
                         <Status label={statusLabel} color={statusColor} selected={selected} />

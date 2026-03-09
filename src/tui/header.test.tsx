@@ -148,4 +148,23 @@ describe('Header', () => {
     it('Header is memoized with React.memo', () => {
         expect(Header).toHaveProperty('$$typeof', Symbol.for('react.memo'));
     });
+
+    // ---- subtitleOverride ----
+
+    it('subtitleOverride replaces line 3 when provided', () => {
+        const output = rts(
+            <Header currentView={{ type: ViewType.Home }} columns={cols} subtitleOverride="Custom hint" />
+        );
+        const line3 = output.split('\n')[2];
+        expect(line3).toContain('Custom hint');
+        expect(line3).not.toContain('All issues and orchestration state');
+    });
+
+    it('line 3 shows default subtitle when subtitleOverride is undefined', () => {
+        const output = rts(
+            <Header currentView={{ type: ViewType.Home }} columns={cols} />
+        );
+        const line3 = output.split('\n')[2];
+        expect(line3).toContain('All issues and orchestration state');
+    });
 });
