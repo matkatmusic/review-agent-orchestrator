@@ -34,6 +34,7 @@ export interface Issue {
     issue_revision: number;
     agent_last_read_at: string | null;
     user_last_viewed_at: string | null;
+    blocked_by: number[];
 }
 
 export enum ResponseType {
