@@ -6,7 +6,7 @@ import { HomeView } from './home-view.js';
 import type { Issue } from '../types.js';
 import { IssueStatus } from '../types.js';
 import { LayoutProps, TerminalProps } from './views.js';
-import { STATUS_SHORTCUTS } from './footer.js';
+import { STATUS_SHORTCUTS, CONFIRM_TRASH_SHORTCUTS } from './footer.js';
 
 function makeIssue(overrides: Partial<Issue> & { inum: number; title: string }): Issue {
     return {
@@ -14,6 +14,7 @@ function makeIssue(overrides: Partial<Issue> & { inum: number; title: string }):
         status: IssueStatus.InQueue,
         created_at: '2026-01-01T00:00:00Z',
         resolved_at: null,
+        trashed_at: null,
         issue_revision: 1,
         agent_last_read_at: null,
         user_last_viewed_at: null,
@@ -112,6 +113,7 @@ describe('HomeView (Phase 1 — render only)', () => {
 });
 
 const tick = () => new Promise(r => setTimeout(r, 0));
+const settle = () => new Promise(r => setTimeout(r, 50));
 
 function cursorLine(frame: string): string | undefined {
     return stripAnsi(frame).split('\n').find(l => l.includes('\u25B8'));
@@ -623,5 +625,132 @@ describe('HomeView — no-op hotkey guards', () => {
         stdin.write('f');
         await tick();
         expect(handler).not.toHaveBeenCalled();
+    });
+});
+
+describe('HomeView — trash confirmation', () => {
+    it('"x" once enters confirmation state (footer changes to confirm shortcuts)', async () => {
+        const footerSpy = vi.fn();
+        const trashSpy = vi.fn();
+        const { stdin } = render(
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} setFooterShortcuts={footerSpy} onTrashIssue={trashSpy} />
+        );
+        await settle();
+        footerSpy.mockClear();
+        stdin.write('x');
+        await settle();
+        expect(footerSpy).toHaveBeenCalledWith(CONFIRM_TRASH_SHORTCUTS);
+        expect(trashSpy).not.toHaveBeenCalled();
+    });
+
+    it('"x" "x" calls onTrashIssue with selected issue inum', async () => {
+        const trashSpy = vi.fn();
+        const { stdin } = render(
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} onTrashIssue={trashSpy} />
+        );
+        await tick();
+        stdin.write('x');
+        await settle();
+        stdin.write('x');
+        await settle();
+        expect(trashSpy).toHaveBeenCalledWith(1);
+    });
+
+    it('"x" then Esc cancels (restores normal footer)', async () => {
+        const footerSpy = vi.fn();
+        const trashSpy = vi.fn();
+        const { stdin } = render(
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} setFooterShortcuts={footerSpy} onTrashIssue={trashSpy} />
+        );
+        await settle();
+        footerSpy.mockClear();
+        stdin.write('x');
+        await settle();
+        expect(footerSpy).toHaveBeenCalledWith(CONFIRM_TRASH_SHORTCUTS);
+        footerSpy.mockClear();
+        stdin.write('\x1b');
+        await settle();
+        expect(footerSpy).toHaveBeenCalledWith(STATUS_SHORTCUTS[IssueStatus.Active]);
+        expect(trashSpy).not.toHaveBeenCalled();
+    });
+
+    it('"x" then other key (e.g. "a") stays in confirm state (ignored)', async () => {
+        const trashSpy = vi.fn();
+        const footerSpy = vi.fn();
+        const { stdin } = render(
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} setFooterShortcuts={footerSpy} onTrashIssue={trashSpy} />
+        );
+        await settle();
+        stdin.write('x');
+        await settle();
+        footerSpy.mockClear();
+        stdin.write('a');
+        await settle();
+        expect(trashSpy).not.toHaveBeenCalled();
+        // Still in confirm state -- footer should NOT have been reset
+        expect(footerSpy).not.toHaveBeenCalled();
+    });
+
+    it('"x" then arrow key stays in confirm state (ignored)', async () => {
+        const trashSpy = vi.fn();
+        const footerSpy = vi.fn();
+        const { stdin } = render(
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} setFooterShortcuts={footerSpy} onTrashIssue={trashSpy} />
+        );
+        await settle();
+        stdin.write('x');
+        await settle();
+        footerSpy.mockClear();
+        stdin.write('\x1b[B');
+        await settle();
+        expect(trashSpy).not.toHaveBeenCalled();
+        // Still in confirm state -- footer should NOT have been reset
+        expect(footerSpy).not.toHaveBeenCalled();
+    });
+
+    it('"x" available from all statuses', async () => {
+        const statuses = [IssueStatus.Active, IssueStatus.InQueue, IssueStatus.Blocked, IssueStatus.Deferred, IssueStatus.Resolved];
+        for (const status of statuses) {
+            const footerSpy = vi.fn();
+            const issues = [makeIssue({ inum: 99, title: 'test_issue', status })];
+            const { stdin } = render(
+                <HomeView issues={issues} unreadInums={new Set()} maxAgents={3} terminalProps={TP} layoutProps={LP} setFooterShortcuts={footerSpy} />
+            );
+            await settle();
+            footerSpy.mockClear();
+            stdin.write('x');
+            await settle();
+            expect(footerSpy, `status ${IssueStatus[status]}`).toHaveBeenCalledWith(CONFIRM_TRASH_SHORTCUTS);
+        }
+    });
+
+    it('confirm state highlights selected row red', async () => {
+        const { lastFrame, stdin } = render(
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} />
+        );
+        await tick();
+        stdin.write('x');
+        await tick();
+        const frame = lastFrame()!;
+        // The frame should contain red ANSI codes on the I-1 row
+        const lines = frame.split('\n');
+        const i1Line = lines.find(l => stripAnsi(l).includes('I-1'));
+        expect(i1Line).toBeDefined();
+        // Red ANSI escape: \x1b[31m
+        expect(i1Line).toContain('\x1b[31m');
+    });
+
+    it('"x" "x" on navigated issue trashes the correct inum', async () => {
+        const trashSpy = vi.fn();
+        const { stdin } = render(
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} onTrashIssue={trashSpy} />
+        );
+        await tick();
+        // Navigate to I-3 (index 2)
+        stdin.write('\x1b[B'); await tick();
+        stdin.write('\x1b[B'); await tick();
+        stdin.write('x'); await settle();
+        stdin.write('x'); await settle();
+        expect(trashSpy).toHaveBeenCalledWith(3);
     });
 });

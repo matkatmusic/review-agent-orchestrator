@@ -20,7 +20,7 @@ describe('AppShell', () => {
     it.skip('renders header, content, footer vertically', () => {
         const { lastFrame } = render(
             <AppShell columns={cols} rows={rows} currentView={homeView}>
-                {(_setFooterOptions, _setFooterShortcuts) => <Text>CONTENT</Text>}
+                {(_setFooterOptions, _setFooterShortcuts, _terminal, _layout, _setHeaderSubtitleOverride) => <Text>CONTENT</Text>}
             </AppShell>
         );
         const output = lastFrame()!;
@@ -45,7 +45,7 @@ describe('AppShell', () => {
         const testRows = 24;
         const output = renderToString(
             <AppShell columns={cols} rows={testRows} currentView={homeView}>
-                {(_setFooterOptions, _setFooterShortcuts) => <Text>BODY</Text>}
+                {(_setFooterOptions, _setFooterShortcuts, _terminal, _layout, _setHeaderSubtitleOverride) => <Text>BODY</Text>}
             </AppShell>,
             { columns: cols },
         );
@@ -70,7 +70,7 @@ describe('AppShell', () => {
         // Render exactly expectedContentHeight lines — all should be visible
         const output = renderToString(
             <AppShell columns={testCols} rows={testRows} currentView={homeView}>
-                {(_setFooterOptions, _setFooterShortcuts) => (
+                {(_setFooterOptions, _setFooterShortcuts, _terminal, _layout, _setHeaderSubtitleOverride) => (
                     <Box flexDirection="column">
                         {Array.from({ length: expectedContentHeight }, (_, i) => (
                             <Text key={i}>{`LINE ${i + 1}`}</Text>
@@ -98,7 +98,7 @@ describe('AppShell', () => {
     it('resize updates dimensions when re-rendered with different columns/rows', () => {
         const { lastFrame, rerender } = render(
             <AppShell columns={80} rows={24} currentView={homeView}>
-                {(_setFooterOptions, _setFooterShortcuts) => <Text>BODY</Text>}
+                {(_setFooterOptions, _setFooterShortcuts, _terminal, _layout, _setHeaderSubtitleOverride) => <Text>BODY</Text>}
             </AppShell>
         );
 
@@ -107,7 +107,7 @@ describe('AppShell', () => {
         // Re-render with new dimensions
         rerender(
             <AppShell columns={120} rows={30} currentView={homeView}>
-                {(_setFooterOptions, _setFooterShortcuts) => <Text>BODY</Text>}
+                {(_setFooterOptions, _setFooterShortcuts, _terminal, _layout, _setHeaderSubtitleOverride) => <Text>BODY</Text>}
             </AppShell>
         );
 
@@ -141,7 +141,7 @@ describe('AppShell', () => {
                 rows={24}
                 currentView={{ type: ViewType.Detail, inum: 1 }}
             >
-                {(setFooterOptions, _setFooterShortcuts) => <ChildThatSetsOptions setFooterOptions={setFooterOptions} />}
+                {(setFooterOptions, _setFooterShortcuts, _terminal, _layout, _setHeaderSubtitleOverride) => <ChildThatSetsOptions setFooterOptions={setFooterOptions} />}
             </AppShell>
         );
 
@@ -161,5 +161,31 @@ describe('AppShell', () => {
         // Default Detail-only shortcuts absent in thread mode
         expect(plain).not.toContain('Defer');
         expect(plain).not.toContain('Show pane');
+    });
+
+    // ---- Test 6: setHeaderSubtitleOverride callback reaches header ----
+
+    it('setHeaderSubtitleOverride callback reaches header', async () => {
+        const ChildThatSetsSubtitle: React.FC<{ setOverride: (s: string | undefined) => void }> = ({ setOverride }) => {
+            useEffect(() => {
+                setOverride('test hint');
+            }, []);
+            return <Text>BODY</Text>;
+        };
+
+        const { lastFrame } = render(
+            <AppShell columns={80} rows={24} currentView={homeView}>
+                {(_setFooterOptions, _setFooterShortcuts, _terminal, _layout, setHeaderSubtitleOverride) =>
+                    <ChildThatSetsSubtitle setOverride={setHeaderSubtitleOverride} />
+                }
+            </AppShell>
+        );
+
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        const output = lastFrame()!;
+        const plain = stripAnsi(output);
+        const line3 = plain.split('\n')[2];
+        expect(line3).toContain('test hint');
     });
 });

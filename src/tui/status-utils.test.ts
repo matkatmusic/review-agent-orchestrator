@@ -9,6 +9,7 @@ function makeIssue(overrides: Partial<Issue> & { inum: number }): Issue {
         status: IssueStatus.Active,
         created_at: '2026-01-01T00:00:00Z',
         resolved_at: null,
+        trashed_at: null,
         issue_revision: 1,
         agent_last_read_at: null,
         user_last_viewed_at: null,
@@ -58,6 +59,19 @@ describe('getStatus', () => {
         const active = makeIssue({ inum: 3, status: IssueStatus.Active });
         const issue = makeIssue({ inum: 1, status: IssueStatus.InQueue, blocked_by: [2, 3] });
         expect(getStatus(issue, [issue, resolved, active])).toBe(IssueStatus.Blocked);
+    });
+
+    it('returns stored status when all blockers are Trashed', () => {
+        const blocker = makeIssue({ inum: 2, status: IssueStatus.Trashed });
+        const issue = makeIssue({ inum: 1, status: IssueStatus.InQueue, blocked_by: [2] });
+        expect(getStatus(issue, [issue, blocker])).toBe(IssueStatus.InQueue);
+    });
+
+    it('returns Blocked when one blocker Trashed but another Active', () => {
+        const trashed = makeIssue({ inum: 2, status: IssueStatus.Trashed });
+        const active = makeIssue({ inum: 3, status: IssueStatus.Active });
+        const issue = makeIssue({ inum: 1, status: IssueStatus.InQueue, blocked_by: [2, 3] });
+        expect(getStatus(issue, [issue, trashed, active])).toBe(IssueStatus.Blocked);
     });
 
     it('returns stored status when blocker inum not found in allIssues', () => {

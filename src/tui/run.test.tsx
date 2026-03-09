@@ -86,6 +86,25 @@ describe('run.tsx — --resetMockData flag', () => {
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = () => new Promise(r => setTimeout(r, 50));
 
+describe('run.tsx — trash hotkey', () => {
+    it('trashed issue disappears from Home view after x x', async () => {
+        const longSettle = () => new Promise(r => setTimeout(r, 150));
+        const { lastFrame, stdin } = render(<AppWrapper />);
+        await longSettle();
+
+        // Verify I-1 is visible
+        let plain = stripAnsi(lastFrame()!);
+        expect(plain).toContain('I-1');
+
+        // Press x x to trash I-1
+        stdin.write('x'); await longSettle();
+        stdin.write('x'); await longSettle();
+
+        plain = stripAnsi(lastFrame()!);
+        expect(plain).not.toContain('I-1');
+    });
+});
+
 describe('run.tsx — cascading unblock on resolve', () => {
     it('resolving all blockers transitions blocked issue to In Queue', async () => {
         // I-6 is Blocked (status 2), blocked by I-3 and I-5 per mock-data.default.json

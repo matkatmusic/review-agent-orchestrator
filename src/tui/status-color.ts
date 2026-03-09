@@ -7,6 +7,7 @@ export function statusToColor(status: IssueStatus): string | undefined {
         case IssueStatus.Blocked: return 'red';
         case IssueStatus.Deferred: return 'yellow';
         case IssueStatus.Resolved: return 'gray';
+        case IssueStatus.Trashed: return 'gray';
         default: return undefined;
     }
 }

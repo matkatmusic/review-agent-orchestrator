@@ -34,6 +34,7 @@ const TEST_ISSUE: Issue = {
     status: IssueStatus.Active,
     created_at: '2025-01-15T10:00:00Z',
     resolved_at: null,
+    trashed_at: null,
     issue_revision: 3,
     agent_last_read_at: '2025-01-15T12:00:00Z',
     user_last_viewed_at: '2025-01-15T11:00:00Z',
