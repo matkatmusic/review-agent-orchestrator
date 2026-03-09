@@ -289,9 +289,9 @@ describe('Footer — STATUS_SHORTCUTS', () => {
         expect(k).toEqual(['d', 'r', 'f', 'q']);
     });
 
-    it('Blocked has d, r, e, q', () => {
+    it('Blocked has b, q', () => {
         const k = keys(STATUS_SHORTCUTS[IssueStatus.Blocked]);
-        expect(k).toEqual(['d', 'r', 'e', 'q']);
+        expect(k).toEqual(['b', 'q']);
     });
 
     it('Deferred has e, r, q', () => {

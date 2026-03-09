@@ -300,7 +300,7 @@ describe('HomeView — status change hotkeys', () => {
         expect(handler).toHaveBeenCalledWith({ inum: 7, newStatus: IssueStatus.Resolved });
     });
 
-    it('"d" on Blocked calls handler with Deferred', async () => {
+    it('"d" on Blocked does NOT call handler (no-op)', async () => {
         const handler = vi.fn();
         const { stdin } = render(
             <HomeView issues={MOCK_ISSUES} dependencies={[]} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} onStatusHotkeyPressed={handler} />
@@ -310,7 +310,7 @@ describe('HomeView — status change hotkeys', () => {
         for (let i = 0; i < 5; i++) { stdin.write('\x1b[B'); await tick(); }
         stdin.write('d');
         await tick();
-        expect(handler).toHaveBeenCalledWith({ inum: 6, newStatus: IssueStatus.Deferred });
+        expect(handler).not.toHaveBeenCalled();
     });
 
     it('hotkey targets the cursor-selected issue after navigation', async () => {
@@ -430,6 +430,60 @@ describe('HomeView — blocked status flash', () => {
         const frame = lastFrame()!;
         expect(issueLineFor(frame, 3)).not.toContain('>');
         expect(issueLineFor(frame, 5)).not.toContain('>');
+    });
+
+    it('"b" on Blocked flashes blockers', async () => {
+        const handler = vi.fn();
+        const { lastFrame, stdin } = render(
+            <HomeView issues={MOCK_ISSUES} dependencies={MOCK_DEPS} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} onStatusHotkeyPressed={handler} />
+        );
+        await tick();
+        // Navigate to I-6 (Blocked, index 5)
+        for (let i = 0; i < 5; i++) { stdin.write('\x1b[B'); await tick(); }
+        stdin.write('b');
+        await tick();
+        expect(handler).not.toHaveBeenCalled();
+        const frame = lastFrame()!;
+        expect(issueLineFor(frame, 3)).toContain('>');
+        expect(issueLineFor(frame, 5)).toContain('>');
+    });
+});
+
+describe('HomeView — deferred blocker guard', () => {
+    it('"e" on Deferred with unresolved blockers does NOT enqueue (flashes instead)', async () => {
+        const issues = [
+            makeIssue({ inum: 10, title: 'blocker_issue', status: IssueStatus.Active }),
+            makeIssue({ inum: 11, title: 'was_blocked_now_deferred', status: IssueStatus.Deferred }),
+        ];
+        const deps: Dependency[] = [{ blocker_inum: 10, blocked_inum: 11 }];
+        const handler = vi.fn();
+        const { stdin } = render(
+            <HomeView issues={issues} dependencies={deps} unreadInums={new Set()} maxAgents={3} terminalProps={TP} layoutProps={LP} onStatusHotkeyPressed={handler} />
+        );
+        await tick();
+        stdin.write('\x1b[B'); // move to I-11 (Deferred, index 1)
+        await tick();
+        stdin.write('e');
+        await tick();
+        expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('"e" on Deferred with all blockers resolved enqueues normally', async () => {
+        const issues = [
+            makeIssue({ inum: 10, title: 'blocker_resolved', status: IssueStatus.Resolved }),
+            makeIssue({ inum: 11, title: 'was_blocked_now_deferred', status: IssueStatus.Deferred }),
+        ];
+        const deps: Dependency[] = [{ blocker_inum: 10, blocked_inum: 11 }];
+        const handler = vi.fn();
+        const { stdin } = render(
+            <HomeView issues={issues} dependencies={deps} unreadInums={new Set()} maxAgents={3} terminalProps={TP} layoutProps={LP} onStatusHotkeyPressed={handler} />
+        );
+        await tick();
+        stdin.write('\x1b[B'); // move to I-11 (Deferred, index 1)
+        await tick();
+        stdin.write('e');
+        await tick();
+        expect(handler).toHaveBeenCalledWith({ inum: 11, newStatus: IssueStatus.InQueue });
     });
 });
 

@@ -142,6 +142,15 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
         setFlashOn(true);
     }
 
+    function hasUnresolvedBlockers(inum: number): boolean {
+        return homeViewProps.dependencies
+            .filter(d => d.blocked_inum === inum)
+            .some(d => {
+                const blocker = homeViewProps.issues.find(i => i.inum === d.blocker_inum);
+                return blocker !== undefined && blocker.status !== IssueStatus.Resolved;
+            });
+    }
+
     useInput((input, key) => {
         if (key.downArrow || key.upArrow) {
             setFlashingBlockerInums(new Set());
@@ -161,13 +170,17 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
             if (status === IssueStatus.Blocked) {
                 flashBlockers(selectedIssue.inum);
             } else if (status === IssueStatus.Deferred) {
-                homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.InQueue });
+                if (hasUnresolvedBlockers(selectedIssue.inum)) {
+                    flashBlockers(selectedIssue.inum);
+                } else {
+                    homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.InQueue });
+                }
             } else if (status === IssueStatus.Resolved) {
                 // Phase 3: open Detail, enqueue on submit. Stub: direct enqueue.
                 homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.InQueue });
             }
         } else if (input === 'd') {
-            if (status === IssueStatus.Active || status === IssueStatus.InQueue || status === IssueStatus.Blocked) {
+            if (status === IssueStatus.Active || status === IssueStatus.InQueue) {
                 homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.Deferred });
             }
         } else if (input === 'r') {
@@ -180,6 +193,10 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
             if (status === IssueStatus.InQueue) {
                 // Phase 2: capacity gate + swap modal. Stub: direct activate.
                 homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.Active });
+            }
+        } else if (input === 'b') {
+            if (status === IssueStatus.Blocked) {
+                flashBlockers(selectedIssue.inum);
             }
         }
     });
