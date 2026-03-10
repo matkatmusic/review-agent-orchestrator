@@ -4,10 +4,10 @@
       "inum": 1,
       "title": "migrate_ServerDerivedFields",
       "description": "Migrate server derived fields to new schema",
-      "status": 5,
+      "status": 0,
       "created_at": "2026-01-01T00:00:00Z",
       "resolved_at": null,
-      "trashed_at": "2026-03-09T23:40:19.274Z",
+      "trashed_at": null,
       "issue_revision": 1,
       "agent_last_read_at": null,
       "user_last_viewed_at": "2026-01-01T12:00:00Z",
@@ -30,16 +30,14 @@
       "inum": 3,
       "title": "rate_limiting_design",
       "description": "Design rate limiting strategy",
-      "status": 5,
+      "status": 1,
       "created_at": "2026-01-03T00:00:00Z",
       "resolved_at": null,
-      "trashed_at": "2026-03-09T23:40:23.914Z",
+      "trashed_at": null,
       "issue_revision": 2,
       "agent_last_read_at": null,
       "user_last_viewed_at": null,
-      "blocked_by": [
-        1
-      ]
+      "blocked_by": [1]
     },
     {
       "inum": 4,
@@ -52,48 +50,41 @@
       "issue_revision": 1,
       "agent_last_read_at": null,
       "user_last_viewed_at": null,
-      "blocked_by": [
-        1
-      ]
+      "blocked_by": [1]
     },
     {
       "inum": 5,
       "title": "docker_healthcheck",
       "description": "Add Docker healthcheck endpoint",
-      "status": 5,
+      "status": 1,
       "created_at": "2026-01-05T00:00:00Z",
       "resolved_at": null,
-      "trashed_at": "2026-03-09T23:40:26.520Z",
+      "trashed_at": null,
       "issue_revision": 1,
       "agent_last_read_at": null,
       "user_last_viewed_at": null,
-      "blocked_by": [
-        2
-      ]
+      "blocked_by": [2]
     },
     {
       "inum": 6,
       "title": "stale_session_cleanup",
       "description": "Auto-cleanup stale sessions",
-      "status": 4,
+      "status": 2,
       "created_at": "2026-01-06T00:00:00Z",
-      "resolved_at": "2026-03-09T23:40:35.392Z",
+      "resolved_at": null,
       "trashed_at": null,
       "issue_revision": 1,
       "agent_last_read_at": null,
       "user_last_viewed_at": null,
-      "blocked_by": [
-        3,
-        5
-      ]
+      "blocked_by": [3, 5]
     },
     {
       "inum": 7,
       "title": "legacy_api_removal",
       "description": "Remove legacy API endpoints",
-      "status": 4,
+      "status": 3,
       "created_at": "2026-01-07T00:00:00Z",
-      "resolved_at": "2026-03-09T23:40:36.550Z",
+      "resolved_at": null,
       "trashed_at": null,
       "issue_revision": 1,
       "agent_last_read_at": null,
@@ -126,8 +117,7 @@
       "responding_to_id": null,
       "replying_to_id": null,
       "is_continuation": false,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 2,
@@ -140,8 +130,7 @@
       "responding_to_id": 1,
       "replying_to_id": null,
       "is_continuation": true,
-      "thread_resolved_at": "2026-01-01T10:25:00Z",
-      "quoted_response_id": null
+      "thread_resolved_at": "2026-01-01T10:25:00Z"
     },
     {
       "id": 9,
@@ -154,8 +143,7 @@
       "responding_to_id": null,
       "replying_to_id": 2,
       "is_continuation": false,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 10,
@@ -168,8 +156,7 @@
       "responding_to_id": 9,
       "replying_to_id": null,
       "is_continuation": false,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 11,
@@ -182,8 +169,7 @@
       "responding_to_id": 10,
       "replying_to_id": null,
       "is_continuation": false,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 3,
@@ -196,8 +182,7 @@
       "responding_to_id": 2,
       "replying_to_id": null,
       "is_continuation": true,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 6,
@@ -210,8 +195,7 @@
       "responding_to_id": 3,
       "replying_to_id": null,
       "is_continuation": false,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 7,
@@ -224,8 +208,7 @@
       "responding_to_id": 6,
       "replying_to_id": null,
       "is_continuation": false,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 8,
@@ -238,8 +221,7 @@
       "responding_to_id": 7,
       "replying_to_id": null,
       "is_continuation": false,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 12,
@@ -252,8 +234,7 @@
       "responding_to_id": null,
       "replying_to_id": 8,
       "is_continuation": false,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 13,
@@ -266,8 +247,7 @@
       "responding_to_id": 12,
       "replying_to_id": null,
       "is_continuation": false,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 4,
@@ -280,8 +260,7 @@
       "responding_to_id": 8,
       "replying_to_id": null,
       "is_continuation": false,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 14,
@@ -294,8 +273,7 @@
       "responding_to_id": null,
       "replying_to_id": 4,
       "is_continuation": false,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 15,
@@ -308,8 +286,7 @@
       "responding_to_id": 14,
       "replying_to_id": null,
       "is_continuation": false,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 5,
@@ -322,8 +299,7 @@
       "responding_to_id": 4,
       "replying_to_id": null,
       "is_continuation": true,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 16,
@@ -336,8 +312,7 @@
       "responding_to_id": null,
       "replying_to_id": null,
       "is_continuation": false,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 17,
@@ -350,8 +325,7 @@
       "responding_to_id": null,
       "replying_to_id": null,
       "is_continuation": false,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 18,
@@ -364,8 +338,7 @@
       "responding_to_id": 17,
       "replying_to_id": null,
       "is_continuation": false,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     },
     {
       "id": 19,
@@ -378,11 +351,11 @@
       "responding_to_id": null,
       "replying_to_id": null,
       "is_continuation": false,
-      "thread_resolved_at": null,
-      "quoted_response_id": null
+      "thread_resolved_at": null
     }
   ],
   "unreadInums": [
+    3,
     6
   ],
   "maxAgents": 6,

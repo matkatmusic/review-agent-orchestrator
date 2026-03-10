@@ -7,7 +7,7 @@ if [ $# -lt 1 ]; then
   exit 1
 fi
 
-WORKTREE_NAME="$1"
+WORKTREE_NAME="${1// /_}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 WORKTREE_PATH="${REPO_ROOT}/../${WORKTREE_NAME}"
 COMMIT="HEAD"
@@ -50,7 +50,8 @@ discard_ignored_changes() {
 
     case "${path}" in
       ".claude/settings.json")
-        git -C "${WORKTREE_PATH}" restore --source=HEAD --staged --worktree -- ".claude/settings.json"
+        git -C "${WORKTREE_PATH}" clean -f -- ".claude/settings.json"
+        rmdir "${WORKTREE_PATH}/.claude" 2>/dev/null || true
         ;;
       ".vscode/tasks.json")
         git -C "${WORKTREE_PATH}" clean -f -- ".vscode/tasks.json"
