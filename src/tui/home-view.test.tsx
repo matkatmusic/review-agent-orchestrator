@@ -909,4 +909,49 @@ describe('HomeView — "Blocks ->" flash on blocked issues', () => {
             expect(line).not.toContain('Blocks');
         }
     });
+
+    // Test I: non-blocked titles are dimmed when cursor is on a blocker
+    it('non-blocked titles are dimmed when cursor is on a blocker', async () => {
+        const { lastFrame, stdin } = render(
+            <HomeView issues={MOCK_ISSUES_WITH_BLOCKERS} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} />
+        );
+        await tick();
+        // Navigate away then back to I-1 to trigger autoFlash
+        stdin.write('\x1b[B'); await tick();
+        stdin.write('\x1b[A'); await tick();
+        const rawFrame = lastFrame()!;
+        const rawLines = rawFrame.split('\n');
+        // I-3 and I-4 show "Blocks ->" (red bold, NOT dimmed)
+        const i3Raw = rawLines.find(l => stripAnsi(l).includes('I-3'))!;
+        const i4Raw = rawLines.find(l => stripAnsi(l).includes('I-4'))!;
+        expect(i3Raw).not.toContain('\x1b[2m');
+        expect(i4Raw).not.toContain('\x1b[2m');
+        // Non-blocked, non-selected titles (I-2, I-5, I-6, I-7, I-8) should be dimmed
+        for (const inum of [2, 5, 6, 7, 8]) {
+            const line = rawLines.find(l => stripAnsi(l).includes(`I-${inum}`))!;
+            expect(line, `I-${inum} should be dimmed`).toContain('\x1b[2m');
+        }
+    });
+
+    // Test J: dimming clears when cursor leaves blocker
+    it('dimming clears when cursor moves away from blocker', async () => {
+        const { lastFrame, stdin } = render(
+            <HomeView issues={MOCK_ISSUES_WITH_BLOCKERS} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} />
+        );
+        await tick();
+        // Navigate to I-1 to trigger blocker highlight
+        stdin.write('\x1b[B'); await tick();
+        stdin.write('\x1b[A'); await tick();
+        // Confirm dimming is active
+        const beforeRaw = lastFrame()!;
+        const i2Before = beforeRaw.split('\n').find(l => stripAnsi(l).includes('I-2'))!;
+        expect(i2Before).toContain('\x1b[2m');
+        // Navigate to I-7 (blocks nothing)
+        for (let i = 0; i < 6; i++) { stdin.write('\x1b[B'); await tick(); }
+        const rawFrame = lastFrame()!;
+        const rawLines = rawFrame.split('\n').filter(l => stripAnsi(l).includes('I-'));
+        for (const line of rawLines) {
+            expect(line).not.toContain('\x1b[2m');
+        }
+    });
 });

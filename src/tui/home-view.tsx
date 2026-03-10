@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { Issue, ChangedStatusProps } from '../types.js';
 import { IssueStatus, IssueStatusStringsMap } from '../types.js';
@@ -68,21 +68,29 @@ function InfoMarker(infoMarkerProps: InfoMarkerProps): React.ReactElement {
     );
 }
 
-interface TitleProps { text: string; width: number; selected: boolean; flashColor: string | undefined; flashPrefix: string | undefined; }
+interface TitleProps { text: string; width: number; selected: boolean; dimmed: boolean; flashColor: string | undefined; flashPrefix: string | undefined; flashBold: boolean; }
 function Title(titleProps: TitleProps): React.ReactElement {
     if (titleProps.flashPrefix) {
-        const inner = titleProps.width - 2;
-        const combined = titleProps.flashPrefix + titleProps.text;
-        const displayText = combined.length > inner ? combined.slice(0, inner) : combined;
-        const content = padCenter(displayText, titleProps.width);
-        return (<><Text>{columnSeparator}</Text><Text color="red" bold>{content}</Text></>);
+        // Center the title normally, place prefix 1 space to its left
+        const centered = padCenter(titleProps.text, titleProps.width);
+        const leftPad = 1 + Math.floor((titleProps.width - 2 - titleProps.text.length) / 2);
+        const prefix = titleProps.flashPrefix; // e.g. "Blocks -> " (trailing space = the 1-space gap)
+        const leading = ' '.repeat(Math.max(0, leftPad - prefix.length));
+        const after = centered.slice(leftPad);
+        return (
+            <>
+                <Text>{columnSeparator}</Text>
+                <Text color="red" bold={titleProps.flashBold}>{leading + prefix}</Text>
+                <Text>{after}</Text>
+            </>
+        );
     }
     const colorToUse = titleProps.flashColor ?? (titleProps.selected ? 'cyan' : undefined);
     const titleContent = padCenter(titleProps.text, titleProps.width);
     return (
         <>
             <Text>{columnSeparator}</Text>
-            <Text color={colorToUse} bold={titleProps.selected}>{titleContent}</Text>
+            <Text color={colorToUse} bold={titleProps.selected} dimColor={titleProps.dimmed}>{titleContent}</Text>
         </>
     );
 }
@@ -124,8 +132,8 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
     cursorRef.current = cursor;
 
     const [flashingBlockerInums, setFlashingBlockerInums] = useState<Set<number>>(new Set());
-    const [flashingBlockedInums, setFlashingBlockedInums] = useState<Set<number>>(new Set());
-    const [flashOn, setFlashOn] = useState(false);
+    const [manualBlockerFlash, setManualBlockerFlash] = useState(false);
+    const [flashBold, setFlashBold] = useState(true);
     const [confirmTrashInum, setConfirmTrashInum] = useState<number | null>(null);
 
     const clampedCursor = homeViewProps.issues.length > 0
@@ -135,11 +143,21 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
         ? homeViewProps.issues[clampedCursor].status
         : undefined;
 
+    const blockedByCurrentIssue = useMemo(() => {
+        if (manualBlockerFlash || homeViewProps.issues.length === 0) return new Set<number>();
+        const issue = homeViewProps.issues[clampedCursor];
+        const s = new Set<number>();
+        for (const iss of homeViewProps.issues) {
+            if (iss.blocked_by.includes(issue.inum) && iss.status !== IssueStatus.Resolved) s.add(iss.inum);
+        }
+        return s;
+    }, [clampedCursor, homeViewProps.issues, manualBlockerFlash]);
+
     useEffect(() => {
-        if (flashingBlockerInums.size === 0 && flashingBlockedInums.size === 0) return;
-        const id = setInterval(() => setFlashOn(f => !f), 500);
+        if (blockedByCurrentIssue.size === 0 && flashingBlockerInums.size === 0) { setFlashBold(true); return; }
+        const id = setInterval(() => setFlashBold(b => !b), 500);
         return () => clearInterval(id);
-    }, [flashingBlockerInums, flashingBlockedInums]);
+    }, [blockedByCurrentIssue, flashingBlockerInums]);
 
     useEffect(() => {
         if (!homeViewProps.setFooterShortcuts) return;
@@ -164,8 +182,7 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
         const issue = homeViewProps.issues.find(i => i.inum === inum);
         if (!issue) return;
         setFlashingBlockerInums(new Set(issue.blocked_by));
-        setFlashingBlockedInums(new Set());
-        setFlashOn(true);
+        setManualBlockerFlash(true);
     }
 
     function autoFlashForIndex(idx: number) {
@@ -173,18 +190,10 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
         const issue = homeViewProps.issues[idx];
         if (hasUnresolvedBlockers(issue.inum)) {
             setFlashingBlockerInums(new Set(issue.blocked_by));
-            setFlashOn(true);
         } else {
             setFlashingBlockerInums(new Set());
         }
-        const blockedBySelected = new Set<number>();
-        for (const iss of homeViewProps.issues) {
-            if (iss.blocked_by.includes(issue.inum) && iss.status !== IssueStatus.Resolved) {
-                blockedBySelected.add(iss.inum);
-            }
-        }
-        setFlashingBlockedInums(blockedBySelected);
-        if (blockedBySelected.size > 0) setFlashOn(true);
+        setManualBlockerFlash(false);
     }
 
     function hasUnresolvedBlockers(inum: number): boolean {
@@ -294,11 +303,13 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
                     ? issue.title.slice(0, innerWidth - 3) + '...'
                     : issue.title;
                 const unread = homeViewProps.unreadInums.has(issue.inum);
-                const isBlockingFlash = flashingBlockerInums.has(issue.inum) && flashOn;
-                const isBlockedBySelectedFlash = flashingBlockedInums.has(issue.inum) && flashOn;
-                const flashPrefix = isBlockedBySelectedFlash ? 'Blocks -> '
-                    : isBlockingFlash ? 'Blocked By -> '
+                const isBlocker = flashingBlockerInums.has(issue.inum);
+                const isBlockedBySelected = blockedByCurrentIssue.has(issue.inum);
+                const flashPrefix = isBlockedBySelected ? 'Blocks -> '
+                    : isBlocker ? 'Blocked By -> '
                     : undefined;
+                const anyHighlightActive = blockedByCurrentIssue.size > 0 || flashingBlockerInums.size > 0;
+                const isDimmed = anyHighlightActive && !isBlockedBySelected && !isBlocker && !selected;
                 const flashColor = isConfirmTarget ? 'red' : undefined;
                 const statusLabel = IssueStatusStringsMap.get(issue.status) ?? '';
                 const statusColor = isConfirmTarget ? 'red' : statusToColor(issue.status);
@@ -306,8 +317,8 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
                     <Box key={issue.inum}>
                         <SelectionCaret selected={selected} confirmHighlight={isConfirmTarget} />
                         <IssueNum inum={issue.inum} selected={selected} confirmHighlight={isConfirmTarget} />
-                        <InfoMarker unread={unread} blockingFlash={isBlockingFlash} needsInput={false} blockedBySelectedFlash={isBlockedBySelectedFlash} />
-                        <Title text={titleText} width={titleWidth} selected={selected} flashColor={flashColor} flashPrefix={flashPrefix} />
+                        <InfoMarker unread={unread} blockingFlash={isBlocker} needsInput={false} blockedBySelectedFlash={isBlockedBySelected} />
+                        <Title text={titleText} width={titleWidth} selected={selected} dimmed={isDimmed} flashColor={flashColor} flashPrefix={flashPrefix} flashBold={flashBold} />
                         <Status label={statusLabel} color={statusColor} selected={selected} />
                     </Box>
                 );
