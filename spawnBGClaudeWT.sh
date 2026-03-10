@@ -134,6 +134,18 @@ cat > "${WORKTREE_PATH}/.vscode/tasks.json" << EOF
       "isBackground": true
     },
     {
+      "label": "npm install",
+      "type": "shell",
+      "command": "npm install",
+      "runOptions": {"runOn": "folderOpen"},
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "worktree-${WORKTREE_NAME}",
+        "focus": false
+      }
+    },
+    {
       "label": "tmux: ${WORKTREE_NAME}",
       "type": "shell",
       "command": "tmux new-session -s ${WORKTREE_NAME}",
