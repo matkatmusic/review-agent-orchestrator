@@ -10,7 +10,7 @@ import { STATUS_SHORTCUTS, CONFIRM_TRASH_SHORTCUTS } from './footer.js';
 const COL = {
     cursor: 2,
     id:     5,
-    unread: 8,
+    info:   8,
     status: 10,
 } as const;
 
@@ -23,9 +23,9 @@ function center(text: string, width: number): string {
     return ' '.repeat(left) + text + ' '.repeat(pad - left);
 }
 
-function bracketCenter(text: string, width: number, arrows: boolean): string {
+function padCenter(text: string, width: number): string {
     const inner = center(text, width - 2);
-    return arrows ? `>${inner}<` : ` ${inner} `;
+    return ` ${inner} `;
 }
 
 const columnSeparator = SHOW_COLUMN_SEPARATORS ? '|' : ' ';
@@ -52,27 +52,37 @@ function IssueNum(issueNumProps: IssueNumProps): React.ReactElement {
     );
 }
 
-interface UnreadMarkerProps { unread: boolean; }
-function UnreadMarker(unreadMarkerProps: UnreadMarkerProps): React.ReactElement {
-    const markerText = unreadMarkerProps.unread ? '\u2731' : ' ';
-    const centeredMarker = center(markerText, COL.unread);
+interface InfoMarkerProps { unread: boolean; blockingFlash: boolean; needsInput: boolean; blockedBySelectedFlash: boolean; }
+function InfoMarker(infoMarkerProps: InfoMarkerProps): React.ReactElement {
+    if (infoMarkerProps.blockedBySelectedFlash || infoMarkerProps.blockingFlash) {
+        return (<><Text>{columnSeparator}</Text><Text>{'       '}</Text></>);
+    }
+    const unreadChar = infoMarkerProps.unread ? '*' : ' ';
+    const needsInputChar = infoMarkerProps.needsInput ? 'i' : ' ';
+    const markerText = ` ${unreadChar}   ${needsInputChar} `;
     return (
         <>
             <Text>{columnSeparator}</Text>
-            <Text color="yellow" bold>{centeredMarker}</Text>
+            <Text color="yellow" bold>{markerText}</Text>
         </>
     );
 }
 
-interface TitleProps { text: string; width: number; selected: boolean; showArrows: boolean; flashColor: string | undefined; }
+interface TitleProps { text: string; width: number; selected: boolean; flashColor: string | undefined; flashPrefix: string | undefined; }
 function Title(titleProps: TitleProps): React.ReactElement {
+    if (titleProps.flashPrefix) {
+        const inner = titleProps.width - 2;
+        const combined = titleProps.flashPrefix + titleProps.text;
+        const displayText = combined.length > inner ? combined.slice(0, inner) : combined;
+        const content = padCenter(displayText, titleProps.width);
+        return (<><Text>{columnSeparator}</Text><Text color="red" bold>{content}</Text></>);
+    }
     const colorToUse = titleProps.flashColor ?? (titleProps.selected ? 'cyan' : undefined);
-    const isBold = titleProps.selected || titleProps.showArrows;
-    const titleContent = bracketCenter(titleProps.text, titleProps.width, titleProps.showArrows);
+    const titleContent = padCenter(titleProps.text, titleProps.width);
     return (
         <>
             <Text>{columnSeparator}</Text>
-            <Text color={colorToUse} bold={isBold}>{titleContent}</Text>
+            <Text color={colorToUse} bold={titleProps.selected}>{titleContent}</Text>
         </>
     );
 }
@@ -114,6 +124,7 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
     cursorRef.current = cursor;
 
     const [flashingBlockerInums, setFlashingBlockerInums] = useState<Set<number>>(new Set());
+    const [flashingBlockedInums, setFlashingBlockedInums] = useState<Set<number>>(new Set());
     const [flashOn, setFlashOn] = useState(false);
     const [confirmTrashInum, setConfirmTrashInum] = useState<number | null>(null);
 
@@ -125,10 +136,10 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
         : undefined;
 
     useEffect(() => {
-        if (flashingBlockerInums.size === 0) return;
+        if (flashingBlockerInums.size === 0 && flashingBlockedInums.size === 0) return;
         const id = setInterval(() => setFlashOn(f => !f), 500);
         return () => clearInterval(id);
-    }, [flashingBlockerInums]);
+    }, [flashingBlockerInums, flashingBlockedInums]);
 
     useEffect(() => {
         if (!homeViewProps.setFooterShortcuts) return;
@@ -144,15 +155,36 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
         homeViewProps.setHeaderSubtitleOverride(
             confirmTrashInum !== null
                 ? "Confirm delete with 'x', Esc to cancel"
-                : undefined
+                : "Info: '*' unread  'i' needs input"
         );
+        return () => homeViewProps.setHeaderSubtitleOverride?.(undefined);
     }, [confirmTrashInum]);
 
     function flashBlockers(inum: number) {
         const issue = homeViewProps.issues.find(i => i.inum === inum);
         if (!issue) return;
         setFlashingBlockerInums(new Set(issue.blocked_by));
+        setFlashingBlockedInums(new Set());
         setFlashOn(true);
+    }
+
+    function autoFlashForIndex(idx: number) {
+        if (homeViewProps.issues.length === 0) return;
+        const issue = homeViewProps.issues[idx];
+        if (hasUnresolvedBlockers(issue.inum)) {
+            setFlashingBlockerInums(new Set(issue.blocked_by));
+            setFlashOn(true);
+        } else {
+            setFlashingBlockerInums(new Set());
+        }
+        const blockedBySelected = new Set<number>();
+        for (const iss of homeViewProps.issues) {
+            if (iss.blocked_by.includes(issue.inum) && iss.status !== IssueStatus.Resolved) {
+                blockedBySelected.add(iss.inum);
+            }
+        }
+        setFlashingBlockedInums(blockedBySelected);
+        if (blockedBySelected.size > 0) setFlashOn(true);
     }
 
     function hasUnresolvedBlockers(inum: number): boolean {
@@ -181,13 +213,16 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
             return;
         }
 
-        if (key.downArrow || key.upArrow) {
-            setFlashingBlockerInums(new Set());
-        }
         if (key.downArrow) {
-            setCursor(c => Math.min(c + 1, homeViewProps.issues.length - 1));
+            const newIdx = Math.min(cursorRef.current + 1, homeViewProps.issues.length - 1);
+            setCursor(newIdx);
+            cursorRef.current = newIdx;
+            autoFlashForIndex(newIdx);
         } else if (key.upArrow) {
-            setCursor(c => Math.max(c - 1, 0));
+            const newIdx = Math.max(cursorRef.current - 1, 0);
+            setCursor(newIdx);
+            cursorRef.current = newIdx;
+            autoFlashForIndex(newIdx);
         }
 
         if (!homeViewProps.onStatusHotkeyPressed || homeViewProps.issues.length === 0) return;
@@ -238,10 +273,10 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
         );
     }
 
-    // 5 pipe/space separators between columns: |ID|Unread|Title|Status|
-    const titleWidth = homeViewProps.terminalProps.columns - COL.cursor - COL.id - COL.unread - COL.status - 5;
+    // 5 pipe/space separators between columns: |ID|Info|Title|Status|
+    const titleWidth = homeViewProps.terminalProps.columns - COL.cursor - COL.id - COL.info - COL.status - 5;
     const headerPad = ''.padEnd(COL.cursor);
-    const headerColumns = `|${center('ID', COL.id)}|${center('Unread', COL.unread)}|${center('Title', titleWidth)}|${center('Status', COL.status)}|`;
+    const headerColumns = `${columnSeparator}${center('ID', COL.id)}${columnSeparator}${center('Info', COL.info)}${columnSeparator}${center('Title', titleWidth)}${columnSeparator}${center('Status', COL.status)}${columnSeparator}`;
 
     return (
         <Box flexDirection="column">
@@ -253,23 +288,26 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
             {/* issue rows */}
             {homeViewProps.issues.map((issue, i) => {
                 const selected = i === clampedCursor;
-                const isFlashing = flashingBlockerInums.has(issue.inum);
-                const showArrows = isFlashing && flashOn;
                 const isConfirmTarget = confirmTrashInum === issue.inum;
                 const innerWidth = titleWidth - 2;
                 const titleText = issue.title.length > innerWidth
                     ? issue.title.slice(0, innerWidth - 3) + '...'
                     : issue.title;
                 const unread = homeViewProps.unreadInums.has(issue.inum);
-                const flashColor = isConfirmTarget ? 'red' : showArrows ? 'red' : undefined;
+                const isBlockingFlash = flashingBlockerInums.has(issue.inum) && flashOn;
+                const isBlockedBySelectedFlash = flashingBlockedInums.has(issue.inum) && flashOn;
+                const flashPrefix = isBlockedBySelectedFlash ? 'Blocks -> '
+                    : isBlockingFlash ? 'Blocked By -> '
+                    : undefined;
+                const flashColor = isConfirmTarget ? 'red' : undefined;
                 const statusLabel = IssueStatusStringsMap.get(issue.status) ?? '';
                 const statusColor = isConfirmTarget ? 'red' : statusToColor(issue.status);
                 return (
                     <Box key={issue.inum}>
                         <SelectionCaret selected={selected} confirmHighlight={isConfirmTarget} />
                         <IssueNum inum={issue.inum} selected={selected} confirmHighlight={isConfirmTarget} />
-                        <UnreadMarker unread={unread} />
-                        <Title text={titleText} width={titleWidth} selected={selected} showArrows={showArrows} flashColor={flashColor} />
+                        <InfoMarker unread={unread} blockingFlash={isBlockingFlash} needsInput={false} blockedBySelectedFlash={isBlockedBySelectedFlash} />
+                        <Title text={titleText} width={titleWidth} selected={selected} flashColor={flashColor} flashPrefix={flashPrefix} />
                         <Status label={statusLabel} color={statusColor} selected={selected} />
                     </Box>
                 );

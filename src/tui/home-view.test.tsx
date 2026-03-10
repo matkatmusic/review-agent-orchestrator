@@ -86,9 +86,9 @@ describe('HomeView (Phase 1 — render only)', () => {
         const plain = stripAnsi(lastFrame()!);
         const lines = plain.split('\n');
         const i3Line = lines.find(l => l.includes('I-3'));
-        expect(i3Line).toContain('\u2731');
+        expect(i3Line).toContain('*');
         const i6Line = lines.find(l => l.includes('I-6'));
-        expect(i6Line).toContain('\u2731');
+        expect(i6Line).toContain('*');
     });
 
     it('does not render unread marker for read issues', () => {
@@ -97,10 +97,10 @@ describe('HomeView (Phase 1 — render only)', () => {
         );
         const plain = stripAnsi(lastFrame()!);
         const lines = plain.split('\n');
-        const i1Line = lines.find(l => l.includes('I-1'));
-        expect(i1Line).not.toContain('\u2731');
-        const i2Line = lines.find(l => l.includes('I-2'));
-        expect(i2Line).not.toContain('\u2731');
+        const i1Info = extractInfoColumn(lines.find(l => l.includes('I-1'))!);
+        expect(i1Info).not.toContain('*');
+        const i2Info = extractInfoColumn(lines.find(l => l.includes('I-2'))!);
+        expect(i2Info).not.toContain('*');
     });
 
     it('renders empty state when no issues', () => {
@@ -369,7 +369,7 @@ describe('HomeView — blocked status flash', () => {
         expect(handler).not.toHaveBeenCalled();
     });
 
-    it('"e" on Blocked issue shows > < arrows on blocker rows', async () => {
+    it('"e" on Blocked issue shows "Blocked By ->" on blocker titles', async () => {
         const handler = vi.fn();
         const { lastFrame, stdin } = render(
             <HomeView issues={MOCK_ISSUES_WITH_BLOCKERS} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} onStatusHotkeyPressed={handler} />
@@ -378,10 +378,9 @@ describe('HomeView — blocked status flash', () => {
         for (let i = 0; i < 5; i++) { stdin.write('\x1b[B'); await tick(); }
         stdin.write('e');
         await tick();
-        const frame = lastFrame()!;
-        expect(issueLineFor(frame, 3)).toContain('>');
-        expect(issueLineFor(frame, 5)).toContain('>');
-        expect(issueLineFor(frame, 1)).not.toContain('>');
+        const plain = stripAnsi(lastFrame()!);
+        expect(plain.split('\n').find(l => l.includes('I-3'))).toContain('Blocked By ->');
+        expect(plain.split('\n').find(l => l.includes('I-5'))).toContain('Blocked By ->');
     });
 
     it('"r" on Blocked issue does NOT call onStatusHotkeyPressed (flashes instead)', async () => {
@@ -397,7 +396,7 @@ describe('HomeView — blocked status flash', () => {
         expect(handler).not.toHaveBeenCalled();
     });
 
-    it('"r" on Blocked issue shows > < arrows on blocker rows', async () => {
+    it('"r" on Blocked issue shows "Blocked By ->" on blocker titles', async () => {
         const handler = vi.fn();
         const { lastFrame, stdin } = render(
             <HomeView issues={MOCK_ISSUES_WITH_BLOCKERS} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} onStatusHotkeyPressed={handler} />
@@ -407,18 +406,12 @@ describe('HomeView — blocked status flash', () => {
         for (let i = 0; i < 5; i++) { stdin.write('\x1b[B'); await tick(); }
         stdin.write('r');
         await tick();
-        const frame = lastFrame()!;
-        // I-3 and I-5 are blockers of I-6
-        expect(issueLineFor(frame, 3)).toContain('>');
-        expect(issueLineFor(frame, 3)).toContain('<');
-        expect(issueLineFor(frame, 5)).toContain('>');
-        expect(issueLineFor(frame, 5)).toContain('<');
-        // Non-blockers should NOT have arrows
-        expect(issueLineFor(frame, 1)).not.toContain('>');
-        expect(issueLineFor(frame, 2)).not.toContain('>');
+        const plain = stripAnsi(lastFrame()!);
+        expect(plain.split('\n').find(l => l.includes('I-3'))).toContain('Blocked By ->');
+        expect(plain.split('\n').find(l => l.includes('I-5'))).toContain('Blocked By ->');
     });
 
-    it('flash clears when cursor moves', async () => {
+    it('"Blocked By ->" clears when cursor moves to non-blocked issue', async () => {
         const handler = vi.fn();
         const { lastFrame, stdin } = render(
             <HomeView issues={MOCK_ISSUES_WITH_BLOCKERS} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} onStatusHotkeyPressed={handler} />
@@ -428,17 +421,21 @@ describe('HomeView — blocked status flash', () => {
         for (let i = 0; i < 5; i++) { stdin.write('\x1b[B'); await tick(); }
         stdin.write('r');
         await tick();
-        // Flash should be active
-        expect(issueLineFor(lastFrame()!, 3)).toContain('>');
-        // Move cursor down to clear flash
+        // Flash should be active — I-3 and I-5 should show "Blocked By ->"
+        const before = stripAnsi(lastFrame()!);
+        expect(before.split('\n').find(l => l.includes('I-3'))).toContain('Blocked By ->');
+        // Move cursor down to I-7 (no blockers) to clear flash
         stdin.write('\x1b[B');
         await tick();
-        const frame = lastFrame()!;
-        expect(issueLineFor(frame, 3)).not.toContain('>');
-        expect(issueLineFor(frame, 5)).not.toContain('>');
+        const plain = stripAnsi(lastFrame()!);
+        expect(cursorLine(lastFrame()!)).toContain('I-7');
+        const issueLines = plain.split('\n').filter(l => l.includes('I-'));
+        for (const line of issueLines) {
+            expect(line).not.toContain('Blocked By');
+        }
     });
 
-    it('"b" on Blocked flashes blockers', async () => {
+    it('"b" on Blocked shows "Blocked By ->" on blocker titles', async () => {
         const handler = vi.fn();
         const { lastFrame, stdin } = render(
             <HomeView issues={MOCK_ISSUES_WITH_BLOCKERS} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} onStatusHotkeyPressed={handler} />
@@ -449,9 +446,9 @@ describe('HomeView — blocked status flash', () => {
         stdin.write('b');
         await tick();
         expect(handler).not.toHaveBeenCalled();
-        const frame = lastFrame()!;
-        expect(issueLineFor(frame, 3)).toContain('>');
-        expect(issueLineFor(frame, 5)).toContain('>');
+        const plain = stripAnsi(lastFrame()!);
+        expect(plain.split('\n').find(l => l.includes('I-3'))).toContain('Blocked By ->');
+        expect(plain.split('\n').find(l => l.includes('I-5'))).toContain('Blocked By ->');
     });
 });
 
@@ -752,5 +749,164 @@ describe('HomeView — trash confirmation', () => {
         stdin.write('x'); await settle();
         stdin.write('x'); await settle();
         expect(trashSpy).toHaveBeenCalledWith(3);
+    });
+});
+
+/** Extract the Info column segment from a row line (between ID column and Title column) */
+function extractInfoColumn(line: string): string {
+    // Layout: cursor(2) + sep(1) + ID(5) + sep(1) + Info(8) + sep(1) + Title...
+    // The Info column starts at position 2+1+5+1 = 9 and is 8 chars wide
+    return line.slice(9, 17);
+}
+
+describe('HomeView — Info column + blocking indicators', () => {
+    // Test A: header shows 'Info' column (not 'Unread')
+    it('header row contains "Info" column label', () => {
+        const { lastFrame } = render(
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} />
+        );
+        const plain = stripAnsi(lastFrame()!);
+        const headerLine = plain.split('\n')[0];
+        expect(headerLine).toContain('Info');
+        expect(headerLine).not.toContain('Unread');
+    });
+
+    // Test B: hint text sent to header subtitle
+    it('sets header subtitle with hint text on mount', async () => {
+        const subtitleSpy = vi.fn();
+        render(
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} setHeaderSubtitleOverride={subtitleSpy} />
+        );
+        await tick();
+        expect(subtitleSpy).toHaveBeenCalledWith("Info: '*' unread  'i' needs input");
+    });
+
+    // Test C: no static 'b' in Info column (blocking shown via title flash only)
+    it("does not show 'b' in Info column for any issue", () => {
+        const { lastFrame } = render(
+            <HomeView issues={MOCK_ISSUES_WITH_BLOCKERS} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} />
+        );
+        const frame = lastFrame()!;
+        for (const inum of [1, 2, 3, 4, 5, 6, 7, 8]) {
+            const info = extractInfoColumn(issueLineFor(frame, inum)!);
+            expect(info, `I-${inum} Info should not contain 'b'`).not.toContain('b');
+        }
+    });
+
+    // Test D: "Blocked By ->" flashes on blocker titles when blocked issue is selected
+    it('"Blocked By ->" shows on blocker titles when cursor is on a blocked issue', async () => {
+        const { lastFrame, stdin } = render(
+            <HomeView issues={MOCK_ISSUES_WITH_BLOCKERS} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} />
+        );
+        await tick();
+        // Navigate to I-6 (index 5) which has blocked_by: [3, 5]
+        for (let i = 0; i < 5; i++) { stdin.write('\x1b[B'); await tick(); }
+        const plain = stripAnsi(lastFrame()!);
+        expect(plain.split('\n').find(l => l.includes('I-3'))).toContain('Blocked By ->');
+        expect(plain.split('\n').find(l => l.includes('I-5'))).toContain('Blocked By ->');
+    });
+
+    // Test E: "Blocked By ->" stops when cursor leaves blocked issue
+    it('"Blocked By ->" stops when cursor moves away from blocked issue', async () => {
+        const { lastFrame, stdin } = render(
+            <HomeView issues={MOCK_ISSUES_WITH_BLOCKERS} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} />
+        );
+        await tick();
+        // Navigate to I-6 (index 5) - auto-flash starts on I-3, I-5
+        for (let i = 0; i < 5; i++) { stdin.write('\x1b[B'); await tick(); }
+        await settle();
+        // Confirm flash active
+        const before = stripAnsi(lastFrame()!);
+        expect(before.split('\n').find(l => l.includes('I-3'))).toContain('Blocked By ->');
+        // Navigate away to I-7 (index 6) — no unresolved blockers, flash clears
+        stdin.write('\x1b[B'); await tick();
+        expect(cursorLine(lastFrame()!)).toContain('I-7');
+        const plain = stripAnsi(lastFrame()!);
+        const issueLines = plain.split('\n').filter(l => l.includes('I-'));
+        for (const line of issueLines) {
+            expect(line).not.toContain('Blocked By');
+        }
+    });
+});
+
+describe('HomeView — "Blocks ->" flash on blocked issues', () => {
+    // Test F: selecting non-blocker shows no "Blocks ->"
+    it('selecting non-blocker leaves all titles unchanged (no "Blocks ->")', async () => {
+        const { lastFrame, stdin } = render(
+            <HomeView issues={MOCK_ISSUES_WITH_BLOCKERS} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} />
+        );
+        await tick();
+        // Navigate to I-7 (index 6) which blocks nothing
+        for (let i = 0; i < 6; i++) { stdin.write('\x1b[B'); await tick(); }
+        const plain = stripAnsi(lastFrame()!);
+        const issueLines = plain.split('\n').filter(l => l.includes('I-'));
+        for (const line of issueLines) {
+            expect(line).not.toContain('Blocks');
+        }
+    });
+
+    // Test G: selecting blocker shows "Blocks ->" on blocked issue titles
+    it('selecting blocker shows "Blocks ->" prepended to blocked issue titles', async () => {
+        const { lastFrame, stdin } = render(
+            <HomeView issues={MOCK_ISSUES_WITH_BLOCKERS} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} />
+        );
+        await tick();
+        // Navigate away then back to I-1 to trigger autoFlash
+        stdin.write('\x1b[B'); await tick(); // to I-2
+        stdin.write('\x1b[A'); await tick(); // back to I-1
+        // I-1 blocks I-3 and I-4 — they should show "Blocks ->" in title
+        const plain = stripAnsi(lastFrame()!);
+        const i3Line = plain.split('\n').find(l => l.includes('I-3'));
+        const i4Line = plain.split('\n').find(l => l.includes('I-4'));
+        expect(i3Line).toContain('Blocks ->');
+        expect(i4Line).toContain('Blocks ->');
+        // Other issues should NOT show "Blocks"
+        const i2Line = plain.split('\n').find(l => l.includes('I-2'));
+        const i5Line = plain.split('\n').find(l => l.includes('I-5'));
+        const i6Line = plain.split('\n').find(l => l.includes('I-6'));
+        const i7Line = plain.split('\n').find(l => l.includes('I-7'));
+        const i8Line = plain.split('\n').find(l => l.includes('I-8'));
+        expect(i2Line).not.toContain('Blocks');
+        expect(i5Line).not.toContain('Blocks');
+        expect(i6Line).not.toContain('Blocks');
+        expect(i7Line).not.toContain('Blocks');
+        expect(i8Line).not.toContain('Blocks');
+    });
+
+    // Test G2: Info column is blank on rows showing "Blocks ->"
+    it('"Blocks ->" rows have blank Info column', async () => {
+        const { lastFrame, stdin } = render(
+            <HomeView issues={MOCK_ISSUES_WITH_BLOCKERS} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} />
+        );
+        await tick();
+        stdin.write('\x1b[B'); await tick();
+        stdin.write('\x1b[A'); await tick();
+        const frame = lastFrame()!;
+        // I-3 and I-4 should have blank Info columns (no *, b, or i)
+        const i3Info = extractInfoColumn(issueLineFor(frame, 3)!);
+        const i4Info = extractInfoColumn(issueLineFor(frame, 4)!);
+        expect(i3Info.trim()).toBe('');
+        expect(i4Info.trim()).toBe('');
+    });
+
+    // Test H: "Blocks ->" clears when cursor leaves blocker
+    it('"Blocks ->" clears when cursor moves away from blocker', async () => {
+        const { lastFrame, stdin } = render(
+            <HomeView issues={MOCK_ISSUES_WITH_BLOCKERS} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} />
+        );
+        await tick();
+        // Trigger flash on I-1
+        stdin.write('\x1b[B'); await tick();
+        stdin.write('\x1b[A'); await tick();
+        // Confirm flash is active
+        const before = stripAnsi(lastFrame()!);
+        expect(before.split('\n').find(l => l.includes('I-3'))).toContain('Blocks ->');
+        // Navigate to I-7 (blocks nothing)
+        for (let i = 0; i < 6; i++) { stdin.write('\x1b[B'); await tick(); }
+        const plain = stripAnsi(lastFrame()!);
+        const issueLines = plain.split('\n').filter(l => l.includes('I-'));
+        for (const line of issueLines) {
+            expect(line).not.toContain('Blocks');
+        }
     });
 });
