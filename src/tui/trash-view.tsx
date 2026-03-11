@@ -12,6 +12,37 @@ const COL = {
     days:   8,
 } as const;
 
+// ---- Confirmation modal ----
+
+interface ConfirmModalProps {
+    prompt: string;
+    shortcuts: readonly Shortcut[];
+    columns: number;
+    rows: number;
+}
+
+function ConfirmModal(props: ConfirmModalProps): React.ReactElement {
+    return (
+        <Box justifyContent="center" alignItems="center" width={props.columns} height={props.rows}>
+            <Box flexDirection="column" alignItems="center" borderStyle="single" paddingLeft={1} paddingRight={1}>
+                <Text> </Text>
+                <Text bold color='red'>  {props.prompt}  </Text>
+                <Text> </Text>
+                <Box gap={2} justifyContent="center">
+                    {props.shortcuts.map(s => (
+                        <Text key={s.key}>
+                            <Text>[</Text>
+                            <Text color="cyan" bold>{s.key}</Text>
+                            <Text>] {s.label}</Text>
+                        </Text>
+                    ))}
+                </Box>
+                <Text> </Text>
+            </Box>
+        </Box>
+    );
+}
+
 function center(text: string, width: number): string {
     const pad = width - text.length;
     if (pad <= 0) return text.slice(0, width);
@@ -102,16 +133,9 @@ export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashV
         }
     }, [confirmDeleteInum, confirmEmptyTrash]);
 
-    // Header subtitle override effect
+    // Header subtitle override effect — modal handles prompts now
     useEffect(() => {
-        if (!props.setHeaderSubtitleOverride) return;
-        if (confirmDeleteInum !== null) {
-            props.setHeaderSubtitleOverride("Confirm permanent delete with 'd', Esc to cancel");
-        } else if (confirmEmptyTrash) {
-            props.setHeaderSubtitleOverride("Confirm empty trash with 'e', Esc to cancel");
-        } else {
-            props.setHeaderSubtitleOverride(undefined);
-        }
+        props.setHeaderSubtitleOverride?.(undefined);
     }, [confirmDeleteInum, confirmEmptyTrash]);
 
     useInput((input, key) => {
@@ -166,6 +190,34 @@ export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashV
     const headerPad = ''.padEnd(COL.cursor);
     const headerColumns = `|${center('ID', COL.id)}|${center('Title', titleWidth)}|${center('Days', COL.days)}|`;
 
+    // Confirmation modal replaces the issue list
+    const contentRows = props.terminalProps.rows - props.layoutProps.headerLines - props.layoutProps.footerLines;
+
+    if (confirmDeleteInum !== null) {
+        return (
+            <Box flexDirection="column">
+                <ConfirmModal
+                    prompt={`Really delete I-${confirmDeleteInum}?`}
+                    shortcuts={CONFIRM_DELETE_SHORTCUTS}
+                    columns={props.terminalProps.columns}
+                    rows={contentRows}
+                />
+            </Box>
+        );
+    }
+    if (confirmEmptyTrash) {
+        return (
+            <Box flexDirection="column">
+                <ConfirmModal
+                    prompt="Really empty trash?"
+                    shortcuts={CONFIRM_EMPTY_SHORTCUTS}
+                    columns={props.terminalProps.columns}
+                    rows={contentRows}
+                />
+            </Box>
+        );
+    }
+
     return (
         <Box flexDirection="column">
             {/* header row */}
@@ -176,18 +228,16 @@ export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashV
             {/* issue rows */}
             {props.issues.map((issue, i) => {
                 const selected = i === clampedCursor;
-                const isConfirmTarget = confirmDeleteInum === issue.inum;
                 const innerWidth = titleWidth - 2;
                 const titleText = issue.title.length > innerWidth
                     ? issue.title.slice(0, innerWidth - 3) + '...'
                     : issue.title;
-                const flashColor = isConfirmTarget ? 'red' : undefined;
                 return (
                     <Box key={issue.inum}>
-                        <SelectionCaret selected={selected} confirmHighlight={isConfirmTarget} />
-                        <IssueNum inum={issue.inum} selected={selected} confirmHighlight={isConfirmTarget} />
-                        <Title text={titleText} width={titleWidth} selected={selected} flashColor={flashColor} />
-                        <Days trashedAt={issue.trashed_at!} selected={selected} confirmHighlight={isConfirmTarget} />
+                        <SelectionCaret selected={selected} />
+                        <IssueNum inum={issue.inum} selected={selected} />
+                        <Title text={titleText} width={titleWidth} selected={selected} flashColor={undefined} />
+                        <Days trashedAt={issue.trashed_at!} selected={selected} />
                     </Box>
                 );
             })}

@@ -303,18 +303,40 @@ describe('TrashView -- permanent delete hotkey [d]', () => {
         expect(handler).not.toHaveBeenCalled();
     });
 
-    it('confirm state highlights selected row red', async () => {
+    it('d shows confirmation modal with issue number', async () => {
         const { lastFrame, stdin } = render(
             <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} />
         );
         await tick();
         stdin.write('d'); await tick();
-        const frame = lastFrame()!;
-        const lines = frame.split('\n');
-        const i9Line = lines.find(l => stripAnsi(l).includes('I-9'));
-        expect(i9Line).toBeDefined();
-        // Red ANSI escape: \x1b[31m
-        expect(i9Line).toContain('\x1b[31m');
+        const plain = stripAnsi(lastFrame()!);
+        expect(plain).toContain('Really delete I-9?');
+        expect(plain).toContain('Confirm delete');
+        expect(plain).toContain('Cancel');
+    });
+
+    it('modal replaces issue list (titles not visible during confirm)', async () => {
+        const { lastFrame, stdin } = render(
+            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} />
+        );
+        await tick();
+        stdin.write('d'); await tick();
+        const plain = stripAnsi(lastFrame()!);
+        expect(plain).not.toContain('trashed_blocked_by_five');
+        expect(plain).not.toContain('trashed_blocks_four');
+        expect(plain).not.toContain('trashed_standalone');
+    });
+
+    it('modal disappears after Esc (issue list returns)', async () => {
+        const { lastFrame, stdin } = render(
+            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} />
+        );
+        await tick();
+        stdin.write('d'); await tick();
+        stdin.write('\x1b'); await tick();
+        const plain = stripAnsi(lastFrame()!);
+        expect(plain).not.toContain('Really delete');
+        expect(plain).toContain('trashed_blocked_by_five');
     });
 });
 
@@ -355,6 +377,16 @@ describe('TrashView -- empty trash hotkey [e]', () => {
         stdin.write('\x1b'); await settle();
         expect(handler).not.toHaveBeenCalled();
     });
+
+    it('e shows empty trash confirmation modal', async () => {
+        const { lastFrame, stdin } = render(
+            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} />
+        );
+        await tick();
+        stdin.write('e'); await tick();
+        const plain = stripAnsi(lastFrame()!);
+        expect(plain).toContain('Really empty trash?');
+    });
 });
 
 // ---- Header subtitle override ----
@@ -363,7 +395,7 @@ describe('TrashView -- header subtitle override', () => {
     beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(FIXED_NOW); });
     afterEach(() => { vi.restoreAllMocks(); });
 
-    it('sets subtitle override during delete confirmation', async () => {
+    it('does not set subtitle override during delete confirmation (modal handles it)', async () => {
         const handler = vi.fn();
         const { stdin } = render(
             <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} setHeaderSubtitleOverride={handler} />
@@ -371,10 +403,11 @@ describe('TrashView -- header subtitle override', () => {
         await settle();
         handler.mockClear();
         stdin.write('d'); await settle();
-        expect(handler).toHaveBeenCalledWith(expect.stringContaining('delete'));
+        // Should always clear (undefined), never set a string
+        expect(handler).toHaveBeenCalledWith(undefined);
     });
 
-    it('sets subtitle override during empty trash confirmation', async () => {
+    it('does not set subtitle override during empty trash confirmation (modal handles it)', async () => {
         const handler = vi.fn();
         const { stdin } = render(
             <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} setHeaderSubtitleOverride={handler} />
@@ -382,7 +415,7 @@ describe('TrashView -- header subtitle override', () => {
         await settle();
         handler.mockClear();
         stdin.write('e'); await settle();
-        expect(handler).toHaveBeenCalledWith(expect.stringContaining('empty'));
+        expect(handler).toHaveBeenCalledWith(undefined);
     });
 
     it('clears subtitle override after cancellation', async () => {
