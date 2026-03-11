@@ -778,7 +778,7 @@ describe('HomeView — Info column + blocking indicators', () => {
             <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} setHeaderSubtitleOverride={subtitleSpy} />
         );
         await tick();
-        expect(subtitleSpy).toHaveBeenCalledWith("Info: '*' unread  'i' needs input");
+        expect(subtitleSpy).toHaveBeenCalledWith("Info: (*) unread, (i) needs input");
     });
 
     // Test C: no static 'b' in Info column (blocking shown via title flash only)
