@@ -44,6 +44,8 @@ function getSubtitle(view: View, threadInfo?: { inThread: boolean }): string {
             return 'Issues grouped by container';
         case ViewType.IssuePicker:
             return view.mode === 'blockedBy' ? 'Select blocking issues' : 'Select blocked issues';
+        case ViewType.Trash:
+            return 'Trashed issues pending deletion';
         default:
             return assertNever(view);
     }

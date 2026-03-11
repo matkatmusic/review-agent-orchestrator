@@ -79,6 +79,14 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
         { key: inkKey(Ink_keyofKeys_Choices.ESCAPE), label: 'Close' },
         { key: 'q',     label: 'Quit' },
     ],
+    [ViewType.Trash]: [
+        { key: 'r', label: 'Restore' },
+        { key: 'd', label: 'Delete' },
+        { key: 'e', label: 'Empty trash' },
+        { key: comboKey(KeyCombinations.SCROLL_UP_DOWN), label: 'Navigate' },
+        { key: 'Esc', label: 'Back' },
+        { key: 'q', label: 'Quit' },
+    ],
 };
 
 const dimShortcut: Shortcut = { key: comboKey(KeyCombinations.SHIFT_D), label: 'Dim unrelated issues' };
@@ -90,10 +98,21 @@ export const STATUS_SHORTCUTS: Record<IssueStatus, readonly Shortcut[]> = {
     [IssueStatus.Deferred]: [{ key: 'e', label: 'Enqueue' }, { key: 'r', label: 'Resolve' }, { key: 'x', label: 'Trash' }, dimShortcut, { key: 'q', label: 'Quit' }],
     [IssueStatus.Resolved]: [{ key: 'e', label: 'Add comment to re-enqueue' }, { key: 'x', label: 'Trash' }, dimShortcut, { key: 'q', label: 'Quit' }],
     [IssueStatus.Trashed]:  [dimShortcut, { key: 'q', label: 'Quit' }],
+    [IssueStatus.Inactive]: [{ key: 'f', label: 'Activate' }, { key: 'e', label: 'Enqueue' }, { key: 'x', label: 'Trash' }, dimShortcut, { key: 'q', label: 'Quit' }],
 };
 
 export const CONFIRM_TRASH_SHORTCUTS: readonly Shortcut[] = [
     { key: 'x', label: 'Confirm trash' },
+    { key: 'Esc', label: 'Cancel' },
+];
+
+export const CONFIRM_DELETE_SHORTCUTS: readonly Shortcut[] = [
+    { key: 'd', label: 'Confirm delete' },
+    { key: 'Esc', label: 'Cancel' },
+];
+
+export const CONFIRM_EMPTY_SHORTCUTS: readonly Shortcut[] = [
+    { key: 'e', label: 'Confirm empty trash' },
     { key: 'Esc', label: 'Cancel' },
 ];
 

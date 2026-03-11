@@ -24,6 +24,7 @@ const rts = (el: React.JSX.Element) => renderToString(el, { columns: cols });
 const allViews: ViewType[] = [
     ViewType.Home, ViewType.Detail, ViewType.NewIssue,
     ViewType.AgentStatus, ViewType.BlockingMap, ViewType.GroupView,
+    ViewType.Trash,
 ];
 
 // Derive ANSI open codes from chalk (avoids hardcoding escape sequences)
@@ -261,6 +262,7 @@ describe('Footer — footer shows correct shortcuts for each non-Detail ViewType
         ViewType.BlockingMap,
         ViewType.GroupView,
         ViewType.IssuePicker,
+        ViewType.Trash,
     ];
 
     it('each non-Detail view renders all its shortcut keys and labels', () => {

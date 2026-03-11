@@ -30,6 +30,7 @@ const [
     { AppShell },
     { ViewType },
     { HomeView },
+    { TrashView },
     { useMockStore },
 ] = await Promise.all([
     import('react'),
@@ -37,6 +38,7 @@ const [
     import('./app-shell.js'),
     import('./views.js'),
     import('./home-view.js'),
+    import('./trash-view.js'),
     import('./use-mock-store.js'),
 ]);
 
@@ -77,7 +79,8 @@ export function AppWrapper() {
         }
     }, [stream, onResize]);
 
-    const currentView: View = { type: ViewType.Home };
+    // TEMPORARY: revert to ViewType.Home when Trash debugging is done
+    const currentView: View = { type: ViewType.Trash };
 
     return (
         <AppShell
@@ -88,16 +91,16 @@ export function AppWrapper() {
             unreadCount={mockStoreWithUpdater.mockDataStore.unreadInums.size}
         >
             {(setFooterOptions, setFooterShortcuts, terminal, layout, setHeaderSubtitleOverride) => (
-                <HomeView
-                    issues={mockStoreWithUpdater.mockDataStore.issues.filter(i => i.status !== IssueStatus.Trashed)}
-                    unreadInums={mockStoreWithUpdater.mockDataStore.unreadInums}
-                    maxAgents={mockStoreWithUpdater.mockDataStore.maxAgents}
+                // TEMPORARY: swap back to HomeView when Trash debugging is done
+                <TrashView
+                    issues={mockStoreWithUpdater.mockDataStore.issues.filter(i => i.status === IssueStatus.Trashed)}
                     terminalProps={terminal}
                     layoutProps={layout}
-                    onStatusHotkeyPressed={mockStoreWithUpdater.updateIssueStatusCallback}
                     setFooterShortcuts={setFooterShortcuts}
-                    onTrashIssue={mockStoreWithUpdater.trashIssueCallback}
                     setHeaderSubtitleOverride={setHeaderSubtitleOverride}
+                    onRestoreIssue={mockStoreWithUpdater.restoreIssueCallback}
+                    onPermanentDelete={mockStoreWithUpdater.permanentDeleteCallback}
+                    onEmptyTrash={mockStoreWithUpdater.emptyTrashCallback}
                 />
             )}
         </AppShell>

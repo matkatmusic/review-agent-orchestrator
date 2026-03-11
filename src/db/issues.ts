@@ -131,6 +131,7 @@ export function getStatusCounts(db: DB): Record<IssueStatus, number> {
         [IssueStatus.Deferred]: 0,
         [IssueStatus.Resolved]: 0,
         [IssueStatus.Trashed]: 0,
+        [IssueStatus.Inactive]: 0,
     };
     for (const row of rows) {
         counts[row.status] = row.count;

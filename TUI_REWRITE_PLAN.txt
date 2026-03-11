@@ -492,7 +492,7 @@ Req coverage: REQ-SHELL-001, REQ-SHELL-002, REQ-SHELL-003,
     - Columns: cursor(2) | ID(5) | Title(variable) | Days(8)
     - Days column: floor((now - trashed_at) / 86400000) + 'd'
     - Cursor navigation: Up/Down arrows
-    - Empty state: "Trash is empty."
+    - Empty state: "Trash is empty." centered in the view.
 
   Substep 1.5c: Trash view footer hotkeys
   ........................................

@@ -8,6 +8,9 @@ export interface MockStoreWithUpdater {
     mockDataStore: MockStore;
     updateIssueStatusCallback: (changedStatusProps: ChangedStatusProps) => void;
     trashIssueCallback: (inum: number) => void;
+    restoreIssueCallback: (inum: number) => void;
+    permanentDeleteCallback: (inum: number) => void;
+    emptyTrashCallback: () => void;
 }
 
 function isBlockerCleared(status: IssueStatus): boolean {
@@ -28,13 +31,25 @@ function cascadeUnblock(issues: import('../types.js').Issue[], changedInum: numb
     });
 }
 
+function syncDetailData(prev: MockStore, updatedIssues: import('../types.js').Issue[]): Record<number, import('./mock-data.js').DetailMockData> {
+    const updatedDetailData = { ...prev.detailData };
+    for (const issue of updatedIssues) {
+        if (updatedDetailData[issue.inum]) {
+            updatedDetailData[issue.inum] = {
+                ...updatedDetailData[issue.inum],
+                issue,
+            };
+        }
+    }
+    return updatedDetailData;
+}
+
 export function useMockStore(): MockStoreWithUpdater {
     const [mockDataStore, updateMockStoreData] = useState<MockStore>(() => loadMockData());
 
     const updateIssueStatusCallback = useCallback(
         (changedStatusProps: ChangedStatusProps) => {
             updateMockStoreData((prev) => {
-                // 1. Immutable update of the target issue
                 let updatedIssues = prev.issues.map((issue) =>
                     issue.inum === changedStatusProps.inum
                         ? {
@@ -48,26 +63,14 @@ export function useMockStore(): MockStoreWithUpdater {
                         : issue,
                 );
 
-                // 2. Cascade: unblock issues whose blockers are all now resolved/trashed
                 if (isBlockerCleared(changedStatusProps.newStatus)) {
                     updatedIssues = cascadeUnblock(updatedIssues, changedStatusProps.inum);
-                }
-
-                // 3. Sync detailData issue references to new Issue objects
-                const updatedDetailData = { ...prev.detailData };
-                for (const issue of updatedIssues) {
-                    if (updatedDetailData[issue.inum]) {
-                        updatedDetailData[issue.inum] = {
-                            ...updatedDetailData[issue.inum],
-                            issue,
-                        };
-                    }
                 }
 
                 const next: MockStore = {
                     ...prev,
                     issues: updatedIssues,
-                    detailData: updatedDetailData,
+                    detailData: syncDetailData(prev, updatedIssues),
                 };
 
                 saveMockData(next);
@@ -90,13 +93,130 @@ export function useMockStore(): MockStoreWithUpdater {
                         : issue,
                 );
 
-                // Cascade: unblock issues whose blockers are all now resolved/trashed
+                updatedIssues = cascadeUnblock(updatedIssues, inum);
+
+                const updatedUnreadInums = new Set(prev.unreadInums);
+                updatedUnreadInums.delete(inum);
+
+                const next: MockStore = {
+                    ...prev,
+                    issues: updatedIssues,
+                    unreadInums: updatedUnreadInums,
+                    detailData: syncDetailData(prev, updatedIssues),
+                };
+
+                saveMockData(next);
+                return next;
+            });
+        },
+        [],
+    );
+
+    const restoreIssueCallback = useCallback(
+        (inum: number) => {
+            updateMockStoreData((prev) => {
+                const updatedIssues = prev.issues.map((issue) =>
+                    issue.inum === inum
+                        ? { ...issue, status: IssueStatus.Inactive, trashed_at: null }
+                        : issue,
+                );
+
+                const next: MockStore = {
+                    ...prev,
+                    issues: updatedIssues,
+                    detailData: syncDetailData(prev, updatedIssues),
+                };
+
+                saveMockData(next);
+                return next;
+            });
+        },
+        [],
+    );
+
+    const permanentDeleteCallback = useCallback(
+        (inum: number) => {
+            updateMockStoreData((prev) => {
+                // Remove the issue
+                let updatedIssues = prev.issues.filter((issue) => issue.inum !== inum);
+
+                // Clean up blocked_by references
+                updatedIssues = updatedIssues.map((issue) =>
+                    issue.blocked_by.includes(inum)
+                        ? { ...issue, blocked_by: issue.blocked_by.filter((bi) => bi !== inum) }
+                        : issue,
+                );
+
+                // Cascade unblock for issues that were blocked by the deleted inum
                 updatedIssues = cascadeUnblock(updatedIssues, inum);
 
                 const updatedUnreadInums = new Set(prev.unreadInums);
                 updatedUnreadInums.delete(inum);
 
                 const updatedDetailData = { ...prev.detailData };
+                delete updatedDetailData[inum];
+                // Sync remaining issues
+                for (const issue of updatedIssues) {
+                    if (updatedDetailData[issue.inum]) {
+                        updatedDetailData[issue.inum] = {
+                            ...updatedDetailData[issue.inum],
+                            issue,
+                        };
+                    }
+                }
+
+                const next: MockStore = {
+                    ...prev,
+                    issues: updatedIssues,
+                    unreadInums: updatedUnreadInums,
+                    detailData: updatedDetailData,
+                };
+
+                saveMockData(next);
+                return next;
+            });
+        },
+        [],
+    );
+
+    const emptyTrashCallback = useCallback(
+        () => {
+            updateMockStoreData((prev) => {
+                const trashedInums = new Set(
+                    prev.issues
+                        .filter((i) => i.status === IssueStatus.Trashed)
+                        .map((i) => i.inum),
+                );
+
+                // Remove all trashed issues
+                let updatedIssues = prev.issues.filter(
+                    (issue) => issue.status !== IssueStatus.Trashed,
+                );
+
+                // Clean up blocked_by references for all deleted inums
+                updatedIssues = updatedIssues.map((issue) => {
+                    const filteredBlockedBy = issue.blocked_by.filter(
+                        (bi) => !trashedInums.has(bi),
+                    );
+                    return filteredBlockedBy.length !== issue.blocked_by.length
+                        ? { ...issue, blocked_by: filteredBlockedBy }
+                        : issue;
+                });
+
+                // Cascade unblock
+                for (const deletedInum of trashedInums) {
+                    updatedIssues = cascadeUnblock(updatedIssues, deletedInum);
+                }
+
+                const updatedUnreadInums = new Set(prev.unreadInums);
+                for (const inum of trashedInums) {
+                    updatedUnreadInums.delete(inum);
+                }
+
+                const updatedDetailData = { ...prev.detailData };
+                for (const inum of trashedInums) {
+                    delete updatedDetailData[inum];
+                }
                 for (const issue of updatedIssues) {
                     if (updatedDetailData[issue.inum]) {
                         updatedDetailData[issue.inum] = {
@@ -124,6 +244,9 @@ export function useMockStore(): MockStoreWithUpdater {
         mockDataStore: mockDataStore,
         updateIssueStatusCallback: updateIssueStatusCallback,
         trashIssueCallback: trashIssueCallback,
+        restoreIssueCallback: restoreIssueCallback,
+        permanentDeleteCallback: permanentDeleteCallback,
+        emptyTrashCallback: emptyTrashCallback,
     };
     return result;
 }

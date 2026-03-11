@@ -6,6 +6,7 @@ export enum ViewType {
     BlockingMap,
     GroupView,
     IssuePicker,
+    Trash,
 }
 
 export const ViewTypeStringsMap = new Map<ViewType, string>([
@@ -16,6 +17,7 @@ export const ViewTypeStringsMap = new Map<ViewType, string>([
     [ViewType.BlockingMap, "Blocking Map"],
     [ViewType.GroupView, "Group View"],
     [ViewType.IssuePicker, "Issue Picker"],
+    [ViewType.Trash, "Trash"],
 ]);
 
 export type View =
@@ -25,7 +27,8 @@ export type View =
     | { type: ViewType.AgentStatus }
     | { type: ViewType.BlockingMap }
     | { type: ViewType.GroupView }
-    | { type: ViewType.IssuePicker; mode: 'blockedBy' | 'blocks'; inum: number };
+    | { type: ViewType.IssuePicker; mode: 'blockedBy' | 'blocks'; inum: number }
+    | { type: ViewType.Trash };
 
 export interface TerminalProps {
     columns: number;
