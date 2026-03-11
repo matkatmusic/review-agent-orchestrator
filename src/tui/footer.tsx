@@ -112,7 +112,7 @@ export const CONFIRM_DELETE_SHORTCUTS: readonly Shortcut[] = [
 ];
 
 export const CONFIRM_EMPTY_SHORTCUTS: readonly Shortcut[] = [
-    { key: 'e', label: 'Confirm empty trash' },
+    { key: '"empty" + Enter', label: 'Confirm' },
     { key: 'Esc', label: 'Cancel' },
 ];
 

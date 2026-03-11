@@ -8,7 +8,7 @@ import { IssueStatus } from '../types.js';
 import type { TerminalProps, LayoutProps } from './views.js';
 import { VIEW_SHORTCUTS } from './footer.js';
 import { ViewType } from './views.js';
-import { CONFIRM_DELETE_SHORTCUTS, CONFIRM_EMPTY_SHORTCUTS } from './footer.js';
+
 
 function makeTrashedIssue(overrides: Partial<Issue> & { inum: number; title: string; trashed_at: string }): Issue {
     return {
@@ -188,7 +188,7 @@ describe('TrashView -- setFooterShortcuts', () => {
         expect(handler).toHaveBeenCalledWith(VIEW_SHORTCUTS[ViewType.Trash]);
     });
 
-    it('calls setFooterShortcuts with confirm delete shortcuts when d pressed', async () => {
+    it('hides footer shortcuts when d pressed (delete modal)', async () => {
         const handler = vi.fn();
         const { stdin } = render(
             <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} setFooterShortcuts={handler} />
@@ -197,10 +197,10 @@ describe('TrashView -- setFooterShortcuts', () => {
         handler.mockClear();
         stdin.write('d');
         await settle();
-        expect(handler).toHaveBeenCalledWith(CONFIRM_DELETE_SHORTCUTS);
+        expect(handler).toHaveBeenCalledWith([]);
     });
 
-    it('calls setFooterShortcuts with confirm empty shortcuts when e pressed', async () => {
+    it('hides footer shortcuts when e pressed (empty trash modal)', async () => {
         const handler = vi.fn();
         const { stdin } = render(
             <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} setFooterShortcuts={handler} />
@@ -209,7 +209,7 @@ describe('TrashView -- setFooterShortcuts', () => {
         handler.mockClear();
         stdin.write('e');
         await settle();
-        expect(handler).toHaveBeenCalledWith(CONFIRM_EMPTY_SHORTCUTS);
+        expect(handler).toHaveBeenCalledWith([]);
     });
 
     it('restores Trash view shortcuts after Esc cancels', async () => {
@@ -356,14 +356,16 @@ describe('TrashView -- empty trash hotkey [e]', () => {
         expect(handler).not.toHaveBeenCalled();
     });
 
-    it('e e calls onEmptyTrash', async () => {
+    it('typing "empty" + Enter after e calls onEmptyTrash', async () => {
         const handler = vi.fn();
         const { stdin } = render(
             <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} onEmptyTrash={handler} />
         );
         await tick();
         stdin.write('e'); await settle();
-        stdin.write('e'); await settle();
+        for (const ch of 'empty') { stdin.write(ch); await settle(); }
+        expect(handler).not.toHaveBeenCalled();
+        stdin.write('\r'); await settle();
         expect(handler).toHaveBeenCalledOnce();
     });
 
@@ -378,12 +380,90 @@ describe('TrashView -- empty trash hotkey [e]', () => {
         expect(handler).not.toHaveBeenCalled();
     });
 
-    it('e shows empty trash confirmation modal', async () => {
+    it('e shows type-to-confirm modal', async () => {
         const { lastFrame, stdin } = render(
             <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} />
         );
         await tick();
         stdin.write('e'); await tick();
+        const plain = stripAnsi(lastFrame()!);
+        expect(plain).toContain('Really empty trash?');
+        expect(plain).toContain('Type empty');
+        expect(plain).toContain('Cancel');
+        expect(plain).not.toContain('To Confirm');
+    });
+
+    it('modal shows Enter confirm after typing full word', async () => {
+        const { lastFrame, stdin } = render(
+            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} />
+        );
+        await tick();
+        stdin.write('e'); await settle();
+        for (const ch of 'empty') { stdin.write(ch); await settle(); }
+        const plain = stripAnsi(lastFrame()!);
+        expect(plain).toContain('[Enter] To Confirm');
+        expect(plain).toContain('[Esc] Cancel');
+    });
+
+    it('partial typing shows progress without confirming', async () => {
+        const handler = vi.fn();
+        const { lastFrame, stdin } = render(
+            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} onEmptyTrash={handler} />
+        );
+        await tick();
+        stdin.write('e'); await settle();
+        stdin.write('e'); await settle();
+        stdin.write('m'); await settle();
+        expect(handler).not.toHaveBeenCalled();
+        const plain = stripAnsi(lastFrame()!);
+        expect(plain).toContain('Really empty trash?');
+    });
+
+    it('backspace removes last typed character', async () => {
+        const handler = vi.fn();
+        const { lastFrame, stdin } = render(
+            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} onEmptyTrash={handler} />
+        );
+        await tick();
+        stdin.write('e'); await settle(); // enter confirm mode
+        stdin.write('e'); await settle(); // type 'e'
+        stdin.write('m'); await settle(); // type 'm'
+        stdin.write('\x7f'); await settle(); // backspace — buffer back to 'e'
+        // Still in confirm mode, not confirmed
+        expect(handler).not.toHaveBeenCalled();
+        const plain = stripAnsi(lastFrame()!);
+        expect(plain).toContain('Really empty trash?');
+    });
+
+    it('wrong character is silently ignored', async () => {
+        const handler = vi.fn();
+        const { stdin } = render(
+            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} onEmptyTrash={handler} />
+        );
+        await tick();
+        stdin.write('e'); await settle(); // enter confirm mode
+        stdin.write('e'); await settle(); // type 'e'
+        stdin.write('x'); await settle(); // wrong char — ignored
+        stdin.write('m'); await settle(); // 'm' still works (buffer is 'e')
+        stdin.write('p'); await settle();
+        stdin.write('t'); await settle();
+        stdin.write('y'); await settle();
+        expect(handler).not.toHaveBeenCalled();
+        stdin.write('\r'); await settle();
+        expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it('Enter before typing full word does nothing', async () => {
+        const handler = vi.fn();
+        const { lastFrame, stdin } = render(
+            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} onEmptyTrash={handler} />
+        );
+        await tick();
+        stdin.write('e'); await settle(); // enter confirm mode
+        stdin.write('e'); await settle(); // type 'e'
+        stdin.write('m'); await settle(); // type 'm'
+        stdin.write('\r'); await settle(); // Enter — word incomplete
+        expect(handler).not.toHaveBeenCalled();
         const plain = stripAnsi(lastFrame()!);
         expect(plain).toContain('Really empty trash?');
     });

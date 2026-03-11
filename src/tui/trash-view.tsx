@@ -4,7 +4,7 @@ import type { Issue } from '../types.js';
 import type { TerminalProps, LayoutProps } from './views.js';
 import { ViewType } from './views.js';
 import type { Shortcut } from './footer.js';
-import { VIEW_SHORTCUTS, CONFIRM_DELETE_SHORTCUTS, CONFIRM_EMPTY_SHORTCUTS } from './footer.js';
+import { VIEW_SHORTCUTS, CONFIRM_DELETE_SHORTCUTS } from './footer.js';
 
 const COL = {
     cursor: 2,
@@ -37,6 +37,41 @@ function ConfirmModal(props: ConfirmModalProps): React.ReactElement {
                         </Text>
                     ))}
                 </Box>
+                <Text> </Text>
+            </Box>
+        </Box>
+    );
+}
+
+interface TypeToConfirmModalProps {
+    prompt: string;
+    targetWord: string;
+    typed: string;
+    columns: number;
+    rows: number;
+}
+
+function TypeToConfirmModal(props: TypeToConfirmModalProps): React.ReactElement {
+    return (
+        <Box justifyContent="center" alignItems="center" width={props.columns} height={props.rows}>
+            <Box flexDirection="column" alignItems="center" borderStyle="single" paddingLeft={1} paddingRight={1}>
+                <Text> </Text>
+                <Text bold color="red">  {props.prompt}  </Text>
+                <Text> </Text>
+                <Box>
+                    <Text>  Type </Text>
+                    {[...props.targetWord].map((char, i) => (
+                        <Text key={i} bold={i < props.typed.length} color={i < props.typed.length ? 'green' : undefined} dimColor={i >= props.typed.length}>
+                            {char}
+                        </Text>
+                    ))}
+                    <Text>  </Text>
+                </Box>
+                <Text> </Text>
+                {props.typed === props.targetWord
+                    ? <Box gap={2}><Text>[<Text color="cyan" bold>Enter</Text>] To Confirm</Text><Text>[<Text color="cyan" bold>Esc</Text>] Cancel</Text></Box>
+                    : <Text>[<Text color="cyan" bold>Esc</Text>] Cancel</Text>
+                }
                 <Text> </Text>
             </Box>
         </Box>
@@ -115,7 +150,8 @@ export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashV
     cursorRef.current = cursor;
 
     const [confirmDeleteInum, setConfirmDeleteInum] = useState<number | null>(null);
-    const [confirmEmptyTrash, setConfirmEmptyTrash] = useState(false);
+    const [emptyTrashTyped, setEmptyTrashTyped] = useState<string | null>(null);
+    const confirmEmptyTrash = emptyTrashTyped !== null;
 
     const clampedCursor = props.issues.length > 0
         ? Math.min(cursor, props.issues.length - 1)
@@ -124,14 +160,15 @@ export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashV
     // Footer shortcuts effect
     useEffect(() => {
         if (!props.setFooterShortcuts) return;
-        if (confirmDeleteInum !== null) {
-            props.setFooterShortcuts(CONFIRM_DELETE_SHORTCUTS);
-        } else if (confirmEmptyTrash) {
-            props.setFooterShortcuts(CONFIRM_EMPTY_SHORTCUTS);
-        } else {
-            props.setFooterShortcuts(VIEW_SHORTCUTS[ViewType.Trash]);
-        }
-    }, [confirmDeleteInum, confirmEmptyTrash]);
+        const shortcuts = (() => {
+            if (confirmDeleteInum !== null || confirmEmptyTrash)
+                return [];
+            return VIEW_SHORTCUTS[ViewType.Trash].filter(
+                s => props.issues.length > 0 || s.key === 'Esc' || s.key === 'q'
+            );
+        })();
+        props.setFooterShortcuts(shortcuts);
+    }, [confirmDeleteInum, confirmEmptyTrash, props.issues.length]);
 
     // Header subtitle override effect — modal handles prompts now
     useEffect(() => {
@@ -151,12 +188,20 @@ export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashV
         }
 
         // Empty trash confirmation state machine
-        if (confirmEmptyTrash) {
-            if (input === 'e') {
+        if (emptyTrashTyped !== null) {
+            if (key.escape) {
+                setEmptyTrashTyped(null);
+            } else if (key.backspace || key.delete) {
+                setEmptyTrashTyped(prev => prev!.slice(0, -1));
+            } else if (key.return && emptyTrashTyped === 'empty') {
                 props.onEmptyTrash?.();
-                setConfirmEmptyTrash(false);
-            } else if (key.escape) {
-                setConfirmEmptyTrash(false);
+                setEmptyTrashTyped(null);
+            } else if (input && input.length === 1) {
+                const next = emptyTrashTyped + input;
+                if ('empty'.startsWith(next)) {
+                    setEmptyTrashTyped(next);
+                }
+                // else: ignore characters that don't match the expected sequence
             }
             return;
         }
@@ -173,14 +218,16 @@ export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashV
             const idx = Math.min(cursorRef.current, Math.max(0, props.issues.length - 1));
             setConfirmDeleteInum(props.issues[idx].inum);
         } else if (input === 'e' && props.issues.length > 0) {
-            setConfirmEmptyTrash(true);
+            setEmptyTrashTyped('');
         }
     });
 
+    const contentRows = props.terminalProps.rows - props.layoutProps.headerLines - props.layoutProps.footerLines;
+
     if (props.issues.length === 0) {
         return (
-            <Box flexDirection="column">
-                <Text dimColor>  Trash is empty.</Text>
+            <Box justifyContent="center" alignItems="center" width={props.terminalProps.columns} height={contentRows}>
+                <Text dimColor>Trash is empty.</Text>
             </Box>
         );
     }
@@ -190,8 +237,6 @@ export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashV
     const headerPad = ''.padEnd(COL.cursor);
     const headerColumns = `|${center('ID', COL.id)}|${center('Title', titleWidth)}|${center('Days', COL.days)}|`;
 
-    // Confirmation modal replaces the issue list
-    const contentRows = props.terminalProps.rows - props.layoutProps.headerLines - props.layoutProps.footerLines;
 
     if (confirmDeleteInum !== null) {
         return (
@@ -205,12 +250,13 @@ export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashV
             </Box>
         );
     }
-    if (confirmEmptyTrash) {
+    if (emptyTrashTyped !== null) {
         return (
             <Box flexDirection="column">
-                <ConfirmModal
+                <TypeToConfirmModal
                     prompt="Really empty trash?"
-                    shortcuts={CONFIRM_EMPTY_SHORTCUTS}
+                    targetWord="empty"
+                    typed={emptyTrashTyped}
                     columns={props.terminalProps.columns}
                     rows={contentRows}
                 />
