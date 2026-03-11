@@ -7,6 +7,7 @@ All changes in `src/tui/home-view.tsx` and `src/tui/home-view.test.tsx`.
 Conform to coding styles defined in the AP-0xx clauses in TUI_REWRITE_REQUIREMENTS.txt
 
 ---
+When selecting an issue that blocks other issues, make all non-blocked issues' title text dim and Do not flash the blocked issue; just show 'Blocks ->' before the blocked issue's title.
 
 ## Phase 1 — RED: Write failing tests
 

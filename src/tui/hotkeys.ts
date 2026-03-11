@@ -61,6 +61,7 @@ export enum KeyCombinations {
     CTRL_SHIFT_LEFT_ARROW,
     CTRL_SHIFT_RIGHT_ARROW,
     CTRL_R,
+    SHIFT_D,
     ALT_H,
     ALT_Q,
     CTRL_ALT_Q,
@@ -76,6 +77,8 @@ export function getHotKeyLabel(keyCombo: KeyCombinations): string {
             return InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.CONTROL)! + ' ' + InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.SHIFT)! + ' ' + InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.RIGHT_ARROW)!;
         case KeyCombinations.CTRL_R:
             return InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.CONTROL)! + ' ' + 'r';
+        case KeyCombinations.SHIFT_D:
+            return 'D';
         case KeyCombinations.ALT_H:
             return InkKeyOfKeysStringMap.get(Ink_keyofKeys_Choices.META_ALT)! + ' ' + 'h';
         case KeyCombinations.ALT_Q:
@@ -109,6 +112,8 @@ export function matchesKeyCombination(keyCombo: KeyCombinations, input: string, 
             return matchesKey(key, Ink_keyofKeys_Choices.CONTROL)
                 && !matchesKey(key, Ink_keyofKeys_Choices.SHIFT)
                 && input === 'r';
+        case KeyCombinations.SHIFT_D:
+            return input === 'D';
         case KeyCombinations.ALT_H:
             return (matchesKey(key, Ink_keyofKeys_Choices.META_ALT) && input === 'h')
                 || input === '\u02D9';

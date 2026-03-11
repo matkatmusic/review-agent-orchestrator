@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { Issue, ChangedStatusProps } from '../types.js';
 import { IssueStatus, IssueStatusStringsMap } from '../types.js';
@@ -6,15 +6,18 @@ import { statusToColor } from './status-color.js';
 import type { TerminalProps, LayoutProps } from './views.js';
 import type { Shortcut } from './footer.js';
 import { STATUS_SHORTCUTS, CONFIRM_TRASH_SHORTCUTS } from './footer.js';
+import { KeyCombinations, matchesKeyCombination } from './hotkeys.js';
+import { Header } from './header.js';
+import { text } from 'stream/consumers';
 
 const COL = {
     cursor: 2,
     id:     5,
-    unread: 8,
+    info:   8,
     status: 10,
 } as const;
 
-const SHOW_COLUMN_SEPARATORS = false;
+const SHOW_COLUMN_SEPARATORS = true;
 
 function center(text: string, width: number): string {
     const pad = width - text.length;
@@ -23,70 +26,229 @@ function center(text: string, width: number): string {
     return ' '.repeat(left) + text + ' '.repeat(pad - left);
 }
 
-function bracketCenter(text: string, width: number, arrows: boolean): string {
+function padCenter(text: string, width: number): string {
     const inner = center(text, width - 2);
-    return arrows ? `>${inner}<` : ` ${inner} `;
+    return ` ${inner} `;
+}
+
+function padToLength(str: string, maxLength: number): string {
+    while( str.length < maxLength )
+    {
+        str = ' ' + str;
+        if( str.length >= maxLength )
+            break;
+        str += ' ';
+    }
+    return str;
 }
 
 const columnSeparator = SHOW_COLUMN_SEPARATORS ? '|' : ' ';
 
-interface SelectionCaretProps { selected: boolean; confirmHighlight?: boolean; }
-function SelectionCaret(selectionCaretProps: SelectionCaretProps): React.ReactElement {
-    const colorToUse = selectionCaretProps.confirmHighlight ? 'red' : selectionCaretProps.selected ? 'cyan' : undefined;
-    const selectionCaret = selectionCaretProps.selected ? '\u25B8 ' : '  ';
+interface TextColumnProps {
+    text: string;
+    selected: boolean;
+    color: string | undefined;
+    dimmed?: boolean;
+}
+
+function Column(columnProps: TextColumnProps): React.ReactElement {
+    const color = columnProps.dimmed && !columnProps.color ? 'gray' : columnProps.color;
     return (
-        <Text color={colorToUse} bold={selectionCaretProps.selected}>
-            {selectionCaret}
+        <Text color={color} bold={columnProps.selected} dimColor={columnProps.dimmed}>
+            {columnProps.text}
         </Text>
     );
 }
 
-interface IssueNumProps { inum: number; selected: boolean; confirmHighlight?: boolean; }
-function IssueNum(issueNumProps: IssueNumProps): React.ReactElement {
-    const colorToUse = issueNumProps.confirmHighlight ? 'red' : issueNumProps.selected ? 'cyan' : undefined;
-    const idLabel = center(`I-${issueNumProps.inum}`, COL.id);
+function PipedSeparatorColumn() : React.ReactElement {
+    let columnProps: TextColumnProps = {
+        text: '|',
+        selected: false,
+        color: 'gray',
+    }
+    return Column(columnProps);
+}
+
+function BlankSeparatorColumn() : React.ReactElement {
+    let columnProps: TextColumnProps = {
+        text: ' ',
+        selected: false,
+        color: 'gray',
+    };
+    return Column(columnProps);
+}
+
+function TextWithSpaces(textColumnProps: TextColumnProps) : React.ReactElement {
+    let columnProps: TextColumnProps = {
+        ...textColumnProps,
+        text: ' ' + textColumnProps.text + ' ',
+    };
+    return Column(columnProps);
+}
+
+interface CenteredTextInFixedWidthProps extends TextColumnProps {
+    width: number;
+}
+
+function CenteredTextInFixedWidth(props: CenteredTextInFixedWidthProps) : React.ReactElement {
     return (
-        <Text color={colorToUse} bold={issueNumProps.selected}>
-            {columnSeparator}{idLabel}
-        </Text>
+        <Box width={props.width} justifyContent="center">
+            <TextWithSpaces text={props.text} selected={props.selected} color={props.color} />
+        </Box>
     );
 }
 
-interface UnreadMarkerProps { unread: boolean; }
-function UnreadMarker(unreadMarkerProps: UnreadMarkerProps): React.ReactElement {
-    const markerText = unreadMarkerProps.unread ? '\u2731' : ' ';
-    const centeredMarker = center(markerText, COL.unread);
+const enum HeaderColumns {
+    ID, 
+    Info,
+    Title,
+    Status,
+};
+
+const HeaderTitlesStringMap = new Map<HeaderColumns, string>([
+    [HeaderColumns.ID, "ID#"],
+    [HeaderColumns.Info, "Info"],
+    [HeaderColumns.Title, "Title"],
+    [HeaderColumns.Status, "Status"]
+]);
+
+function getTitleWidth(terminalProps: TerminalProps) : number 
+{
+    let numColumns = terminalProps.columns;
+    const caretWidth = 1;
+    const blankCharWidth = 1;
+    const pipeCharWidth = 1;
+    const idWidth = HeaderTitlesStringMap.get(HeaderColumns.ID)!.length + 2;
+    const infoWidth = HeaderTitlesStringMap.get(HeaderColumns.Info)!.length + 2;
+    const statusWidth = HeaderTitlesStringMap.get(HeaderColumns.Status)!.length + 2;
+    const titleWidth = numColumns 
+        - caretWidth 
+        - pipeCharWidth 
+        - idWidth 
+        - pipeCharWidth 
+        - infoWidth 
+        - pipeCharWidth
+        - statusWidth
+        - pipeCharWidth
+        - blankCharWidth;
+
+    return titleWidth;
+}
+
+function HeaderRow(terminalProps: TerminalProps) : React.ReactElement {
+    // _|_ID_|_Status_|_Info_|_Title ... <window width - 3>_|_
+    const titleWidth = getTitleWidth(terminalProps);
+
+    const headerRowColor = 'gray';
+    const idText = HeaderTitlesStringMap.get(HeaderColumns.ID)!;
+    const statusText = HeaderTitlesStringMap.get(HeaderColumns.Status)!;
+    const infoText = HeaderTitlesStringMap.get(HeaderColumns.Info)!;
+    const titleText = HeaderTitlesStringMap.get(HeaderColumns.Title)!;
+    // chars before title padding: 2 blanks + pipe + (id+2) + pipe + (status+2) + pipe + (info+2) + pipe + (title+2)
+    // chars after title padding: pipe + blank
+    const usedWidth = 2 + 1 + (idText.length + 2) + 1 + (statusText.length + 2) + 1 + (infoText.length + 2) + 1 + (titleText.length + 2) + 1 + 1;
+    const titlePadding = Math.max(0, terminalProps.columns - usedWidth);
     return (
-        <>
-            <Text>{columnSeparator}</Text>
-            <Text color="yellow" bold>{centeredMarker}</Text>
-        </>
+        <Box>
+            <BlankSeparatorColumn/>
+            <BlankSeparatorColumn/>
+            <PipedSeparatorColumn/>
+            <TextWithSpaces text={idText} selected={false} color={headerRowColor} />
+            <PipedSeparatorColumn/>
+            <TextWithSpaces text={statusText} selected={false} color={headerRowColor} />
+            <PipedSeparatorColumn/>
+            <TextWithSpaces text={infoText} selected={false} color={headerRowColor} />
+            <PipedSeparatorColumn/>
+            <TextWithSpaces text={titleText} selected={false} color={headerRowColor} />
+            <Column text={' '.repeat(titlePadding)} selected={false} color={undefined}/>
+            <PipedSeparatorColumn/>
+            <BlankSeparatorColumn/>
+        </Box>
     );
 }
 
-interface TitleProps { text: string; width: number; selected: boolean; showArrows: boolean; flashColor: string | undefined; }
-function Title(titleProps: TitleProps): React.ReactElement {
-    const colorToUse = titleProps.flashColor ?? (titleProps.selected ? 'cyan' : undefined);
-    const isBold = titleProps.selected || titleProps.showArrows;
-    const titleContent = bracketCenter(titleProps.text, titleProps.width, titleProps.showArrows);
+interface SelectionCaretProps { 
+    selected: boolean; 
+    confirmHighlight?: boolean; 
+}
+
+function SelectionCaret(selectionCaretProps: SelectionCaretProps) : React.ReactElement {
+    const columnProps: TextColumnProps = {
+        text: selectionCaretProps.selected ? '> ' : '  ',
+        selected: selectionCaretProps.selected,
+        color: selectionCaretProps.confirmHighlight ? 'red' : 'cyan',
+    };
+    return Column(columnProps);
+}
+
+interface IssueNumProps {
+    inum: number;
+    selected: boolean;
+    dimmed?: boolean;
+}
+
+function IssueNum(issueNumProps: IssueNumProps) : React.ReactElement {
+    const textColumnProps: TextColumnProps = {
+        text: `I-${issueNumProps.inum}`,
+        selected: issueNumProps.selected,
+        color: issueNumProps.selected ? 'cyan' : undefined,
+        dimmed: issueNumProps.dimmed,
+    };
+    return TextWithSpaces(textColumnProps);
+}
+
+interface InfoMarkerProps {
+    unread: boolean;
+    blockingFlash: boolean;
+    needsInput: boolean;
+    blockedBySelectedFlash: boolean;
+    dimmed?: boolean;
+}
+
+function InfoMarker(infoMarkerProps: InfoMarkerProps) : React.ReactElement {
+    const maxLength = HeaderTitlesStringMap.get(HeaderColumns.Info)!.length;
+    let str = '';
+    if( infoMarkerProps.unread )
+        str += "*";
+    if( infoMarkerProps.needsInput )
+        str += "i";
+
+    str = padToLength(str, maxLength);
+
+    const textColumnProps : TextColumnProps = {
+        text: str,
+        selected: false,
+        color: 'yellow',
+        dimmed: infoMarkerProps.dimmed,
+    };
+    return TextWithSpaces(textColumnProps);
+}
+
+interface FlashingTextProps {
+    text: string;
+    color: string;
+    bold: boolean;
+}
+
+function FlashingText(props: FlashingTextProps): React.ReactElement {
     return (
-        <>
-            <Text>{columnSeparator}</Text>
-            <Text color={colorToUse} bold={isBold}>{titleContent}</Text>
-        </>
+        <Text color={props.color} bold={props.bold}>{props.text}</Text>
     );
 }
 
-interface StatusProps { label: string; color: string | undefined; selected: boolean; }
-function Status(statusProps: StatusProps): React.ReactElement {
-    const centeredLabel = center(statusProps.label, COL.status);
-    return (
-        <>
-            <Text>{columnSeparator}</Text>
-            <Text color={statusProps.color} bold={statusProps.selected}>{centeredLabel}</Text>
-            <Text>{columnSeparator}</Text>
-        </>
-    );
+interface StatusProps { 
+    label: string; 
+    color: string | undefined; 
+    selected: boolean; 
+}
+
+function Status(textColumnProps: TextColumnProps) : React.ReactElement {
+    const maxWidth = HeaderTitlesStringMap.get(HeaderColumns.Status)!.length + 2;
+    const paddedProps: TextColumnProps = {
+        ...textColumnProps,
+        text: padToLength(textColumnProps.text, maxWidth),
+    };
+    return Column(paddedProps);
 }
 
 export interface HomeViewProps {
@@ -114,8 +276,10 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
     cursorRef.current = cursor;
 
     const [flashingBlockerInums, setFlashingBlockerInums] = useState<Set<number>>(new Set());
-    const [flashOn, setFlashOn] = useState(false);
+    const [manualBlockerFlash, setManualBlockerFlash] = useState(false);
+    const [flashBold, setFlashBold] = useState(true);
     const [confirmTrashInum, setConfirmTrashInum] = useState<number | null>(null);
+    const [dimUnrelated, setDimUnrelated] = useState(false);
 
     const clampedCursor = homeViewProps.issues.length > 0
         ? Math.min(cursor, homeViewProps.issues.length - 1)
@@ -124,11 +288,21 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
         ? homeViewProps.issues[clampedCursor].status
         : undefined;
 
+    const blockedByCurrentIssue = useMemo(() => {
+        if (manualBlockerFlash || homeViewProps.issues.length === 0) return new Set<number>();
+        const issue = homeViewProps.issues[clampedCursor];
+        const s = new Set<number>();
+        for (const iss of homeViewProps.issues) {
+            if (iss.blocked_by.includes(issue.inum) && iss.status !== IssueStatus.Resolved) s.add(iss.inum);
+        }
+        return s;
+    }, [clampedCursor, homeViewProps.issues, manualBlockerFlash]);
+
     useEffect(() => {
-        if (flashingBlockerInums.size === 0) return;
-        const id = setInterval(() => setFlashOn(f => !f), 500);
+        if (blockedByCurrentIssue.size === 0 && flashingBlockerInums.size === 0) { setFlashBold(true); return; }
+        const id = setInterval(() => setFlashBold(b => !b), 500);
         return () => clearInterval(id);
-    }, [flashingBlockerInums]);
+    }, [blockedByCurrentIssue, flashingBlockerInums]);
 
     useEffect(() => {
         if (!homeViewProps.setFooterShortcuts) return;
@@ -144,15 +318,27 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
         homeViewProps.setHeaderSubtitleOverride(
             confirmTrashInum !== null
                 ? "Confirm delete with 'x', Esc to cancel"
-                : undefined
+                : "Info: (*) unread, (i) needs input"
         );
+        return () => homeViewProps.setHeaderSubtitleOverride?.(undefined);
     }, [confirmTrashInum]);
 
     function flashBlockers(inum: number) {
         const issue = homeViewProps.issues.find(i => i.inum === inum);
         if (!issue) return;
         setFlashingBlockerInums(new Set(issue.blocked_by));
-        setFlashOn(true);
+        setManualBlockerFlash(true);
+    }
+
+    function autoFlashForIndex(idx: number) {
+        if (homeViewProps.issues.length === 0) return;
+        const issue = homeViewProps.issues[idx];
+        if (hasUnresolvedBlockers(issue.inum)) {
+            setFlashingBlockerInums(new Set(issue.blocked_by));
+        } else {
+            setFlashingBlockerInums(new Set());
+        }
+        setManualBlockerFlash(false);
     }
 
     function hasUnresolvedBlockers(inum: number): boolean {
@@ -165,6 +351,7 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
     }
 
     useInput((input, key) => {
+        // process.stderr.write(`input=${JSON.stringify(input)} key=${JSON.stringify(key)}\n`); 
         // Confirmation state machine for trash
         if (confirmTrashInum !== null) {
             if (input === 'x') {
@@ -181,13 +368,21 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
             return;
         }
 
-        if (key.downArrow || key.upArrow) {
-            setFlashingBlockerInums(new Set());
+        if (matchesKeyCombination(KeyCombinations.SHIFT_D, input, key)) {
+            setDimUnrelated(d => !d);
+            return;
         }
+
         if (key.downArrow) {
-            setCursor(c => Math.min(c + 1, homeViewProps.issues.length - 1));
+            const newIdx = Math.min(cursorRef.current + 1, homeViewProps.issues.length - 1);
+            setCursor(newIdx);
+            cursorRef.current = newIdx;
+            autoFlashForIndex(newIdx);
         } else if (key.upArrow) {
-            setCursor(c => Math.max(c - 1, 0));
+            const newIdx = Math.max(cursorRef.current - 1, 0);
+            setCursor(newIdx);
+            cursorRef.current = newIdx;
+            autoFlashForIndex(newIdx);
         }
 
         if (!homeViewProps.onStatusHotkeyPressed || homeViewProps.issues.length === 0) return;
@@ -238,39 +433,48 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
         );
     }
 
-    // 5 pipe/space separators between columns: |ID|Unread|Title|Status|
-    const titleWidth = homeViewProps.terminalProps.columns - COL.cursor - COL.id - COL.unread - COL.status - 5;
-    const headerPad = ''.padEnd(COL.cursor);
-    const headerColumns = `|${center('ID', COL.id)}|${center('Unread', COL.unread)}|${center('Title', titleWidth)}|${center('Status', COL.status)}|`;
-
+    const titleWidth = getTitleWidth(homeViewProps.terminalProps);
+    
     return (
         <Box flexDirection="column">
             {/* header row */}
             <Box>
-                <Text dimColor>{headerPad}</Text>
-                <Text dimColor>{headerColumns}</Text>
+                <HeaderRow {...homeViewProps.terminalProps}/>
             </Box>
             {/* issue rows */}
             {homeViewProps.issues.map((issue, i) => {
                 const selected = i === clampedCursor;
-                const isFlashing = flashingBlockerInums.has(issue.inum);
-                const showArrows = isFlashing && flashOn;
                 const isConfirmTarget = confirmTrashInum === issue.inum;
-                const innerWidth = titleWidth - 2;
+                const unread = homeViewProps.unreadInums.has(issue.inum);
+                const isBlocker = flashingBlockerInums.has(issue.inum);
+                const isBlockedBySelected = blockedByCurrentIssue.has(issue.inum);
+                const flashSuffix = isBlockedBySelected ? ' <- Blocks'
+                    : isBlocker ? ' <- Blocked By'
+                    : undefined;
+                const suffixLen = flashSuffix ? flashSuffix.length : 0;
+                const innerWidth = titleWidth - 1 - suffixLen; // 1 for leading space
                 const titleText = issue.title.length > innerWidth
                     ? issue.title.slice(0, innerWidth - 3) + '...'
                     : issue.title;
-                const unread = homeViewProps.unreadInums.has(issue.inum);
-                const flashColor = isConfirmTarget ? 'red' : showArrows ? 'red' : undefined;
+                const anyHighlightActive = blockedByCurrentIssue.size > 0 || flashingBlockerInums.size > 0;
+                const isDimmed = dimUnrelated && anyHighlightActive && !isBlockedBySelected && !isBlocker && !selected;
+                const flashColor = isConfirmTarget ? 'red' : undefined;
                 const statusLabel = IssueStatusStringsMap.get(issue.status) ?? '';
                 const statusColor = isConfirmTarget ? 'red' : statusToColor(issue.status);
                 return (
                     <Box key={issue.inum}>
-                        <SelectionCaret selected={selected} confirmHighlight={isConfirmTarget} />
-                        <IssueNum inum={issue.inum} selected={selected} confirmHighlight={isConfirmTarget} />
-                        <UnreadMarker unread={unread} />
-                        <Title text={titleText} width={titleWidth} selected={selected} showArrows={showArrows} flashColor={flashColor} />
-                        <Status label={statusLabel} color={statusColor} selected={selected} />
+                        <SelectionCaret selected={selected}/>
+                        <PipedSeparatorColumn/>
+                        <IssueNum inum={issue.inum} selected={selected} dimmed={isDimmed} />
+                        <PipedSeparatorColumn/>
+                        <Status text={statusLabel} color={statusColor} selected={selected} dimmed={isDimmed} />
+                        <PipedSeparatorColumn/>
+                        <InfoMarker unread={unread} blockingFlash={isBlocker} needsInput={false} blockedBySelectedFlash={isBlockedBySelected} dimmed={isDimmed} />
+                        <PipedSeparatorColumn/>
+                        <TextWithSpaces text={titleText} selected={selected} color={flashColor ?? (selected ? 'cyan' : undefined)} dimmed={isDimmed} />
+                        {flashSuffix && <FlashingText text={flashSuffix} color="red" bold={flashBold} />}
+                        <BlankSeparatorColumn/>
+                        <BlankSeparatorColumn/>
                     </Box>
                 );
             })}
