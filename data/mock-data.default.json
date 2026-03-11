@@ -50,7 +50,7 @@
       "issue_revision": 1,
       "agent_last_read_at": null,
       "user_last_viewed_at": null,
-      "blocked_by": [1]
+      "blocked_by": [1, 10]
     },
     {
       "inum": 5,
@@ -100,6 +100,45 @@
       "resolved_at": "2026-01-10T00:00:00Z",
       "trashed_at": null,
       "issue_revision": 3,
+      "agent_last_read_at": null,
+      "user_last_viewed_at": null,
+      "blocked_by": []
+    },
+    {
+      "inum": 9,
+      "title": "trashed_blocked_by_five",
+      "description": "Trashed issue blocked by issue 5",
+      "status": 5,
+      "created_at": "2026-02-20T00:00:00Z",
+      "resolved_at": null,
+      "trashed_at": "2026-03-05T00:00:00Z",
+      "issue_revision": 1,
+      "agent_last_read_at": null,
+      "user_last_viewed_at": null,
+      "blocked_by": [5]
+    },
+    {
+      "inum": 10,
+      "title": "trashed_blocks_four",
+      "description": "Trashed issue that blocks issue 4",
+      "status": 5,
+      "created_at": "2026-02-22T00:00:00Z",
+      "resolved_at": null,
+      "trashed_at": "2026-03-04T00:00:00Z",
+      "issue_revision": 1,
+      "agent_last_read_at": null,
+      "user_last_viewed_at": null,
+      "blocked_by": []
+    },
+    {
+      "inum": 11,
+      "title": "trashed_standalone",
+      "description": "Standalone trashed issue",
+      "status": 5,
+      "created_at": "2026-02-15T00:00:00Z",
+      "resolved_at": null,
+      "trashed_at": "2026-03-01T00:00:00Z",
+      "issue_revision": 1,
       "agent_last_read_at": null,
       "user_last_viewed_at": null,
       "blocked_by": []

@@ -8,6 +8,7 @@ export function statusToColor(status: IssueStatus): string | undefined {
         case IssueStatus.Deferred: return 'yellow';
         case IssueStatus.Resolved: return 'gray';
         case IssueStatus.Trashed: return 'gray';
+        case IssueStatus.Inactive: return 'gray';
         default: return undefined;
     }
 }

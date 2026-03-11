@@ -24,6 +24,7 @@ const rts = (el: React.JSX.Element) => renderToString(el, { columns: cols });
 const allViews: ViewType[] = [
     ViewType.Home, ViewType.Detail, ViewType.NewIssue,
     ViewType.AgentStatus, ViewType.BlockingMap, ViewType.GroupView,
+    ViewType.Trash,
 ];
 
 // Derive ANSI open codes from chalk (avoids hardcoding escape sequences)
@@ -261,6 +262,7 @@ describe('Footer — footer shows correct shortcuts for each non-Detail ViewType
         ViewType.BlockingMap,
         ViewType.GroupView,
         ViewType.IssuePicker,
+        ViewType.Trash,
     ];
 
     it('each non-Detail view renders all its shortcut keys and labels', () => {
@@ -280,34 +282,34 @@ describe('Footer — footer shows correct shortcuts for each non-Detail ViewType
 describe('Footer — STATUS_SHORTCUTS', () => {
     const keys = (shortcuts: readonly Shortcut[]) => shortcuts.map(s => s.key);
 
-    it('Active has d, r, x, q', () => {
+    it('Active has d, r, x, D, q', () => {
         const k = keys(STATUS_SHORTCUTS[IssueStatus.Active]);
-        expect(k).toEqual(['d', 'r', 'x', 'q']);
+        expect(k).toEqual(['d', 'r', 'x', 'D', 'q']);
     });
 
-    it('InQueue has d, r, f, x, q', () => {
+    it('InQueue has d, r, f, x, D, q', () => {
         const k = keys(STATUS_SHORTCUTS[IssueStatus.InQueue]);
-        expect(k).toEqual(['d', 'r', 'f', 'x', 'q']);
+        expect(k).toEqual(['d', 'r', 'f', 'x', 'D', 'q']);
     });
 
-    it('Blocked has b, x, q', () => {
+    it('Blocked has b, x, D, q', () => {
         const k = keys(STATUS_SHORTCUTS[IssueStatus.Blocked]);
-        expect(k).toEqual(['b', 'x', 'q']);
+        expect(k).toEqual(['b', 'x', 'D', 'q']);
     });
 
-    it('Deferred has e, r, x, q', () => {
+    it('Deferred has e, r, x, D, q', () => {
         const k = keys(STATUS_SHORTCUTS[IssueStatus.Deferred]);
-        expect(k).toEqual(['e', 'r', 'x', 'q']);
+        expect(k).toEqual(['e', 'r', 'x', 'D', 'q']);
     });
 
-    it('Resolved has e, x, q', () => {
+    it('Resolved has e, x, D, q', () => {
         const k = keys(STATUS_SHORTCUTS[IssueStatus.Resolved]);
-        expect(k).toEqual(['e', 'x', 'q']);
+        expect(k).toEqual(['e', 'x', 'D', 'q']);
     });
 
-    it('Trashed has q', () => {
+    it('Trashed has D, q', () => {
         const k = keys(STATUS_SHORTCUTS[IssueStatus.Trashed]);
-        expect(k).toEqual(['q']);
+        expect(k).toEqual(['D', 'q']);
     });
 
     it('"q" is present for every status', () => {

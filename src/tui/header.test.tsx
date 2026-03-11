@@ -160,6 +160,14 @@ describe('Header', () => {
         expect(line3).not.toContain('All issues and orchestration state');
     });
 
+    it('line 3 shows trash subtitle for Trash view', () => {
+        const output = rts(
+            <Header currentView={{ type: ViewType.Trash }} columns={cols} />
+        );
+        const line3 = output.split('\n')[2];
+        expect(line3).toContain('Trashed issues pending deletion');
+    });
+
     it('line 3 shows default subtitle when subtitleOverride is undefined', () => {
         const output = rts(
             <Header currentView={{ type: ViewType.Home }} columns={cols} />

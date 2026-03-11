@@ -9,7 +9,8 @@ export enum IssueStatus {
   Blocked,
   Deferred,
   Resolved,
-  Trashed = 5
+  Trashed = 5,
+  Inactive = 6
 }
 
 export interface ChangedStatusProps {
@@ -24,6 +25,7 @@ export const IssueStatusStringsMap = new Map<IssueStatus, string>([
   [IssueStatus.Deferred, "Deferred"],
   [IssueStatus.Resolved, "Resolved"],
   [IssueStatus.Trashed, "Trashed"],
+  [IssueStatus.Inactive, "Inactive"],
 ]);
 
 export interface Issue {
