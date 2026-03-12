@@ -1,0 +1,599 @@
+WORKTREE SPAWNER REWRITE -- COMPLETENESS & EDGE CASE REVIEW
+============================================================
+Reviewer: Security Auditor (Claude Opus 4.6)
+Date: 2026-03-12
+
+
+A) NUMBERED ISSUES, GAPS, AND EDGE CASES
+=========================================
+
+--- CRITICAL ---
+
+1. CRITICAL: pgrep substring matching produces false positives (Daemon M.1 and M.3.1)
+
+   The spec uses pgrep -f "agy.*$(basename "${REPO_ROOT}")" to detect whether
+   the main IDE is alive, and pgrep -f "agy.*${worktree_path}" for worktree IDEs.
+
+   pgrep -f matches against the entire command line as a substring. This creates
+   multiple attack/failure vectors:
+
+   (a) If REPO_ROOT basename is "review" and another process has "review" anywhere
+       in its command line (a browser tab title, another editor, a log viewer),
+       pgrep returns a false positive and the daemon never exits.
+
+   (b) Conversely, if the IDE binary is not literally "agy" (e.g., it's a symlink
+       named differently, or the process name in ps differs from the binary name),
+       pgrep returns a false negative and the daemon kills tmux sessions prematurely.
+
+   (c) A worktree path like "foo" would match "foobar" -- if you have worktrees
+       named "api" and "api-v2", the pgrep for "api" matches the "api-v2" IDE
+       process, causing the daemon to think "api" IDE is alive when it is not.
+
+   Recommendation: Use a more precise matching strategy. Options:
+   - Use pgrep with anchored regex or exact path matching (pgrep -fx for exact).
+   - Write IDE PID to a known file on spawn and check that specific PID.
+   - Use lsof or fuser to check which process has the worktree directory open.
+   - At minimum, append a path separator or end-of-string anchor to the pattern:
+     pgrep -f "agy.*${worktree_path}(/|$)" to prevent prefix collisions.
+
+
+2. CRITICAL: Race condition between spawn and daemon on freshly created worktrees
+
+   The spec removes the grace period / lockfile timestamp mechanism from the old
+   design. The new is_worktree_merged() function solves the "freshly created branch
+   looks merged" problem, but introduces a different race:
+
+   Timeline:
+   - T=0: User runs spawnWorktree.sh, which does git worktree add -b NAME ... HEAD
+   - T=0.1: Daemon poll fires, discovers the new worktree via git worktree list
+   - T=0.1: is_worktree_merged() runs. No merge commit exists yet, returns 1. OK.
+   - T=0.2: But the daemon ALSO runs M.3.1 (check worktree IDE alive).
+     The IDE has not launched yet (Step 5 hasn't executed). pgrep finds nothing.
+     Daemon concludes IDE is dead. Daemon kills the tmux session.
+
+   The tmux session hasn't been created yet either (it's created by the IDE's
+   tasks.json on folder open), so this specific case may be benign. But the
+   broader issue stands: the daemon can take actions on a worktree that is still
+   being set up by the spawner.
+
+   Recommendation: Add a brief "setup lock" mechanism -- not a persistent lockfile
+   but a transient sentinel (e.g., a .worktree-spawning file in the worktree root)
+   that the spawner creates at Step 1 and removes at Step 7. The daemon should
+   skip any worktree that has this sentinel.
+
+
+3. CRITICAL: is_worktree_merged() scans ALL merge commits in the entire repo history
+
+   The function runs: git log --all --merges --format='%H %P'
+
+   In a repository with significant history, this enumerates EVERY merge commit
+   across ALL branches. For a repo with 10,000 merge commits, this runs every 5
+   seconds. For a repo with 100,000 merge commits (common in long-lived projects),
+   this could take multiple seconds per poll and consume significant CPU/IO.
+
+   Worse: the output is piped into a bash while-read loop with nested array
+   iteration, which is one of the slowest possible ways to process data in bash.
+
+   Recommendation: Limit the scan scope. Since you only care about merges that
+   happened AFTER the worktree branch was created, use:
+
+     git log --all --merges --format='%H %P' --since="<branch_creation_time>"
+
+   Or even better, record the branch creation commit hash and use:
+
+     git log --all --merges --format='%H %P' --ancestry-path <branch_tip>..
+
+   Alternatively, use git branch --contains <branch_tip> as a cheaper first-pass
+   check, then confirm with the parent scan only if that returns hits.
+
+
+--- HIGH ---
+
+4. HIGH: tmux session name collision and special character handling
+
+   The spec says tmux new-session -s __NAME__. tmux session names have
+   restrictions: they cannot contain periods or colons. The name validation
+   regex [a-zA-Z0-9_-]+ prevents these, which is good. However:
+
+   (a) If a tmux session with the same name already exists (e.g., user manually
+       created one, or a previous unclean shutdown left one behind), tmux
+       new-session -s NAME will fail with "duplicate session: NAME". The tasks.json
+       command has no error handling for this. The tmux terminal pane will show
+       the error and become a dead shell.
+
+   (b) The daemon checks "tmux has-session" before killing, but if the session
+       was attached from another terminal, kill-session will terminate that
+       terminal's view as well -- potentially surprising the user.
+
+   Recommendation:
+   - In the tasks.json tmux command, use:
+     tmux kill-session -t __NAME__ 2>/dev/null; tmux new-session -s __NAME__
+     or:
+     tmux new-session -A -s __NAME__ (attach if exists, create if not)
+   - Document that the daemon may kill attached tmux sessions.
+
+
+5. HIGH: Daemon singleton detection via pgrep is unreliable
+
+   The spec says: "Singleton: pgrep for other daemon instances (no PID file)"
+
+   pgrep -f "worktreeDaemon.sh.*$(basename "${REPO_ROOT}")" will match:
+   - The current process itself (the one doing the check)
+   - Any editor that has worktreeDaemon.sh open in a buffer
+   - A "cat worktreeDaemon.sh" or "less worktreeDaemon.sh" process
+   - grep itself (classic grep-matches-grep problem, though pgrep usually
+     excludes its own PID)
+
+   With no PID file, the daemon cannot reliably distinguish "I am the only
+   instance" from "there is a stale match." The current implementation (being
+   replaced) uses a PID file and validates it -- this is actually MORE reliable
+   than the proposed pgrep-only approach.
+
+   Recommendation: Keep the PID file for singleton detection. It is standard
+   practice for daemon processes. Use pgrep as a secondary validation (confirm
+   the PID file's process is actually a daemon). The spec's stated goal is "no
+   lockfiles" for state tracking, but a daemon PID file is not a state-tracking
+   lockfile -- it's a process management artifact.
+
+
+6. HIGH: set -e (errexit) interaction with the daemon loop
+
+   The spec does not mention shell options, but the existing worktreeDaemon.sh
+   uses set -euo pipefail. If the rewrite preserves this:
+
+   - Any command returning non-zero inside the main loop will terminate the
+     entire daemon. For example: git worktree list failing due to a momentary
+     lock, pgrep returning 1 (no match), tmux kill-session failing because the
+     session already died -- any of these kills the daemon silently.
+
+   - The trap only catches SIGINT/SIGTERM, not ERR. An errexit termination will
+     NOT trigger the cleanup trap (behavior varies by bash version, but in most
+     versions trap on EXIT would fire but trap on SIGTERM would not).
+
+   The current daemon already has this problem (set -euo pipefail on line 2).
+
+   Recommendation: The daemon main loop MUST NOT use set -e. Use explicit error
+   checking on every command. Alternatively, use set -e globally but wrap the
+   entire loop body in a function with error handling, or use "|| true" on every
+   command that might legitimately fail. Also add a trap on EXIT (not just
+   SIGINT/SIGTERM) for cleanup.
+
+
+7. HIGH: VS Code dependsOn does not guarantee sequential execution for runOnFolderOpen tasks
+
+   The spec assumes "npm install" will block and complete before Claude and tmux
+   start, using dependsOn. However, VS Code's task dependency system has known
+   limitations:
+
+   (a) dependsOn with runOnFolderOpen: VS Code documentation does not guarantee
+       that dependsOn ordering is respected when tasks are auto-triggered by
+       folder open. The behavior is documented for manually-run tasks only.
+
+   (b) npm install is not marked as isBackground, but it also has no
+       problemMatcher. VS Code determines task completion by either:
+       - The process exiting (for non-background tasks)
+       - A problemMatcher pattern (for background tasks)
+       Without a problemMatcher, VS Code should detect completion via process
+       exit, which should work. But if npm install produces an error and the
+       process exits non-zero, VS Code may or may not run dependent tasks
+       depending on the "dependsOrder" setting.
+
+   (c) All three tasks have runOnFolderOpen. This means VS Code will try to
+       start all three on folder open, and dependsOn creates a conflict: "start
+       me on folder open, but also wait for this other task." The actual behavior
+       is underdocumented and may vary between VS Code versions.
+
+   Recommendation: Remove runOnFolderOpen from Claude and tmux tasks. Keep it
+   ONLY on npm install. Then create a compound task (type: compound) that depends
+   on npm install and launches Claude + tmux. Mark THAT compound task with
+   runOnFolderOpen. This makes the dependency chain explicit and avoids the
+   ambiguity of multiple runOnFolderOpen tasks with cross-dependencies.
+
+
+8. HIGH: git worktree remove --force can lose data
+
+   In M.3.3 step d, the spec says: "If clean: kill tmux, git worktree remove
+   --force, git branch -D, git worktree prune"
+
+   git worktree remove --force removes the worktree even if there are untracked
+   files or submodule changes that git status --porcelain might not report. The
+   --force flag bypasses safety checks. The spec checks for dirty files BEFORE
+   this step, but there is a TOCTOU (time-of-check-time-of-use) race: files
+   could be created between the check and the removal.
+
+   Additionally, git branch -D (capital D) force-deletes the branch even if it
+   has unmerged changes. Since the branch was already detected as merged, this
+   should be safe in theory, but if the merge detection had a false positive
+   (see issue #13), this destroys work.
+
+   Recommendation: Use git worktree remove (without --force) first, and only
+   fall back to --force if the non-force version succeeds (which it will if
+   truly clean). Use git branch -d (lowercase d) instead of -D, which will
+   refuse to delete an unmerged branch. The merge was already verified, so -d
+   should succeed; if it doesn't, that's a signal something is wrong.
+
+
+--- MEDIUM ---
+
+9. MEDIUM: WORKTREE_PATH construction is fragile and potentially unsafe
+
+   WORKTREE_PATH="${REPO_ROOT}/../${WORKTREE_NAME}"
+
+   This places worktrees as siblings of the repo root. Issues:
+
+   (a) If REPO_ROOT is at a filesystem boundary (e.g., /mnt/repo), the parent
+       might be a different filesystem, which git worktree handles poorly (it
+       uses relative symlinks internally).
+
+   (b) The path is not canonicalized. REPO_ROOT could contain symlinks, meaning
+       "${REPO_ROOT}/.." might not resolve to the expected directory. Use
+       realpath or cd+pwd to canonicalize.
+
+   (c) If the user runs the script from a subdirectory, REPO_ROOT from
+       git rev-parse --show-toplevel is absolute, so this is safe. But if
+       REPO_ROOT is passed as a relative path to the daemon, all bets are off.
+
+   Recommendation: Canonicalize REPO_ROOT at the top of every script:
+     REPO_ROOT="$(cd "${REPO_ROOT}" && pwd -P)"
+   And validate that the parent directory is writable:
+     [ -w "$(dirname "${WORKTREE_PATH}")" ] || die "Parent directory not writable"
+
+
+10. MEDIUM: No handling of concurrent spawn invocations
+
+    If the user triggers "Spawn Claude Worktree" twice in quick succession with
+    the same name, both invocations will race through the state matrix:
+
+    - Both check branch_exists and path_exists simultaneously
+    - Both see CASE D (neither exists)
+    - Both try git worktree add -b NAME -- the second one fails because the
+      branch was just created by the first
+    - The second invocation errors out, but the first may have partially
+      completed scaffolding
+
+    Recommendation: Use mkdir as an atomic lock:
+      mkdir "${WORKTREE_PATH}/.spawning" 2>/dev/null || { echo "Spawn already
+      in progress"; exit 1; }
+    This is atomic on all filesystems. Remove it in a trap on EXIT.
+
+
+11. MEDIUM: sed template injection via worktree name
+
+    sed "s/__NAME__/${WORKTREE_NAME}/g" v1/templates/tasks.json
+
+    Although the name is validated to [a-zA-Z0-9_-]+, the sed command uses /
+    as the delimiter. None of the allowed characters include /, so this is safe
+    from delimiter collision. However, if the validation regex is ever relaxed
+    (e.g., to allow dots for version numbers), this becomes an injection vector.
+
+    Also, if WORKTREE_NAME contains & (which the regex does not allow, but
+    defense in depth), sed treats & as "the matched string" in the replacement.
+
+    Recommendation: Use a different sed delimiter that cannot appear in the name
+    (e.g., | or #), and escape the replacement string:
+      sed "s|__NAME__|${WORKTREE_NAME//&/\\&}|g"
+    This provides defense in depth if the validation is later modified.
+
+
+12. MEDIUM: Merge detection misses squash merges, rebases, and cherry-picks
+
+    The spec explicitly focuses on --no-ff merge commits, which is the stated
+    workflow (R8). However, if anyone ever does a squash merge, rebase-merge,
+    or cherry-pick of the worktree branch's commits, the branch will never be
+    detected as merged and the worktree will persist forever.
+
+    The spec acknowledges this in the old worktreeDaemon.sh comments, but the
+    rewrite spec does not mention it at all. This is a documentation gap that
+    will confuse future maintainers.
+
+    Recommendation: Add a comment block in is_worktree_merged() explicitly
+    documenting which merge strategies are detected (--no-ff only) and which
+    are not (squash, rebase, cherry-pick, fast-forward). Consider adding a
+    fallback: if a worktree branch has been idle (no new commits) for N hours
+    and the branch tip's content (tree hash) matches any branch head, treat it
+    as merged.
+
+
+13. MEDIUM: is_worktree_merged() false positive on amended/rebased target branches
+
+    Scenario:
+    1. User creates worktree branch "feature", makes commits, tip is abc123
+    2. User merges feature into main with --no-ff. Merge commit M has parents
+       [main_tip, abc123]. is_worktree_merged() returns 0. Correct.
+    3. Someone rebases main, rewriting history. Merge commit M still exists in
+       reflog but is now unreachable from main HEAD.
+    4. git log --all includes reflog entries depending on gc state. If M is
+       still reachable from ANY ref (including stash, other branches, etc.),
+       the function still returns 0.
+    5. Now the user pushes new commits to "feature". Tip changes to def456.
+       is_worktree_merged() correctly returns 1 (old merge's parent was abc123,
+       not def456). This is fine.
+
+    But consider: user merges feature, daemon detects it and starts cleanup.
+    Between the merge detection and the branch deletion, the user pushes a new
+    commit to feature (unlikely but possible in a 5-second window). The daemon
+    force-deletes the branch with -D, losing the new commit.
+
+    Recommendation: Re-verify the branch tip immediately before deletion:
+      current_tip=$(git rev-parse refs/heads/${branch})
+      if [ "${current_tip}" != "${detected_tip}" ]; then
+        log "Branch tip changed since merge detection, skipping cleanup"
+        continue
+      fi
+
+
+14. MEDIUM: SIGHUP handling is assumed but not guaranteed
+
+    The spec says: "Also dies naturally via SIGHUP when IDE terminal closes."
+
+    This depends on the IDE sending SIGHUP to child processes when the terminal
+    closes. VS Code's terminal behavior:
+
+    (a) VS Code sends SIGHUP to the shell process when the terminal is disposed.
+        But if the daemon was started with nohup (the fallback in Step 6), SIGHUP
+        is explicitly ignored.
+
+    (b) If the daemon is started via runOnFolderOpen task, VS Code may or may not
+        send SIGHUP depending on the task's lifecycle management. Background tasks
+        (isBackground: true) may be kept alive even after the terminal panel is
+        closed.
+
+    (c) On macOS, terminal SIGHUP behavior differs from Linux in edge cases
+        (especially with tmux involved).
+
+    The M.1 poll check (pgrep for main IDE) is the actual reliable mechanism.
+    The SIGHUP mention in the spec gives false confidence.
+
+    Recommendation: Do not rely on SIGHUP at all. The M.1 poll check is the
+    correct mechanism. Remove SIGHUP mentions from the spec to avoid confusion.
+    Ensure the daemon's SIGTERM/SIGINT trap also handles cleanup correctly.
+
+
+15. MEDIUM: Scaffold file comparison in CASE A is underspecified
+
+    Step 3 CASE A says: "Compare .claude/settings.json and .vscode/tasks.json
+    to templates. If modified: prompt."
+
+    But .vscode/tasks.json is generated from a template via sed substitution. The
+    "template" version has __NAME__ placeholders, while the worktree version has
+    the actual name substituted. A naive diff will ALWAYS show them as different.
+
+    The comparison needs to:
+    1. Generate the expected tasks.json (by running the same sed substitution)
+    2. Compare the generated version against the existing version
+
+    The spec doesn't describe this two-step comparison process.
+
+    Recommendation: Specify that check_scaffold_modified() must generate the
+    expected output (sed the template with the current worktree name) and compare
+    against the actual file, not compare against the raw template.
+
+
+16. MEDIUM: npm install failure leaves worktree in broken state
+
+    If npm install fails (network error, bad package.json, disk full), the
+    dependent tasks (Claude and tmux) never start. The user is left with a
+    worktree IDE window that has no Claude session and no tmux session, with no
+    obvious error indication (npm install presentation is "reveal": "silent").
+
+    The daemon will still discover this worktree and monitor it, but the user
+    has no way to retry npm install without manually running it or closing and
+    reopening the IDE window.
+
+    Recommendation: Change npm install presentation to "reveal": "always" on
+    failure. Add a "retry" task. Or make Claude and tmux not depend on npm
+    install (they don't need node_modules to function), and run npm install as
+    a parallel non-blocking task.
+
+
+17. MEDIUM: git worktree list --porcelain parsing edge cases
+
+    The spec says the daemon uses git worktree list --porcelain to discover
+    worktrees. The porcelain format outputs:
+
+      worktree /path/to/worktree
+      HEAD abc123
+      branch refs/heads/branch-name
+      <blank line>
+
+    Edge cases:
+    (a) Detached HEAD worktrees show "detached" instead of "branch refs/heads/..."
+        The daemon should skip these (they have no branch to check for merge).
+    (b) Bare worktrees show "bare" instead of the path fields.
+    (c) Locked worktrees show an additional "locked" or "locked <reason>" line.
+        The daemon should not try to remove locked worktrees.
+    (d) Prunable worktrees show "prunable <reason>".
+
+    The spec's get_worktrees() function is described as "parse git worktree list
+    --porcelain" but no parsing logic is specified.
+
+    Recommendation: Specify the parsing logic explicitly. Skip detached HEAD
+    entries. Skip locked entries. Handle the case where the worktree path
+    contains spaces (the porcelain format does not quote paths).
+
+
+--- LOW ---
+
+18. LOW: No log rotation or size limit for daemon output
+
+    The daemon runs indefinitely, logging every 5 seconds. If verbose mode is
+    enabled, this generates roughly 1KB per cycle, or ~17MB per day. Even without
+    verbose, log output accumulates without bound.
+
+    Recommendation: Implement log rotation. Either:
+    - Truncate the log file when it exceeds a threshold (e.g., keep last 1000 lines)
+    - Use a rotating log file scheme (daemon.log, daemon.log.1, etc.)
+    - Since the daemon is started from an IDE terminal, rely on the terminal's
+      scrollback buffer and don't write to a file at all.
+
+
+19. LOW: Template file (v1/templates/tasks.json) does not yet exist
+
+    The glob shows v1/templates/tasks.json.snippet but no tasks.json. The spec
+    says CREATE v1/templates/tasks.json. This is not an issue per se (it's a new
+    file to be created), but the implementation sequence should verify the
+    template exists before spawnWorktree.sh tries to sed it.
+
+    Recommendation: Add a guard in spawnWorktree.sh:
+      [ -f "${SCRIPT_DIR}/v1/templates/tasks.json" ] || die "Template missing"
+
+
+20. LOW: No cleanup of worktrees on daemon crash/unexpected exit
+
+    If the daemon is killed with SIGKILL (kill -9), the trap does not fire.
+    Worktrees remain with their tmux sessions. On next daemon start, the daemon
+    rediscovers them from git worktree list, which is good. But tmux sessions
+    are not rediscovered -- the daemon only kills tmux sessions, it never
+    re-creates them.
+
+    Recommendation: On daemon startup, enumerate existing tmux sessions matching
+    known worktree names. Log their presence for the user. Consider re-attaching
+    them in the IDE if the worktree IDE is still running.
+
+
+21. LOW: validate_name() allows names that collide with git internals
+
+    Names like "HEAD", "master", "main", "FETCH_HEAD", "ORIG_HEAD", "MERGE_HEAD"
+    pass the [a-zA-Z0-9_-]+ validation. Creating a branch named "HEAD" or
+    "master" could cause subtle git issues or collide with existing branches.
+
+    Recommendation: Add a blacklist of reserved names:
+      case "${name}" in
+        HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD|CHERRY_PICK_HEAD)
+          die "Reserved name: ${name}" ;;
+      esac
+    Also check if the branch name collides with an existing branch (outside of
+    the intentional CASE B reopen scenario).
+
+
+22. LOW: No idempotency guarantee for scaffold_worktree()
+
+    If the scaffolding step is interrupted (e.g., disk full after creating
+    .claude/settings.json but before creating .vscode/tasks.json), the worktree
+    is in a partial state. A reopen (CASE A) would find the path and branch
+    exist, check the scaffold files, find tasks.json missing, and... the spec
+    doesn't say what happens when a scaffold file is missing (as opposed to
+    modified).
+
+    Recommendation: CASE A should check for scaffold file EXISTENCE first, and
+    if any are missing, re-scaffold unconditionally (no prompt needed).
+
+
+23. LOW: The specification has a duplicate line in R1
+
+    R1 lists "If path exists but branch missing: error + manual cleanup
+    instructions" twice (both the 5th and 6th bullet). This is a copy-paste
+    error in the spec document.
+
+    Recommendation: Remove the duplicate line.
+
+
+24. LOW: Claude CLI flag syntax unverified
+
+    The spec notes: "claude --permission-mode plan needs verification -- may
+    need adjustment to the actual CLI flag syntax."
+
+    If this flag is wrong, the Claude task will fail on every worktree open,
+    silently (isBackground: true, no problemMatcher). The user will see an empty
+    terminal pane with no explanation.
+
+    Recommendation: Verify the flag before implementation. If uncertain, wrap
+    it in a script that checks the flag and falls back:
+      claude --permission-mode plan 2>/dev/null || claude --plan-mode || claude
+
+
+25. LOW: tmux new-session without -d creates foreground session
+
+    The tasks.json tmux command is: tmux new-session -s __NAME__
+
+    Without -d (detach), this creates a foreground session in the VS Code
+    terminal pane. This is actually the desired behavior (the user interacts
+    with tmux in the terminal pane). However, if the VS Code terminal pane is
+    resized or loses focus, the tmux session may behave unexpectedly.
+
+    Also, tmux new-session without specifying a window size will use the terminal
+    dimensions at creation time. If the IDE terminal starts small (during
+    initial layout) and then resizes, the tmux session will have the wrong
+    dimensions until detach/reattach.
+
+    Recommendation: This is acceptable for the use case. No change needed, but
+    document this behavior for users who experience layout issues.
+
+
+B) REQUIREMENT COVERAGE CHECK
+==============================
+
+R1  (Create worktree):        COVERED. State matrix in Step 3 handles all four
+                               cases. Name validation present. Space-to-underscore
+                               conversion present. Minor gap: duplicate line in spec,
+                               and CASE A scaffold comparison underspecified (#15).
+
+R2  (Open in IDE):             COVERED. agy --new-window in Step 5.
+
+R3  (Claude in terminal):      COVERED. tasks.json template includes Claude task.
+                               Flag syntax unverified (#24).
+
+R4  (tmux session):            COVERED. tasks.json template includes tmux task.
+                               Session collision not handled (#4).
+
+R5  (Split terminals):         COVERED. Task group "worktree-__NAME__" with
+                               dedicated panels.
+
+R6  (npm install first):       PARTIALLY COVERED. dependsOn is present but
+                               runOnFolderOpen interaction is unreliable (#7).
+                               Failure handling missing (#16).
+
+R7  (Kill tmux on IDE close):  COVERED. Daemon M.3.1 checks IDE alive, kills tmux.
+                               pgrep reliability issues (#1).
+
+R8  (Merge detection + cleanup): COVERED. is_worktree_merged() implements parent
+                               scan. Performance concern (#3). False positive
+                               edge case (#13). No squash/rebase detection (#12).
+                               Scaffold discard and dirty-file check present.
+
+R9  (Main repo tasks.json):    COVERED. Input prompt for name, Command Palette
+                               triggerable.
+
+R10 (Daemon auto-start):       COVERED. runOnFolderOpen task for daemon. Singleton
+                               detection unreliable (#5). Rediscovery from
+                               git worktree list present. SIGHUP unreliable (#14).
+
+
+C) FINAL VERDICT
+================
+
+NOT READY FOR IMPLEMENTATION AS-IS. Revisions needed.
+
+The specification demonstrates strong architectural thinking -- eliminating
+lockfiles, using merge-commit parent scanning instead of git branch --merged,
+and deriving state from git rather than tracking it in files. These are genuine
+improvements over the current implementation.
+
+However, there are three categories of issues that must be addressed before
+implementation:
+
+MUST FIX (blocks implementation):
+- Issue #1: pgrep false positives/negatives will cause the daemon to
+  malfunction in real-world use. This is the most likely source of bugs.
+- Issue #5: Singleton detection without PID file is a regression from the
+  current design. Keep the PID file.
+- Issue #6: set -e in a daemon loop is a crash waiting to happen.
+- Issue #7: runOnFolderOpen + dependsOn interaction must be validated or
+  redesigned with a compound task.
+
+SHOULD FIX (high risk of user-facing bugs):
+- Issue #2: Spawn/daemon race condition.
+- Issue #3: Merge scan performance on large repos.
+- Issue #4: tmux session name collision.
+- Issue #8: Use non-force git commands to prevent data loss.
+- Issue #13: Re-verify branch tip before deletion.
+- Issue #15: Scaffold comparison logic underspecified.
+
+NICE TO FIX (polish, defense in depth):
+- Issues #9 through #25.
+
+The core design (merge-commit parent scan, lockfile-free state derivation,
+tasks.json template system) is sound. The issues are primarily in process
+management reliability (pgrep, set -e, SIGHUP) and underspecified edge cases.
+With the MUST FIX items addressed, this spec would be ready for implementation
+with confidence.

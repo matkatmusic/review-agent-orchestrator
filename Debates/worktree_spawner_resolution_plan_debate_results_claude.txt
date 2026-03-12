@@ -1,0 +1,1027 @@
+WORKTREE SPAWNER REWRITE — RESOLUTION PLAN
+Authored by: Claude (Security Auditor Persona)
+
+================================================================================
+PHASE 1: BLOCKING ISSUES (system cannot function without these fixes)
+================================================================================
+
+ISSUE 1: pgrep substring false positives + self-detection
+  Synthesis ref: Critical #1, Consolidated Rec #1
+
+  VERDICT: CONFIRMED. This is a show-stopper.
+
+  pgrep -f "worktreeDaemon.sh.*reponame" will match itself (the pgrep process
+  contains the pattern in its own cmdline), match substrings of longer repo names,
+  and is fragile across platforms. The daemon cannot reliably start or detect its
+  singleton status.
+
+  EXACT CHANGE — worktreeDaemon.sh INIT section:
+
+  Replace:
+    # Singleton: pgrep for other daemon instances (no PID file)
+
+  With PID-file + kill -0 approach:
+
+    PIDFILE="${REPO_ROOT}/.worktree-daemon.pid"
+
+    daemon_already_running() {
+      if [ -f "${PIDFILE}" ]; then
+        local old_pid
+        old_pid=$(<"${PIDFILE}")
+        if kill -0 "${old_pid}" 2>/dev/null; then
+          # Verify it is actually our daemon, not a recycled PID
+          if [ -d "/proc/${old_pid}" ] && grep -q "worktreeDaemon" "/proc/${old_pid}/cmdline" 2>/dev/null; then
+            return 0
+          elif [[ "$OSTYPE" == darwin* ]]; then
+            if ps -p "${old_pid}" -o command= 2>/dev/null | grep -q "worktreeDaemon"; then
+              return 0
+            fi
+          fi
+        fi
+        # Stale PID file — remove it
+        rm -f "${PIDFILE}"
+      fi
+      return 1
+    }
+
+    if daemon_already_running; then
+      log "Daemon already running (PID $(cat "${PIDFILE}")). Exiting."
+      exit 0
+    fi
+
+    echo $$ > "${PIDFILE}"
+
+    cleanup_pidfile() {
+      rm -f "${PIDFILE}"
+    }
+    trap 'cleanup_pidfile; exit 0' EXIT SIGINT SIGTERM
+
+  Also add .worktree-daemon.pid to .gitignore.
+
+  EXACT CHANGE — spawnWorktree.sh STEP 6:
+
+  Replace:
+    pgrep -f "worktreeDaemon.sh.*$(basename "${REPO_ROOT}")"
+
+  With:
+    PIDFILE="${REPO_ROOT}/.worktree-daemon.pid"
+    daemon_is_running() {
+      [ -f "${PIDFILE}" ] && kill -0 "$(<"${PIDFILE}")" 2>/dev/null
+    }
+    if ! daemon_is_running; then
+      nohup "${REPO_ROOT}/worktreeDaemon.sh" "${REPO_ROOT}" >> "${REPO_ROOT}/.worktree-daemon.log" 2>&1 &
+    fi
+
+  For M.1 (CHECK MAIN IDE ALIVE) and M.3.1 (CHECK WORKTREE IDE ALIVE), replace
+  pgrep with a function that uses exact-match:
+
+    ide_is_running_for_path() {
+      local target_path="$1"
+      local canonical
+      canonical=$(cd "${target_path}" 2>/dev/null && pwd -P)
+      # Use pgrep with full match but filter out our own PID
+      pgrep -f "agy" | while read -r pid; do
+        [ "${pid}" = "$$" ] && continue
+        local cmdline
+        if [[ "$OSTYPE" == darwin* ]]; then
+          cmdline=$(ps -p "${pid}" -o command= 2>/dev/null)
+        else
+          cmdline=$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null)
+        fi
+        if echo "${cmdline}" | grep -qF "${canonical}"; then
+          return 0
+        fi
+      done
+      return 1
+    }
+
+  Complexity: MEDIUM. Touches daemon init, spawner step 6, and all IDE checks.
+
+
+ISSUE 4: runOnFolderOpen first-launch trust prompt
+  Synthesis ref: Critical #4, Consolidated Rec #4
+
+  VERDICT: CONFIRMED. VS Code displays a trust prompt the first time a workspace
+  has runOnFolderOpen tasks. The user must click "Allow" before tasks execute.
+  This is a one-time-per-workspace UX issue, not a persistent blocker.
+
+  EXACT CHANGE — Add to spawnWorktree.sh after STEP 5 (open IDE):
+
+    # Note: VS Code may prompt to trust tasks on first open.
+    # After the user trusts once, subsequent opens auto-run.
+    echo "[INFO] If this is the first time opening this worktree, VS Code will"
+    echo "       ask you to trust auto-run tasks. Click 'Allow' to enable automation."
+
+  EXACT CHANGE — Add a fallback bootstrap approach. Create v1/templates/bootstrap.sh:
+
+    #!/usr/bin/env bash
+    # Fallback bootstrap — run manually if tasks.json auto-run fails
+    set -euo pipefail
+    WORKTREE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+    cd "${WORKTREE_ROOT}"
+    npm install
+    # Start Claude and tmux in split
+    tmux new-session -A -s "$(basename "${WORKTREE_ROOT}")" -d
+    claude --permission-mode plan
+
+  And scaffold it during STEP 4:
+    cp v1/templates/bootstrap.sh "${WORKTREE_PATH}/bootstrap.sh"
+    chmod +x "${WORKTREE_PATH}/bootstrap.sh"
+
+  Complexity: SMALL. A warning message plus a fallback script.
+
+
+ISSUE 5: Race condition — spawn vs daemon on freshly created worktrees
+  Synthesis ref: Critical #5
+
+  VERDICT: CONFIRMED. Daemon polls every 5s. A freshly created worktree could be
+  scanned before the IDE opens, and if the branch happens to already be reachable
+  from another branch (e.g., created from a commit already on master), the merge
+  detection could trigger premature cleanup.
+
+  EXACT CHANGE — The ownership marker (Issue 3 below) combined with a grace period
+  addresses this. In worktreeDaemon.sh M.3, before checking merge status:
+
+    # Skip worktrees younger than 30 seconds (creation grace period)
+    MARKER="${worktree_path}/.managed-worktree"
+    if [ -f "${MARKER}" ]; then
+      local created_at
+      created_at=$(stat -f "%m" "${MARKER}" 2>/dev/null || stat -c "%Y" "${MARKER}" 2>/dev/null)
+      local now
+      now=$(date +%s)
+      if (( now - created_at < 30 )); then
+        vlog "Skipping ${worktree_path}: within creation grace period"
+        continue
+      fi
+    fi
+
+  Complexity: SMALL. Stat check on the marker file.
+
+
+ISSUE 6: Merge detection false positive on branches created at old commits
+  Synthesis ref: Critical #6, Consolidated Rec #5
+
+  VERDICT: CONFIRMED. This is the core bug that motivated the rewrite. The current
+  is_worktree_merged() scans ALL merge commits ever. If a branch was created from
+  a commit that was already merged somewhere, it matches. The fix requires recording
+  the branch birth commit and constraining the scan window.
+
+  EXACT CHANGE — Record branch birth in spawnWorktree.sh STEP 4 (after worktree add):
+
+    # Record branch birth commit for merge detection
+    BIRTH_COMMIT=$(git -C "${REPO_ROOT}" rev-parse HEAD)
+    echo "${BIRTH_COMMIT}" > "${WORKTREE_PATH}/.worktree-birth-commit"
+
+  EXACT CHANGE — Replace is_worktree_merged() in worktreeLib.sh:
+
+    is_worktree_merged() {
+      local branch_name="$1"
+      local worktree_path="$2"
+      local repo_root="${3:-${REPO_ROOT}}"
+
+      # Get current branch tip
+      local branch_tip
+      branch_tip=$(git -C "${repo_root}" rev-parse "refs/heads/${branch_name}" 2>/dev/null) || return 1
+
+      # Load birth commit for scan window
+      local birth_file="${worktree_path}/.worktree-birth-commit"
+      local since_commit=""
+      if [ -f "${birth_file}" ]; then
+        since_commit=$(<"${birth_file}")
+      fi
+
+      # Only scan merge commits AFTER branch birth
+      local log_args=(--all --merges --format='%H %P')
+      if [ -n "${since_commit}" ]; then
+        log_args+=(--ancestry-path "${since_commit}..HEAD")
+      fi
+
+      # Use awk instead of bash while-read for performance
+      git -C "${repo_root}" log "${log_args[@]}" 2>/dev/null | \
+        awk -v tip="${branch_tip}" '{
+          for (i = 3; i <= NF; i++) {
+            if ($i == tip) { exit 0 }
+          }
+        } END { exit 1 }'
+    }
+
+  Note on --ancestry-path: this limits the scan to commits that are descendants of
+  the birth commit AND ancestors of HEAD. This dramatically reduces the search space
+  and eliminates false positives from pre-existing merge commits.
+
+  ALSO ADD squash merge fallback (Consolidated Rec #5):
+
+    is_worktree_squash_merged() {
+      local branch_name="$1"
+      local repo_root="${2:-${REPO_ROOT}}"
+
+      # Check if the branch's diff is already contained in any target branch
+      # by comparing tree objects after squash
+      local branch_tip
+      branch_tip=$(git -C "${repo_root}" rev-parse "refs/heads/${branch_name}" 2>/dev/null) || return 1
+
+      local merge_base
+      merge_base=$(git -C "${repo_root}" merge-base HEAD "${branch_tip}" 2>/dev/null) || return 1
+
+      # If branch tip is ancestor of HEAD, the changes are incorporated
+      if git -C "${repo_root}" merge-base --is-ancestor "${branch_tip}" HEAD 2>/dev/null; then
+        # But this could just mean no divergence. Check there are actual commits.
+        local ahead
+        ahead=$(git -C "${repo_root}" rev-list --count "${merge_base}..${branch_tip}" 2>/dev/null)
+        if [ "${ahead:-0}" -gt 0 ]; then
+          return 0
+        fi
+      fi
+
+      # Cherry-pick detection: check if all commits on branch exist on target
+      local unmerged
+      unmerged=$(git -C "${repo_root}" cherry HEAD "${branch_name}" 2>/dev/null | grep -c '^+' || true)
+      if [ "${unmerged}" -eq 0 ]; then
+        return 0
+      fi
+
+      return 1
+    }
+
+  Update daemon M.3.2 to call both:
+
+    if is_worktree_merged "${branch_name}" "${worktree_path}" "${REPO_ROOT}" || \
+       is_worktree_squash_merged "${branch_name}" "${REPO_ROOT}"; then
+      # proceed to cleanup
+    fi
+
+  Complexity: LARGE. Core algorithm rewrite plus new squash detection function.
+
+
+ISSUE 8: isBackground + empty problemMatcher hangs VS Code task engine
+  Synthesis ref: High #8, Consolidated Rec #4
+
+  VERDICT: CONFIRMED. When isBackground is true, VS Code expects a problemMatcher
+  with a background pattern to know when the task has "started." Without it, the
+  dependsOn chain can stall because VS Code never considers the dependency resolved.
+
+  EXACT CHANGE — For the daemon task in main repo .vscode/tasks.json:
+
+  Replace:
+    "isBackground": true,
+    "problemMatcher": []
+
+  With:
+    "isBackground": true,
+    "problemMatcher": {
+      "pattern": { "regexp": "^$" },
+      "background": {
+        "activeOnStart": true,
+        "beginsPattern": "^\\[DAEMON\\]",
+        "endsPattern": "^$"
+      }
+    }
+
+  And ensure worktreeDaemon.sh prints a startup line:
+    echo "[DAEMON] Worktree daemon started for ${REPO_ROOT}"
+
+  EXACT CHANGE — For the worktree IDE tasks.json template, the Claude and tmux
+  tasks need similar treatment. Replace their problemMatcher: [] with:
+
+    "problemMatcher": {
+      "pattern": { "regexp": "^$" },
+      "background": {
+        "activeOnStart": true,
+        "beginsPattern": ".",
+        "endsPattern": "^$"
+      }
+    }
+
+  Complexity: SMALL. Config changes only.
+
+
+ISSUE 16: Interactive prompt hidden in automated task
+  Synthesis ref: High #16
+
+  VERDICT: CONFIRMED. In Case A (reopen), the spec says to prompt "Overwrite? [y/N]"
+  when scaffold files are modified. But spawnWorktree.sh is launched from a VS Code
+  task, where stdin may not be available.
+
+  EXACT CHANGE — Make the overwrite behavior non-interactive with a flag:
+
+  In spawnWorktree.sh, add a --force flag:
+
+    FORCE=false
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --force) FORCE=true; shift ;;
+        *) WORKTREE_NAME="${1// /_}"; shift ;;
+      esac
+    done
+
+  In Case A, replace the interactive prompt:
+
+    if check_scaffold_modified "${WORKTREE_PATH}" "${WORKTREE_NAME}"; then
+      if [ "${FORCE}" = true ]; then
+        log "Scaffold modified but --force specified. Overwriting."
+        scaffold_worktree "${WORKTREE_PATH}" "${WORKTREE_NAME}"
+      else
+        log "WARNING: Scaffold files in ${WORKTREE_PATH} have been modified."
+        log "Re-run with --force to overwrite, or edit manually."
+        # Still proceed to open IDE — just skip scaffold overwrite
+      fi
+    else
+      scaffold_worktree "${WORKTREE_PATH}" "${WORKTREE_NAME}"
+    fi
+
+  Update the VS Code task to use --force (since VS Code invocation is intentional):
+
+    "command": "${workspaceFolder}/spawnWorktree.sh --force ${input:worktreeName}"
+
+  When run from terminal manually, user gets the warning and can add --force.
+
+  Complexity: SMALL. Flag parsing and conditional logic.
+
+
+================================================================================
+PHASE 2: DATA SAFETY ISSUES (could cause loss of user work)
+================================================================================
+
+ISSUE 2: Scaffold files are tracked repo files used as disposable scaffold
+  Synthesis ref: Critical #2, Consolidated Rec #2
+
+  VERDICT: CONFIRMED. If .claude/settings.json and .vscode/tasks.json are tracked
+  in the worktree's branch, then git status will show them as modified (since they
+  were overwritten by scaffold), and git worktree remove --force could discard
+  actual user changes. Worse, "discarding" scaffold on merge means running git
+  checkout on tracked files, which is semantically wrong.
+
+  EXACT CHANGE — The scaffold files must be untracked. In spawnWorktree.sh STEP 4,
+  add them to the worktree's local git exclude:
+
+    scaffold_worktree() {
+      local wt_path="$1"
+      local wt_name="$2"
+
+      mkdir -p "${wt_path}/.claude" "${wt_path}/.vscode"
+      cp "${REPO_ROOT}/v1/templates/settings.json" "${wt_path}/.claude/settings.json"
+      sed "s/__NAME__/${wt_name}/g" "${REPO_ROOT}/v1/templates/tasks.json" > "${wt_path}/.vscode/tasks.json"
+
+      # Ensure scaffold files are git-ignored in this worktree
+      local exclude_file="${wt_path}/.git/info/exclude"
+      # Note: in a worktree, .git is a file pointing to the real gitdir.
+      # We need the actual gitdir path.
+      local gitdir
+      gitdir=$(git -C "${wt_path}" rev-parse --git-dir 2>/dev/null)
+      exclude_file="${gitdir}/info/exclude"
+      mkdir -p "$(dirname "${exclude_file}")"
+
+      for pattern in ".claude/settings.json" ".vscode/tasks.json" ".managed-worktree" ".worktree-birth-commit" "bootstrap.sh"; do
+        if ! grep -qxF "${pattern}" "${exclude_file}" 2>/dev/null; then
+          echo "${pattern}" >> "${exclude_file}"
+        fi
+      done
+    }
+
+  This makes the scaffold files invisible to git status in the worktree, so:
+  - has_non_scaffold_changes() no longer needs special filtering
+  - git worktree remove --force won't see them as dirty
+  - The daemon's "discard scaffold" step is just rm, not git checkout
+
+  Complexity: MEDIUM. Changes scaffold_worktree and simplifies has_non_scaffold_changes.
+
+
+ISSUE 3: No ownership marker — daemon can act on user-created worktrees
+  Synthesis ref: Critical #3, Consolidated Rec #3
+
+  VERDICT: CONFIRMED. Without a marker, the daemon will attempt merge detection and
+  cleanup on ANY worktree in the repo, including ones the user created manually for
+  unrelated purposes. This is a data safety issue.
+
+  EXACT CHANGE — In spawnWorktree.sh, at the end of STEP 4:
+
+    # Mark this worktree as managed by our system
+    touch "${WORKTREE_PATH}/.managed-worktree"
+
+  In worktreeDaemon.sh M.3, add guard at the start of the per-worktree loop:
+
+    # Only manage worktrees we created
+    if [ ! -f "${worktree_path}/.managed-worktree" ]; then
+      vlog "Skipping unmanaged worktree: ${worktree_path}"
+      continue
+    fi
+
+  Complexity: TRIVIAL. One touch, one test.
+
+
+ISSUE 11: git worktree remove --force data loss (TOCTOU race)
+  Synthesis ref: High #11, Consolidated Rec #6, #8
+
+  VERDICT: CONFIRMED. Between checking "is clean" and running "remove --force",
+  the user could save a file. The --force flag bypasses git's own safety checks.
+
+  EXACT CHANGE — In worktreeDaemon.sh M.3.3, replace the cleanup sequence:
+
+    cleanup_worktree() {
+      local worktree_path="$1"
+      local branch_name="$2"
+
+      # Step 1: Kill IDE and tmux first
+      # (IDE kill is best-effort; user may have already closed it)
+      if ide_is_running_for_path "${worktree_path}"; then
+        log "WARNING: IDE still open for ${worktree_path}. Skipping cleanup."
+        return 1
+      fi
+      tmux kill-session -t "${branch_name}" 2>/dev/null || true
+
+      # Step 2: Wait briefly for any file writes to flush
+      sleep 2
+
+      # Step 3: Re-check for dirty files AFTER killing processes
+      # Remove scaffold files first (they are untracked, safe to delete)
+      discard_scaffold_files "${worktree_path}"
+
+      if has_non_scaffold_changes "${worktree_path}"; then
+        log "WARNING: Dirty files in merged worktree ${worktree_path}. Skipping removal."
+        log "  Manual cleanup: git worktree remove ${worktree_path}"
+        return 1
+      fi
+
+      # Step 4: Re-verify branch tip hasn't moved since merge check
+      local current_tip
+      current_tip=$(git -C "${REPO_ROOT}" rev-parse "refs/heads/${branch_name}" 2>/dev/null) || {
+        log "WARNING: Branch ${branch_name} disappeared during cleanup. Removing worktree path only."
+        git worktree remove "${worktree_path}" 2>/dev/null || rm -rf "${worktree_path}"
+        git worktree prune
+        return 0
+      }
+
+      # Step 5: Use non-force remove first, fall back to force only if truly clean
+      if ! git worktree remove "${worktree_path}" 2>/dev/null; then
+        log "WARNING: git worktree remove failed for ${worktree_path}. May have new changes."
+        log "  Manual cleanup: git worktree remove --force ${worktree_path}"
+        return 1
+      fi
+
+      # Step 6: Delete branch
+      git branch -D "${branch_name}" 2>/dev/null || true
+      git worktree prune
+
+      log "Cleaned up merged worktree: ${branch_name}"
+      return 0
+    }
+
+  Key changes:
+  - No --force on worktree remove (let git's own safety check be the final guard)
+  - Re-verify after killing processes
+  - Sleep 2 to let filesystem flush
+  - Re-check dirty status
+  - Graceful fallback with manual instructions
+
+  Complexity: MEDIUM. Restructures the entire cleanup flow.
+
+
+ISSUE 10: set -e in daemon loop
+  Synthesis ref: High #10, Consolidated Rec #6
+
+  VERDICT: CONFIRMED. set -e in a long-running daemon is dangerous. A transient
+  git failure (lock contention, filesystem hiccup) would kill the entire daemon.
+
+  EXACT CHANGE — worktreeDaemon.sh:
+
+  Remove any set -e at the top of the file. Instead, use explicit error handling:
+
+    # Do NOT use set -e — daemon must survive transient errors
+    # set -u is fine (catch unset variables)
+    set -u
+
+    # Wrap the main loop body in a subshell or function with error handling
+    process_worktrees() {
+      local worktrees
+      worktrees=$(get_worktrees) || {
+        log "WARNING: Failed to list worktrees. Will retry next cycle."
+        return 0  # non-fatal
+      }
+
+      # ... rest of M.2 and M.3 ...
+    }
+
+    while true; do
+      # Check main IDE
+      if ! ide_is_running_for_path "${REPO_ROOT}"; then
+        log "Main IDE closed. Exiting daemon."
+        exit 0
+      fi
+
+      # Process worktrees with error containment
+      process_worktrees || log "WARNING: Error in worktree processing cycle. Continuing."
+
+      sleep "${POLL_INTERVAL}"
+    done
+
+  Complexity: SMALL. Remove set -e, add || guards.
+
+
+ISSUE 7: Daemon exits when main IDE closes but worktree IDEs still open
+  Synthesis ref: High #7, Consolidated Rec #7
+
+  VERDICT: CONFIRMED. The spec says daemon exits when the main IDE closes. But
+  worktree IDEs and their tmux sessions would be orphaned — no cleanup on merge,
+  no tmux kill on IDE close.
+
+  EXACT CHANGE — In worktreeDaemon.sh M.1, replace the immediate exit:
+
+    # M.1: CHECK IF ANY MANAGED IDE IS ALIVE
+    main_alive=false
+    if ide_is_running_for_path "${REPO_ROOT}"; then
+      main_alive=true
+    fi
+
+    any_worktree_alive=false
+    # (This check happens naturally in M.3, but we need it here for the exit decision)
+    while IFS= read -r wt_line; do
+      # parse worktree path from wt_line
+      local wt_path
+      wt_path=$(echo "${wt_line}" | awk '{print $1}')
+      [ -f "${wt_path}/.managed-worktree" ] || continue
+      if ide_is_running_for_path "${wt_path}"; then
+        any_worktree_alive=true
+        break
+      fi
+    done < <(git worktree list 2>/dev/null | tail -n +2)
+
+    if [ "${main_alive}" = false ] && [ "${any_worktree_alive}" = false ]; then
+      log "No IDE windows open. Exiting daemon."
+      exit 0
+    fi
+
+    if [ "${main_alive}" = false ]; then
+      vlog "Main IDE closed but worktree IDEs still open. Continuing."
+    fi
+
+  Complexity: SMALL. Additional IDE check before exit decision.
+
+
+ISSUE 15: Cleanup of active worktrees (merge detected while IDE still open)
+  Synthesis ref: High #15, Consolidated Rec #8
+
+  VERDICT: CONFIRMED. If a branch is merged while the worktree IDE is still open,
+  the daemon should not yank files out from under the user.
+
+  EXACT CHANGE — In worktreeDaemon.sh M.3.3, before cleanup:
+
+    # Don't clean up worktrees with active IDE sessions
+    if ide_is_running_for_path "${worktree_path}"; then
+      log "Branch ${branch_name} merged but IDE still open. Deferring cleanup."
+      # Optionally notify user via a marker file
+      echo "Branch merged. Close this IDE window to allow cleanup." > "${worktree_path}/.merge-detected"
+      continue
+    fi
+
+  Complexity: TRIVIAL. One guard check.
+
+
+================================================================================
+PHASE 3: RELIABILITY IMPROVEMENTS
+================================================================================
+
+ISSUE 9: Merge scan CPU bottleneck — bash while-read loop
+  Synthesis ref: High #9, Consolidated Rec #5
+
+  VERDICT: CONFIRMED. The original while-read loop in bash is extremely slow for
+  large histories. Already addressed in Phase 1 Issue 6 by switching to awk.
+
+  ADDITIONAL CHANGE — Add scan window limit:
+
+  In is_worktree_merged(), add --since flag to limit to recent history:
+
+    # Only scan last 7 days of merge commits (worktrees are short-lived)
+    local log_args=(--all --merges --since="7 days ago" --format='%H %P')
+
+  This provides a hard upper bound on scan cost regardless of repo size.
+
+  Complexity: TRIVIAL. One additional flag.
+
+
+ISSUE 12: tmux session name collision
+  Synthesis ref: High #12, Consolidated Rec #10
+
+  VERDICT: CONFIRMED. If a tmux session with the worktree name already exists
+  (from a previous run, or user-created), tmux new-session will fail.
+
+  EXACT CHANGE — In v1/templates/tasks.json, replace:
+
+    "command": "tmux new-session -s __NAME__"
+
+  With:
+
+    "command": "tmux new-session -A -s __NAME__"
+
+  The -A flag attaches to an existing session if it exists, or creates a new one.
+  This is idempotent and handles all collision cases.
+
+  Complexity: TRIVIAL. One flag addition.
+
+
+ISSUE 13: Singleton detection without PID file
+  Synthesis ref: High #13
+
+  VERDICT: CONFIRMED. Already fully addressed in Phase 1 Issue 1 (PID file approach).
+
+  No additional changes needed.
+
+  Complexity: N/A (already resolved).
+
+
+ISSUE 14: Scaffold comparison in Case A — template has __NAME__ placeholders
+  Synthesis ref: High #14
+
+  VERDICT: CONFIRMED. check_scaffold_modified() needs to compare against the
+  RENDERED template, not the raw template with __NAME__ placeholders.
+
+  EXACT CHANGE — In worktreeLib.sh:
+
+    check_scaffold_modified() {
+      local wt_path="$1"
+      local wt_name="$2"
+
+      local modified=false
+
+      # Compare settings.json (no placeholders, direct compare)
+      if [ -f "${wt_path}/.claude/settings.json" ]; then
+        if ! diff -q "${REPO_ROOT}/v1/templates/settings.json" "${wt_path}/.claude/settings.json" >/dev/null 2>&1; then
+          modified=true
+        fi
+      fi
+
+      # Compare tasks.json (render template first, then compare)
+      if [ -f "${wt_path}/.vscode/tasks.json" ]; then
+        local rendered
+        rendered=$(sed "s/__NAME__/${wt_name}/g" "${REPO_ROOT}/v1/templates/tasks.json")
+        if ! echo "${rendered}" | diff -q - "${wt_path}/.vscode/tasks.json" >/dev/null 2>&1; then
+          modified=true
+        fi
+      fi
+
+      [ "${modified}" = true ]
+    }
+
+  Complexity: SMALL. Sed the template before diffing.
+
+
+ISSUE 17: Merge scan performance — scans entire repo history
+  Synthesis ref: Medium #17
+
+  VERDICT: CONFIRMED. Already addressed by the --since="7 days ago" window in
+  Phase 3 Issue 9 and the awk rewrite in Phase 1 Issue 6.
+
+  No additional changes needed.
+
+  Complexity: N/A (already resolved).
+
+
+ISSUE 18: No squash/rebase merge support
+  Synthesis ref: Medium #18, Consolidated Rec #5
+
+  VERDICT: CONFIRMED. Already addressed in Phase 1 Issue 6 with the
+  is_worktree_squash_merged() function.
+
+  No additional changes needed.
+
+  Complexity: N/A (already resolved).
+
+
+ISSUE 19: Re-verify branch tip before deletion
+  Synthesis ref: Medium #19, Consolidated Rec #6
+
+  VERDICT: CONFIRMED. Already addressed in Phase 2 Issue 11 (cleanup_worktree
+  function re-verifies the branch tip in Step 4).
+
+  No additional changes needed.
+
+  Complexity: N/A (already resolved).
+
+
+ISSUE 20: git worktree list --porcelain parsing edge cases
+  Synthesis ref: Medium #20
+
+  VERDICT: CONFIRMED. Paths with spaces or special characters can break naive
+  parsing. The --porcelain format is well-defined but needs careful handling.
+
+  EXACT CHANGE — In worktreeLib.sh get_worktrees():
+
+    get_worktrees() {
+      local repo_root="${1:-${REPO_ROOT}}"
+      local current_path="" current_branch=""
+
+      git -C "${repo_root}" worktree list --porcelain 2>/dev/null | while IFS= read -r line; do
+        case "${line}" in
+          "worktree "*)
+            current_path="${line#worktree }"
+            ;;
+          "branch "*)
+            current_branch="${line#branch refs/heads/}"
+            ;;
+          "")
+            # Empty line = end of record
+            if [ -n "${current_path}" ] && [ -n "${current_branch}" ]; then
+              # Use null byte as delimiter for paths with spaces
+              printf '%s\t%s\n' "${current_path}" "${current_branch}"
+            fi
+            current_path=""
+            current_branch=""
+            ;;
+        esac
+      done
+    }
+
+  Callers must use:
+    while IFS=$'\t' read -r wt_path wt_branch; do
+      ...
+    done < <(get_worktrees)
+
+  Complexity: SMALL. Parser rewrite with tab delimiters.
+
+
+ISSUE 21: macOS SIGHUP behavior differences
+  Synthesis ref: Medium #21
+
+  VERDICT: CONFIRMED but LOW RISK. The daemon is launched via nohup, which
+  explicitly ignores SIGHUP. The PID file approach (Phase 1 Issue 1) with
+  EXIT trap handles all termination signals. The spec mentions "dies naturally
+  via SIGHUP when IDE terminal closes" but with PID file cleanup on EXIT,
+  this is handled correctly.
+
+  EXACT CHANGE — In worktreeDaemon.sh, make SIGHUP handling explicit:
+
+    trap 'cleanup_pidfile; exit 0' EXIT SIGINT SIGTERM SIGHUP
+
+  Complexity: TRIVIAL. One word added to trap.
+
+
+================================================================================
+PHASE 4: NICE-TO-HAVE IMPROVEMENTS
+================================================================================
+
+ISSUE 22: Claude CLI flag syntax unverified
+  Synthesis ref: Low #22
+
+  VERDICT: DISPUTED (partially). The --permission-mode flag is documented in
+  Claude Code's help output. However, CLI flags can change between versions.
+
+  MITIGATION — Add a version check in the bootstrap:
+
+    # In v1/templates/tasks.json, wrap Claude command:
+    "command": "command -v claude >/dev/null 2>&1 && claude --permission-mode plan || echo 'Claude CLI not found. Install from https://claude.ai/code'"
+
+  Complexity: TRIVIAL.
+
+
+ISSUE 23: WORKTREE_PATH relative ../ with symlinks
+  Synthesis ref: Low #23
+
+  VERDICT: CONFIRMED. If REPO_ROOT is a symlink, ../worktree_name lands somewhere
+  unexpected.
+
+  EXACT CHANGE — In spawnWorktree.sh STEP 1:
+
+    REPO_ROOT="$(cd "${REPO_ROOT}" && pwd -P)"  # Resolve symlinks
+    WORKTREE_PATH="$(cd "${REPO_ROOT}/.." && pwd -P)/${WORKTREE_NAME}"
+
+  Complexity: TRIVIAL.
+
+
+ISSUE 24: No log rotation
+  Synthesis ref: Low #24
+
+  VERDICT: CONFIRMED but low priority for a short-lived daemon.
+
+  EXACT CHANGE — In worktreeDaemon.sh, at the start of each loop iteration:
+
+    # Rotate log if over 1MB
+    LOG_FILE="${REPO_ROOT}/.worktree-daemon.log"
+    if [ -f "${LOG_FILE}" ]; then
+      local log_size
+      log_size=$(wc -c < "${LOG_FILE}" 2>/dev/null || echo 0)
+      if [ "${log_size}" -gt 1048576 ]; then
+        mv "${LOG_FILE}" "${LOG_FILE}.old"
+        # Keep only one backup
+      fi
+    fi
+
+  Complexity: TRIVIAL.
+
+
+ISSUE 25: No npm install timeout
+  Synthesis ref: Low #25
+
+  VERDICT: CONFIRMED. A hanging npm install blocks the entire task chain.
+
+  EXACT CHANGE — In v1/templates/tasks.json, replace:
+
+    "command": "npm install"
+
+  With:
+
+    "command": "timeout 120 npm install || echo 'npm install timed out after 2 minutes'"
+
+  Note: On macOS, timeout is available via coreutils (gtimeout). Alternatively:
+
+    "command": "( npm install & NPM_PID=$!; sleep 120 && kill $NPM_PID 2>/dev/null & wait $NPM_PID )"
+
+  Or more practically, just accept the risk since npm install rarely hangs and
+  the user can see the terminal output and kill it manually.
+
+  REVISED VERDICT: SKIP. The complexity of cross-platform timeout handling outweighs
+  the risk. Users can Ctrl+C a hanging npm install.
+
+  Complexity: N/A (skipped).
+
+
+ISSUE 26: mkdir syntax error (trailing comma)
+  Synthesis ref: Low #26
+
+  VERDICT: CONFIRMED. The spec says "mkdir -p .claude, .vscode" — the comma would
+  create a directory literally named ".claude,". Already addressed by the rewritten
+  scaffold_worktree() function which uses:
+
+    mkdir -p "${wt_path}/.claude" "${wt_path}/.vscode"
+
+  No additional changes needed.
+
+  Complexity: N/A (already resolved).
+
+
+ISSUE 27: Weak input validation
+  Synthesis ref: Low #27, Consolidated Rec #9
+
+  VERDICT: CONFIRMED. The spec describes validation but doesn't show the enforcement.
+
+  EXACT CHANGE — In worktreeLib.sh:
+
+    validate_name() {
+      local name="$1"
+      if [ -z "${name}" ]; then
+        echo "ERROR: Worktree name cannot be empty." >&2
+        return 1
+      fi
+      if ! [[ "${name}" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        echo "ERROR: Worktree name '${name}' contains invalid characters." >&2
+        echo "  Allowed: letters, numbers, underscore, hyphen." >&2
+        return 1
+      fi
+      if [ "${#name}" -gt 50 ]; then
+        echo "ERROR: Worktree name exceeds 50 characters." >&2
+        return 1
+      fi
+      # Prevent names that collide with git internals
+      if [[ "${name}" == "HEAD" || "${name}" == "master" || "${name}" == "main" ]]; then
+        echo "ERROR: '${name}' is a reserved branch name." >&2
+        return 1
+      fi
+      return 0
+    }
+
+  In spawnWorktree.sh STEP 1, enforce it:
+
+    WORKTREE_NAME="${1// /_}"
+    validate_name "${WORKTREE_NAME}" || exit 1
+
+  Complexity: SMALL.
+
+
+================================================================================
+REVISED IMPLEMENTATION SEQUENCE
+================================================================================
+
+The original sequence was:
+  1. worktreeLib.sh -> 2. templates -> 3. spawnWorktree.sh -> 4. daemon -> 5. tasks.json
+
+The revised sequence, accounting for all resolutions:
+
+  STEP 1: worktreeLib.sh (all shared functions)
+    - validate_name() with full enforcement
+    - is_worktree_merged() with awk, birth-commit window, --since limit
+    - is_worktree_squash_merged() (new)
+    - scaffold_worktree() with git exclude for untracked scaffold
+    - check_scaffold_modified() with rendered template comparison
+    - discard_scaffold_files()
+    - has_non_scaffold_changes() (simplified, no scaffold filtering needed)
+    - get_worktrees() with robust porcelain parsing
+    - ide_is_running_for_path() (new, replaces all pgrep calls)
+    - daemon_already_running() / daemon_is_running() (PID file helpers)
+    - log() / vlog()
+    - cleanup_worktree() (new, consolidates all cleanup logic)
+
+  STEP 2: v1/templates/tasks.json
+    - Background problemMatcher patterns for Claude and tmux tasks
+    - tmux new-session -A -s __NAME__ (idempotent)
+    - Claude command with fallback
+
+  STEP 3: v1/templates/settings.json (if not already present)
+
+  STEP 4: v1/templates/bootstrap.sh (new fallback script)
+
+  STEP 5: spawnWorktree.sh
+    - --force flag parsing
+    - Symlink-safe path resolution
+    - .managed-worktree marker creation
+    - .worktree-birth-commit recording
+    - Non-interactive Case A with --force flag
+    - PID-file based daemon check
+
+  STEP 6: worktreeDaemon.sh
+    - PID file singleton (no pgrep)
+    - No set -e, explicit error handling
+    - Watch all IDE windows, not just main
+    - Grace period for new worktrees
+    - Ownership marker check
+    - Deferred cleanup when IDE is open
+    - TOCTOU-safe cleanup with non-force remove
+    - Log rotation
+    - Explicit SIGHUP trap
+
+  STEP 7: .vscode/tasks.json (main repo)
+    - Daemon task with proper background problemMatcher
+    - Spawn task with --force and input prompt
+
+  STEP 8: .gitignore updates
+    - Add: .worktree-daemon.pid, .worktree-daemon.log, .worktree-daemon.log.old
+
+  STEP 9: Delete old files
+    - spawnBGClaudeWT.sh, .worktree-locks/
+
+  STEP 10: test-worktree-scripts.sh updates
+    - Test PID file lifecycle
+    - Test ownership marker
+    - Test birth commit recording
+    - Test merge detection with awk
+    - Test squash merge detection
+    - Test scaffold in git exclude
+    - Test validate_name edge cases
+    - Test cleanup guards
+
+
+================================================================================
+ESTIMATE OF TOTAL CHANGES
+================================================================================
+
+  worktreeLib.sh:        ~250 lines (rewrite, many new functions)
+  worktreeDaemon.sh:     ~180 lines (rewrite with new safety features)
+  spawnWorktree.sh:      ~120 lines (new file, replaces spawnBGClaudeWT.sh)
+  v1/templates/tasks.json:  ~45 lines (modified config)
+  v1/templates/bootstrap.sh: ~15 lines (new file)
+  .vscode/tasks.json:     ~25 lines (modified)
+  .gitignore:              ~5 lines (additions)
+  test-worktree-scripts.sh: ~200 lines (significant updates)
+
+  TOTAL: ~840 lines added/changed
+  TOTAL: ~300 lines removed (old files)
+  NET:   ~540 lines
+
+  This is roughly 60% more code than the original spec estimated, driven
+  primarily by the PID file infrastructure, the awk-based merge detection,
+  the squash merge detection, and the TOCTOU-safe cleanup flow.
+
+
+================================================================================
+FINAL ASSESSMENT
+================================================================================
+
+After applying all resolutions in this plan:
+
+  STATUS: READY FOR IMPLEMENTATION
+
+  The 6 critical issues are fully addressed:
+  - pgrep replaced with PID file + kill -0 (Issue 1)
+  - Scaffold files are untracked via git exclude (Issue 2)
+  - Ownership marker prevents daemon acting on manual worktrees (Issue 3)
+  - First-launch trust prompt documented + fallback bootstrap (Issue 4)
+  - Race condition prevented by 30-second grace period (Issue 5)
+  - Merge detection rewritten with birth commit, awk, and scan window (Issue 6)
+
+  The 10 high-severity issues are fully addressed:
+  - Daemon watches all IDE windows (Issue 7)
+  - Background problemMatcher patterns added (Issue 8)
+  - Awk replaces bash while-read loop (Issue 9)
+  - set -e removed, explicit error handling (Issue 10)
+  - TOCTOU-safe cleanup without --force (Issue 11)
+  - tmux -A flag for idempotency (Issue 12)
+  - PID file for singleton (Issue 13)
+  - Rendered template comparison (Issue 14)
+  - Deferred cleanup when IDE is open (Issue 15)
+  - Non-interactive --force flag (Issue 16)
+
+  The 5 medium issues are addressed or absorbed by other fixes.
+  The 6 low issues are addressed except npm install timeout (skipped as
+  disproportionate complexity for the risk).
+
+  REMAINING RISKS:
+  1. VS Code task trust prompt is a one-time UX friction. No technical fix exists
+     short of pre-configuring the workspace trust settings, which is a security
+     anti-pattern.
+  2. The squash merge detection using git cherry has O(n) complexity in the number
+     of commits on the branch. For typical short-lived feature branches this is
+     negligible, but for long-running branches it could be slow. The --since
+     window mitigates this.
+  3. macOS vs Linux differences in stat flags (-f vs -c) and process inspection
+     (/proc vs ps) are handled but should be tested on both platforms.
+
+  CONFIDENCE LEVEL: HIGH. The resolutions are concrete, minimal, and avoid
+  introducing new failure modes. The phased approach allows incremental testing.
+  The spec is ready for a skilled bash developer to implement.

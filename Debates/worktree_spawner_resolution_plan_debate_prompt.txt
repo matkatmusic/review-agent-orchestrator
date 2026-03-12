@@ -1,0 +1,352 @@
+DEBATE PROMPT: Worktree Spawner Rewrite — Resolution Plan
+
+You have been given two documents:
+
+1. THE ORIGINAL SPEC (worktree-spawner-rewrite.md) — a complete rewrite plan for
+   git worktree management scripts (bash + VS Code tasks.json integration).
+
+2. THE REVIEW SYNTHESIS (worktree_spawner_rewrite_review_debate_synthesis.txt) — the
+   result of a three-way AI review (Claude, Codex, Gemini) that found 27 issues
+   across CRITICAL/HIGH/MEDIUM/LOW severity levels and declared the spec NOT READY.
+
+Your task: Compare the original spec against the synthesis findings and produce
+a CONCRETE RESOLUTION PLAN that addresses every confirmed issue. For each issue:
+
+A) Confirm or dispute the finding (with reasoning)
+B) If confirmed: propose the EXACT change to the spec — not vague advice, but
+   specific bash code, tasks.json config, or spec text modifications
+C) If disputed: explain why and what (if any) alternative mitigation is needed
+D) Rate the implementation complexity (trivial / small / medium / large)
+
+Group your resolutions into implementation phases:
+- Phase 1: Blocking issues that prevent the system from functioning at all
+- Phase 2: Data safety issues that could cause loss of user work
+- Phase 3: Reliability improvements for production robustness
+- Phase 4: Nice-to-have improvements
+
+For each resolution, consider:
+- Does it introduce new complexity or failure modes?
+- Does it conflict with any other resolution?
+- What is the minimal change that fully addresses the issue?
+
+The 10 consolidated recommendations from the synthesis are:
+1. Process detection: Replace pgrep with PID-file + kill -0. Fix self-detection.
+2. Scaffold design: Use untracked marker files, not tracked repo files.
+3. Ownership: Add .managed-worktree marker during spawn.
+4. Task automation: Single compound bootstrap script. Remove isBackground from daemon.
+5. Merge detection: Branch-birth metadata, limit scan window, use awk, add squash fallback.
+6. Daemon safety: No set -e, explicit error handling, re-verify before destructive ops.
+7. Daemon lifecycle: Watch ALL IDE windows, not just main.
+8. Cleanup guards: Check all processes dead before removing worktree.
+9. Input validation: Actually enforce [a-zA-Z0-9_-]+ regex.
+10. tmux: Use new-session -A flag for idempotent session creation.
+
+After proposing all resolutions, provide:
+- A revised implementation sequence (what order to build things)
+- An estimate of total lines of code added/changed
+- A final assessment: after these changes, is the spec ready for implementation?
+
+=== DOCUMENT 1: ORIGINAL SPEC ===
+
+# Worktree Management Scripts — Complete Rewrite
+
+## Requirements
+
+R1.  Create a git worktree (if it doesn't exist), using the user's preferred name.
+     - Spaces converted to underscores, validated to [a-zA-Z0-9_-]+
+     - Always branches from current HEAD
+     - If both branch+path exist: reopen + re-scaffold (prompt before overwriting
+       modified settings/tasks.json)
+     - If branch exists but path missing: re-create worktree from existing branch
+     - If path exists but branch missing: error + manual cleanup instructions
+
+R2.  Open the worktree folder in the user's preferred IDE (currently 'agy').
+
+R3.  Open a Claude instance in the IDE's integrated terminal, with permissions
+     from v1/templates/settings.json and in Plan mode (claude --permission-mode plan).
+
+R4.  Create a tmux session with the same name as the worktree, CWD = worktree folder.
+
+R5.  Split the Claude terminal in the IDE using task groups — Claude and tmux-attach
+     appear side-by-side in the terminal panel automatically.
+
+R6.  Run 'npm install' in the worktree IDE window. Must complete before Claude and
+     tmux start (via dependsOn in tasks.json).
+
+R7.  When the worktree IDE window is closed, kill the tmux session. Detected by
+     daemon polling for the worktree's agy process.
+
+R8.  Periodically (every 5s) scan the git repo to detect if the worktree branch has
+     been merged (--no-ff) into any branch. Detection method: scan merge commits for
+     ones that have the worktree branch tip as a non-first parent. NO LOCKFILES.
+     On merge detected: discard settings.json/tasks.json silently, WARN if other
+     dirty files exist (skip deletion), force-delete only if clean.
+
+R9.  VS Code tasks.json in the MAIN repo IDE with an input prompt for the worktree
+     name, triggerable from Command Palette. No limit on worktree count.
+
+R10. Daemon auto-starts via runOnFolderOpen task in main repo. Finds main IDE by
+     searching for agy process with main repo path. When main IDE closes, daemon
+     exits silently. On reopen, daemon restarts and rediscovers existing worktrees
+     (from git worktree list) with active tmux sessions.
+
+## Context
+
+The current scripts (spawnBGClaudeWT.sh, worktreeDaemon.sh, worktreeLib.sh) have a
+flawed execution order and use lockfiles for state tracking. The daemon falsely detects
+freshly-created branches as "merged" because `git branch --merged` reports reachability,
+not actual merge commits. The entire system needs a rewrite with lockfile-free state
+derivation and correct merge detection.
+
+## Files
+
+| Action | File | Purpose |
+|--------|------|---------|
+| CREATE | `spawnWorktree.sh` | Replaces spawnBGClaudeWT.sh |
+| CREATE | `v1/templates/tasks.json` | Worktree IDE tasks template with `__NAME__` placeholders |
+| REWRITE | `worktreeLib.sh` | Shared functions (merge detection, scaffold, state) |
+| REWRITE | `worktreeDaemon.sh` | Lockfile-free daemon |
+| MODIFY | `.vscode/tasks.json` | Add daemon auto-start task |
+| DELETE | `spawnBGClaudeWT.sh` | Replaced by spawnWorktree.sh |
+| DELETE | `.worktree-locks/` | No longer needed |
+| MODIFY | `.gitignore` | Remove .worktree-locks/ entry |
+| UPDATE | `test-worktree-scripts.sh` | Adapt for new scripts + no lockfiles |
+
+## 1. spawnWorktree.sh — Execution Order
+
+STEP 1: Parse + validate
+  - WORKTREE_NAME="${1// /_}"
+  - Validate: [a-zA-Z0-9_-]+ only
+  - REPO_ROOT, WORKTREE_PATH="${REPO_ROOT}/../${WORKTREE_NAME}"
+
+STEP 2: Determine state
+  - path_exists:   [ -d "${WORKTREE_PATH}" ]
+  - branch_exists: git show-ref --verify --quiet "refs/heads/${WORKTREE_NAME}"
+
+STEP 3: Handle state matrix
+  CASE A (both exist) — REOPEN:
+    - Compare .claude/settings.json and .vscode/tasks.json to templates
+    - If modified: prompt "Overwrite? [y/N]"
+    - If yes or unchanged: overwrite scaffold
+    - → Step 5 (open IDE)
+
+  CASE B (branch exists, no path) — RE-CREATE:
+    - git worktree prune
+    - git worktree add "${WORKTREE_PATH}" "${WORKTREE_NAME}"
+    - → Step 4 (scaffold)
+
+  CASE C (path exists, no branch) — ERROR:
+    - Print error + manual cleanup instructions
+    - Exit 1
+
+  CASE D (neither) — FRESH CREATE:
+    - git worktree add -b "${WORKTREE_NAME}" "${WORKTREE_PATH}" HEAD
+    - → Step 4 (scaffold)
+
+STEP 4: Scaffold worktree
+  - mkdir -p .claude, .vscode
+  - cp v1/templates/settings.json → .claude/settings.json
+  - sed "s/__NAME__/${WORKTREE_NAME}/g" v1/templates/tasks.json → .vscode/tasks.json
+
+STEP 5: Open IDE
+  - agy --new-window "${WORKTREE_PATH}"
+  - IDE auto-runs tasks.json on folder open:
+    1. npm install (blocking)
+    2. Claude + tmux side-by-side (after npm install, via dependsOn)
+
+STEP 6: Ensure daemon running
+  - pgrep -f "worktreeDaemon.sh.*$(basename "${REPO_ROOT}")"
+  - If not running: nohup start as fallback (main route is IDE runOnFolderOpen)
+
+STEP 7: Print summary
+
+## 2. worktreeDaemon.sh — Main Loop
+
+INIT:
+  - Parse REPO_ROOT, VERBOSE, POLL_INTERVAL=5
+  - Singleton: pgrep for other daemon instances (no PID file)
+  - Trap SIGINT/SIGTERM → log + exit
+
+LOOP (every 5s):
+
+  M.1: CHECK MAIN IDE ALIVE
+    - pgrep -f "agy.*$(basename "${REPO_ROOT}")"
+    - If dead → log "Main IDE closed" → exit 0
+    - (Also dies naturally via SIGHUP when IDE terminal closes)
+
+  M.2: DISCOVER WORKTREES
+    - git worktree list --porcelain → array of (path, branch)
+    - Skip main worktree (first entry)
+
+  M.3: FOR EACH WORKTREE:
+
+    M.3.1: CHECK WORKTREE IDE ALIVE
+      - pgrep -f "agy.*${worktree_path}"
+      - If dead + tmux session exists → kill tmux session (R7)
+
+    M.3.2: CHECK MERGE STATUS (R8)
+      - Call is_worktree_merged() — see Section 4
+
+    M.3.3: IF MERGED → CLEANUP
+      a) Remove scaffold files (.claude/settings.json, .vscode/tasks.json)
+      b) Check for OTHER dirty files (git status --porcelain, filter scaffold)
+      c) If dirty: log WARNING, skip deletion
+      d) If clean: kill tmux, git worktree remove --force, git branch -D, git worktree prune
+
+  M.4: sleep 5
+
+## 3. Worktree IDE tasks.json Template (v1/templates/tasks.json)
+
+npm install runs first (not isBackground, blocks). Claude and tmux declare
+dependsOn: "npm install" and share the same task group for side-by-side split.
+
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "npm install",
+      "type": "shell",
+      "command": "npm install",
+      "runOptions": { "runOn": "folderOpen" },
+      "presentation": { "reveal": "silent", "panel": "shared", "showReuseMessage": false },
+      "problemMatcher": []
+    },
+    {
+      "label": "Claude (Plan Mode)",
+      "type": "shell",
+      "command": "claude --permission-mode plan",
+      "dependsOn": "npm install",
+      "runOptions": { "runOn": "folderOpen" },
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "worktree-__NAME__", "focus": true },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "tmux: __NAME__",
+      "type": "shell",
+      "command": "tmux new-session -s __NAME__",
+      "dependsOn": "npm install",
+      "runOptions": { "runOn": "folderOpen" },
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "worktree-__NAME__", "focus": false },
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}
+
+## 4. is_worktree_merged() — Merge Commit Parent Scan
+
+is_worktree_merged() {
+  local branch_name="$1"
+  local repo_root="${2:-${REPO_ROOT}}"
+  local branch_tip
+  branch_tip=$(git -C "${repo_root}" rev-parse "refs/heads/${branch_name}" 2>/dev/null) || return 1
+
+  while IFS= read -r line; do
+    read -ra parts <<< "${line}"
+    for (( i=2; i<${#parts[@]}; i++ )); do
+      [ "${parts[$i]}" = "${branch_tip}" ] && return 0
+    done
+  done < <(git -C "${repo_root}" log --all --merges --format='%H %P' 2>/dev/null)
+
+  return 1
+}
+
+## 5. Main Repo .vscode/tasks.json — Additions
+
+{
+  "label": "Worktree Daemon",
+  "type": "shell",
+  "command": "${workspaceFolder}/worktreeDaemon.sh",
+  "args": ["${workspaceFolder}"],
+  "runOptions": { "runOn": "folderOpen" },
+  "presentation": { "reveal": "silent", "panel": "dedicated", "showReuseMessage": false },
+  "isBackground": true,
+  "problemMatcher": []
+}
+
+## 6. worktreeLib.sh — Exported Functions
+
+is_worktree_merged()        — merge commit parent scan (Section 4)
+validate_name()             — [a-zA-Z0-9_-]+ check
+scaffold_worktree()         — copy settings.json + sed tasks.json template
+check_scaffold_modified()   — diff scaffold files against templates
+discard_scaffold_files()    — rm .claude/settings.json .vscode/tasks.json
+has_non_scaffold_changes()  — git status --porcelain filtered
+get_worktrees()             — parse git worktree list --porcelain
+log() / vlog()              — logging helpers
+
+## 7. Implementation Sequence
+
+1. worktreeLib.sh (functions are independently testable)
+2. v1/templates/tasks.json (template file)
+3. spawnWorktree.sh (sources worktreeLib.sh)
+4. worktreeDaemon.sh (sources worktreeLib.sh)
+5. .vscode/tasks.json (add daemon task)
+6. Cleanup: delete old files, update .gitignore
+7. Update test-worktree-scripts.sh
+
+## 8. Verification
+
+1. bash spawnWorktree.sh "test wt" → creates worktree, opens IDE, tasks auto-run
+2. In worktree IDE: confirm npm install runs first, then Claude + tmux split
+3. Merge worktree with --no-ff into parent → daemon detects and cleans up within 5s
+4. Close worktree IDE → daemon kills tmux session
+5. Close main IDE → daemon exits
+6. Reopen main IDE → daemon restarts, rediscovers existing worktrees
+7. Run updated test-worktree-scripts.sh
+
+=== DOCUMENT 2: REVIEW SYNTHESIS (27 issues found) ===
+
+UNANIMOUS VERDICT (3/3): NOT READY FOR IMPLEMENTATION AS-IS. Revisions needed.
+
+CRITICAL ISSUES:
+1. pgrep substring false positives + SELF-DETECTION (daemon can't launch)
+2. Scaffold files are tracked repo files used as disposable scaffold
+3. No ownership marker — daemon can act on user-created worktrees
+4. runOnFolderOpen first-launch trust prompt (tasks won't auto-run)
+5. Race condition: spawn vs daemon on freshly created worktrees
+6. Merge detection: branch-created-at-old-commit false positive
+
+HIGH ISSUES:
+7. Daemon exits when main IDE closes but worktree IDE still open
+8. isBackground + empty problemMatcher hangs VS Code task engine
+9. Merge scan CPU bottleneck — bash while-read loop
+10. set -e in daemon loop — crash waiting to happen
+11. git worktree remove --force data loss (TOCTOU race)
+12. tmux session name collision
+13. Singleton detection without PID file
+14. Scaffold comparison in Case A underspecified (template has __NAME__)
+15. Cleanup of active worktrees
+16. Interactive prompt hidden in automated task
+
+MEDIUM ISSUES:
+17. Merge scan performance — scans entire repo history every 5s
+18. No squash/rebase merge support
+19. Re-verify branch tip before deletion
+20. git worktree list --porcelain parsing edge cases
+21. macOS SIGHUP behavior differences
+
+LOW ISSUES:
+22. Claude CLI flag syntax unverified
+23. WORKTREE_PATH relative ../ with symlinks
+24. No log rotation
+25. No npm install timeout
+26. mkdir syntax error (trailing comma)
+27. Weak input validation — not actually enforced
+
+CONSOLIDATED RECOMMENDATIONS:
+1. Process detection: Replace pgrep with PID-file + kill -0. Fix self-detection.
+2. Scaffold design: Use untracked marker files, not tracked repo files.
+3. Ownership: Add .managed-worktree marker during spawn.
+4. Task automation: Single compound bootstrap script. Remove isBackground from daemon.
+5. Merge detection: Branch-birth metadata, limit scan window, use awk, add squash fallback.
+6. Daemon safety: No set -e, explicit error handling, re-verify before destructive ops.
+7. Daemon lifecycle: Watch ALL IDE windows, not just main.
+8. Cleanup guards: Check all processes dead before removing worktree.
+9. Input validation: Actually enforce [a-zA-Z0-9_-]+ regex.
+10. tmux: Use new-session -A flag for idempotent session creation.
+
+=== END OF DOCUMENTS ===
+
+Now produce your resolution plan. Be specific — show exact code changes, not just descriptions.

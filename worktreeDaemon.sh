@@ -21,6 +21,7 @@ fi
 LOCK_DIR="${REPO_ROOT}/.worktree-locks"
 PID_FILE="${LOCK_DIR}/daemon.pid"
 SCAN_INTERVAL=10
+GRACE_PERIOD=60
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/worktreeLib.sh"
@@ -83,12 +84,14 @@ while true; do
       IFS= read -r -d '' WORKTREE_PATH
       IFS= read -r -d '' REPO_ROOT_PARSED
       IFS= read -r -d '' PARENT_BRANCH
+      IFS= read -r -d '' SPAWNED_AT
     } < <(node -e "
       const d = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
       process.stdout.write(d.worktreeName + '\0');
       process.stdout.write(d.worktreePath + '\0');
       process.stdout.write(d.repoRoot + '\0');
       process.stdout.write(d.parentBranch + '\0');
+      process.stdout.write((d.spawnedAt || '') + '\0');
     " "${lockfile}" 2>/dev/null) || {
       log "WARNING: Failed to parse ${lockfile}. Skipping."
       continue
@@ -141,6 +144,17 @@ while true; do
     merged_list="$(git -C "${REPO_ROOT}" branch --merged "${PARENT_BRANCH}" 2>/dev/null)" || true
     vlog "${WORKTREE_NAME}: branches merged into ${PARENT_BRANCH}: $(echo "${merged_list}" | xargs)"
     if echo "${merged_list}" | grep -qw "${WORKTREE_NAME}"; then
+      # Grace period: skip cleanup if worktree was spawned recently.
+      # A freshly-created branch is trivially "merged" because it hasn't
+      # diverged from the parent yet — don't clean it up prematurely.
+      if [ -n "${SPAWNED_AT}" ]; then
+        age_seconds="$(node -e "process.stdout.write(String(Math.max(0, Math.floor((Date.now() - new Date(process.argv[1]).getTime()) / 1000))))" "${SPAWNED_AT}" 2>/dev/null)" || age_seconds=""
+        if [ -n "${age_seconds}" ] && [ "${age_seconds}" -lt "${GRACE_PERIOD}" ]; then
+          log "${WORKTREE_NAME}: branch appears merged but was spawned ${age_seconds}s ago (grace period: ${GRACE_PERIOD}s). Skipping."
+          continue
+        fi
+      fi
+
       log "${WORKTREE_NAME}: MERGED into ${PARENT_BRANCH}. Starting cleanup."
 
       if cleanup_worktree; then

@@ -1,0 +1,79 @@
+Here is a comprehensive review of the worktree management rewrite specification, analyzing completeness, edge cases, process management, and Git behaviors. 
+
+### A & B) Issues, Gaps, and Recommendations
+
+#### CRITICAL SEVERITY
+
+**1. Merge Detection Gap (Squash & Fast-Forward Merges)**
+*   **Issue:** The lockfile-free `is_worktr### A & B) Issues, Gaps, and Edge Cases
+
+#### 1. Self-Detection in Daemon Singleton Check (CRITICAL)
+**Issue:** In `worktreeDaemon.sh`, using `pgrep -f "worktreeDaemon.sh.*$(basename "${REPO_ROOT}")"` will match the daemon's own process. The daemon will instantly detect itself, falsely conclude another instance is running, and exit immediately on startup.
+**Recommendation:** Use the bash regex bracket trick to exclude the `pgrep` command itself, and match the absolute path to prevent cross-project false positives:
+```bash
+pgrep -f "[w]orktreeDaemon.sh.*${REPO_ROOT}" > /dev/null && exit 0
+```
+
+#### 2. Severe CPU Bottleneck in Merge Detection Loop (HIGH)
+**Issue:** `is_worktree_merged` pipes `git log --all --merges` into a bash `while read` loop. In large repositories, this outputs thousands of lines. Running a bash loop over thousands of lines *every 5 seconds for every active worktree* will heavily peg the CPU and drastically delay the daemon's execution.
+**Recommendation:** Replace the bash loop with an optimized `awk` one-liner. `awk` is C-based and will process the git log in milliseconds:
+```bash
+git -C "${repo_root}" log --all --merges --format='%P' 2>/dev/null | \
+  awk -v tip="${branch_tip}" '{for(i=2;i<=NF;i++) if($i==tip) exit 0} END{exit 1}'
+```
+
+#### 3. Blind Spot for Squash and Rebase Merges (HIGH)
+**Issue:** The spec strictly scans for `--no-ff` merge commits. If a pull request is squash-merged or rebase-merged (default on many platforms like GitHub), Git does not create a merge commit with the branch tip as a parent. The daemon will *never* detect the branch as merged, leaving worktrees orphaned permanently.
+**Recommendation:** Add a fallback check for remote branch deletion. If `git branch -vv` shows the tracking branch is `[gone]` (indicating the PR was merged and the remote branch deleted), the daemon should assume the branch is safe to clean up.
+
+#### 4. Orphaned tmux Sessions Block Worktree Re-creation (MEDIUM)
+**Issue:** `tmux new-session -s __NAME__` fails immediately if a session with that name already exists. If the daemon crashes or the IDE is closed ungracefully, the tmux session is orphaned. If the user later tries to re-open or re-create that worktree, the background task will fail to launch.
+**Recommendation:** Always use the `-A` (attach) flag in the `tasks.json` template. This gracefully attaches to the session if it was orphaned, or creates it if it doesn't exist:
+`"command": "tmux new-session -A -s __NAME__"`
+
+#### 5. Daemon Exits Prematurely if Main IDE Closes (MEDIUM)
+**Issue:** R10 states the daemon exits when the *main* IDE closes. However, worktree IDE windows operate independently. If a user closes the main IDE but leaves their worktree IDE open, the daemon dies. When they eventually close the worktree IDE, the tmux session will not be killed (violating R7), and merge detection ceases.
+**Recommendation:** The daemon should check if *any* relevant `agy` process is running for the project (main IDE *or* any active worktree paths) and only exit when all project windows are closed.
+
+#### 6. VS Code Background Task Lifecycle Hang (MEDIUM)
+**Issue:** The daemon auto-start task sets `"isBackground": true` but uses an empty `"problemMatcher": []`. In VS Code, a background task without a valid `beginsPattern`/`endsPattern` is never marked as "ready." This can hang the task execution engine, potentially preventing other `runOnFolderOpen` tasks from starting.
+**Recommendation:** Do not use `isBackground: true` for the daemon launcher. Make it a standard shell task that forks the daemon and exits immediately:
+```json
+"isBackground": false,
+"command": "nohup ${workspaceFolder}/worktreeDaemon.sh '${workspaceFolder}' > /dev/null 2>&1 &"
+```
+
+#### 7. Unsafe `git worktree remove --force` (LOW)
+**Issue:** M.3.3 states: "If clean: kill tmux, git worktree remove --force". Using `--force` actively bypasses Git's built-in safety mechanisms. If your custom `git status --porcelain` check has a bug or mishandles an edge case (e.g., specific untracked files), `--force` will irreversibly delete user work.
+**Recommendation:** Remove the `--force` flag. If the worktree is genuinely clean, `git worktree remove <path>` will succeed natively. If it fails, Git is acting as a critical safety net catching something your script missed.
+
+#### 8. Interactive Prompt Hidden in Automated Task (LOW)
+**Issue:** Case A prompts `Overwrite? [y/N]`. If `spawnWorktree.sh` is triggered via a VS Code task or Command Palette shortcut that defaults to a silent or background terminal, the script will hang indefinitely waiting for input the user cannot see.
+**Recommendation:** Ensure the VS Code `tasks.json` that triggers the spawner sets `"presentation": { "reveal": "always", "focus": true }`.
+
+### C) Final Verdict
+
+**NOT READY FOR IMPLEMENTATION AS-IS.**
+
+While the architectural design is a massive improvement over the lockfile-based system, there are fatal flaws in the execution details. The **pgrep self-detection bug (Issue 1)** will prevent the daemon from ever launching. The **bash loop (Issue 2)** will cause severe CPU degradation. The **missing tmux `-A` flag (Issue 4)** and **`--force` deletion (Issue 7)** introduce unacceptable reliability and data-loss risks.
+
+Once the specific recommendations for Issues 1, 2, 4, and 7 are incorporated, this specification will be highly robust, scalable, and ready for implementation.
+Waiting for the debugger to disconnect...
+Waiting for the debugger to disconnect...
+: `.claude,` (with a trailing comma) and `.vscode`.
+*   **Recommendation:** Remove the comma. Use `mkdir -p .claude .vscode`.
+
+**11. Weak Input Validation**
+*   **Issue:** R1 states names are validated to `[a-zA-Z0-9_-]+`. However, the script only performs a space-to-underscore replacement (`${1// /_}`). If a user types `my.branch/name`, it will pass the bash replacement but could break tmux session naming or path logic.
+*   **Recommendation:** Add an explicit enforcement check in Step 1:
+    `if [[ ! "$WORKTREE_NAME" =~ ^[a-zA-Z0-9_-]+$ ]]; then echo "Invalid name"; exit 1; fi`
+
+---
+
+### C) Final Verdict
+
+**NEEDS REVISIONS.** 
+
+While the architectural shift away from lockfiles is excellent and the execution flow is vastly improved over the previous iteration, the specification cannot be implemented as-is. 
+
+The most critical blockers are the **inability to detect Squash/Fast-Forward merges** (which will result in zombie worktrees) and the **destructive deletion of worktrees while the IDE is still actively open**. Address the Critical and High severity issues, and the spec will be robust enough for implementation.

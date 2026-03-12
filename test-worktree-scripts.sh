@@ -237,6 +237,7 @@ write_lockfile() {
   local name="$1"
   local wt_path="$2"
   local parent="$3"
+  local spawned_at="${4:-}"
   mkdir -p "${LOCK_DIR}"
   NODE_OPTIONS='' node -e "
     const fs = require('fs');
@@ -245,10 +246,10 @@ write_lockfile() {
       worktreePath: process.argv[2],
       repoRoot: process.argv[3],
       parentBranch: process.argv[4],
-      spawnedAt: new Date().toISOString()
+      spawnedAt: process.argv[6] || new Date().toISOString()
     };
     fs.writeFileSync(process.argv[5], JSON.stringify(data, null, 2) + '\n');
-  " "${name}" "${wt_path}" "${REPO_ROOT}" "${parent}" "${LOCK_DIR}/${name}.lock"
+  " "${name}" "${wt_path}" "${REPO_ROOT}" "${parent}" "${LOCK_DIR}/${name}.lock" "${spawned_at}"
 }
 
 # Poll daemon.log for a pattern instead of using fixed sleeps.
@@ -763,8 +764,10 @@ test_B7() {
   }
   git checkout "${original_branch}"
 
-  # Write lockfile pointing at the throwaway branch
-  write_lockfile "${TEST_WT_NAME}" "${TEST_WT_PATH}" "${throwaway}"
+  # Write lockfile pointing at the throwaway branch (use old timestamp to
+  # bypass daemon grace period — this simulates a branch that has been alive
+  # long enough for cleanup to be valid).
+  write_lockfile "${TEST_WT_NAME}" "${TEST_WT_PATH}" "${throwaway}" "2020-01-01T00:00:00.000Z"
 
   local log_lines_before
   log_lines_before="$(wc -l < "${LOCK_DIR}/daemon.log" 2>/dev/null || echo 0)"
