@@ -7,3 +7,5 @@ node_modules/
 *.db-wal
 *.db-shm
 package-lock.json
+.worktree-locks/
+.DS_Store
