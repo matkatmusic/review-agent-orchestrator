@@ -12,103 +12,81 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 WORKTREE_PATH="${REPO_ROOT}/../${WORKTREE_NAME}"
 COMMIT="HEAD"
 
-is_ignored_worktree_file() {
-  # Shell uses 0 for "true/success", so return 0 when this path is safe to ignore.
-  case "$1" in
-    ".claude/settings.json"|".vscode/tasks.json")
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/worktreeLib.sh"
 
-has_meaningful_changes() {
-  local line path
+LOCK_DIR="${REPO_ROOT}/.worktree-locks"
+PID_FILE="${LOCK_DIR}/daemon.pid"
 
-  # `git status --porcelain` prefixes each entry with a 2-char status plus a space.
-  # Strip those first 3 chars and compare only the worktree-relative path.
-  while IFS= read -r line; do
-    path="${line:3}"
-
-    if ! is_ignored_worktree_file "${path}"; then
-      # Return success here to mean "yes, we found a meaningful change".
-      return 0
+ensure_daemon() {
+  mkdir -p "${LOCK_DIR}"
+  daemon_running=false
+  if [ -f "${PID_FILE}" ]; then
+    existing_pid="$(cat "${PID_FILE}")"
+    if kill -0 "${existing_pid}" 2>/dev/null && \
+       ps -p "${existing_pid}" -o command= 2>/dev/null | grep -q "worktreeDaemon"; then
+      daemon_running=true
     fi
-  done < <(git -C "${WORKTREE_PATH}" status --porcelain --untracked-files=all 2>/dev/null || true)
-
-  # Nonzero means "no meaningful changes were found".
-  return 1
-}
-
-discard_ignored_changes() {
-  local line path
-
-  while IFS= read -r line; do
-    path="${line:3}"
-
-    case "${path}" in
-      ".claude/settings.json")
-        git -C "${WORKTREE_PATH}" clean -f -- ".claude/settings.json"
-        rmdir "${WORKTREE_PATH}/.claude" 2>/dev/null || true
-        ;;
-      ".vscode/tasks.json")
-        git -C "${WORKTREE_PATH}" clean -f -- ".vscode/tasks.json"
-        rmdir "${WORKTREE_PATH}/.vscode" 2>/dev/null || true
-        ;;
-    esac
-  done < <(git -C "${WORKTREE_PATH}" status --porcelain --untracked-files=all 2>/dev/null || true)
-}
-
-cleanup_worktree() {
-  echo "Evaluating cleanup for ${WORKTREE_PATH}"
-
-  if [ ! -d "${WORKTREE_PATH}" ]; then
-    echo "Worktree path already removed: ${WORKTREE_PATH}"
-    return
   fi
-
-  # Discard generated files first so `git worktree remove` can succeed cleanly.
-  discard_ignored_changes
-
-  if has_meaningful_changes; then
-    echo "Worktree has local changes; keeping ${WORKTREE_PATH}"
-    return
-  fi
-
-  if git -C "${REPO_ROOT}" worktree remove "${WORKTREE_PATH}"; then
-    echo "Worktree removed."
-  else
-    echo "Failed to remove worktree: ${WORKTREE_PATH}"
-    return
-  fi
-
-  if tmux has-session -t "${WORKTREE_NAME}" 2>/dev/null; then
-    tmux kill-session -t "${WORKTREE_NAME}"
-    echo "tmux session killed."
-  fi
-
-  if git -C "${REPO_ROOT}" branch -d "${WORKTREE_NAME}" 2>/dev/null; then
-    echo "Branch deleted."
-  else
-    echo "Branch ${WORKTREE_NAME} kept (unmerged changes). Delete with: git branch -D ${WORKTREE_NAME}"
+  if [ "${daemon_running}" = false ]; then
+    rm -f "${PID_FILE}"
+    nohup "${SCRIPT_DIR}/worktreeDaemon.sh" "${REPO_ROOT}" >> "${LOCK_DIR}/daemon.log" 2>&1 &
+    echo "Daemon started (PID $!)."
   fi
 }
 
-# --- Validate ---
-if [ -e "${WORKTREE_PATH}" ]; then
-  echo "Error: path already exists: ${WORKTREE_PATH}"
+# --- Validate / Reopen ---
+path_exists=false
+branch_exists=false
+[ -e "${WORKTREE_PATH}" ] && path_exists=true
+git show-ref --verify --quiet "refs/heads/${WORKTREE_NAME}" 2>/dev/null && branch_exists=true
+
+if [ "${path_exists}" = true ] && [ "${branch_exists}" = true ]; then
+  # --- Reopen existing worktree ---
+  echo "Reopening existing worktree '${WORKTREE_NAME}' at ${WORKTREE_PATH}"
+
+  if [ ! -f "${LOCK_DIR}/${WORKTREE_NAME}.lock" ]; then
+    PARENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+    mkdir -p "${LOCK_DIR}"
+    node -e "
+      const fs = require('fs');
+      const data = {
+        worktreeName: process.argv[1],
+        worktreePath: process.argv[2],
+        repoRoot: process.argv[3],
+        parentBranch: process.argv[4],
+        spawnedAt: new Date().toISOString()
+      };
+      fs.writeFileSync(process.argv[5], JSON.stringify(data, null, 2) + '\n');
+    " "${WORKTREE_NAME}" "${WORKTREE_PATH}" "${REPO_ROOT}" "${PARENT_BRANCH}" \
+      "${LOCK_DIR}/${WORKTREE_NAME}.lock"
+    echo "Lockfile written: ${LOCK_DIR}/${WORKTREE_NAME}.lock"
+  fi
+
+  ensure_daemon
+  agy --new-window "${WORKTREE_PATH}"
+  exit 0
+fi
+
+if [ "${path_exists}" = true ]; then
+  echo "Error: path exists but branch '${WORKTREE_NAME}' does not: ${WORKTREE_PATH}"
+  echo "Remove it manually: rm -rf ${WORKTREE_PATH}"
   exit 1
 fi
 
-if git show-ref --verify --quiet "refs/heads/${WORKTREE_NAME}" 2>/dev/null; then
-  echo "Error: branch '${WORKTREE_NAME}' already exists"
-  exit 1
+SKIP_WORKTREE_CREATE=false
+if [ "${branch_exists}" = true ]; then
+  # Branch exists but no path — prune stale record, reuse branch
+  git worktree prune
+  echo "Reusing existing branch '${WORKTREE_NAME}'."
+  git worktree add "${WORKTREE_PATH}" "${WORKTREE_NAME}"
+  SKIP_WORKTREE_CREATE=true
 fi
 
 # --- Create worktree ---
-git worktree add -b "${WORKTREE_NAME}" "${WORKTREE_PATH}" "${COMMIT}"
+if [ "${SKIP_WORKTREE_CREATE}" != true ]; then
+  git worktree add -b "${WORKTREE_NAME}" "${WORKTREE_PATH}" "${COMMIT}"
+fi
 
 # --- Write .claude/settings.json ---
 mkdir -p "${WORKTREE_PATH}/.claude"
@@ -163,11 +141,27 @@ cat > "${WORKTREE_PATH}/.vscode/tasks.json" << EOF
 EOF
 
 echo "Worktree '${WORKTREE_NAME}' created at ${WORKTREE_PATH}"
-echo "IDE opening — Claude + tmux will auto-launch on folder open."
-echo "Worktree cleanup runs after that IDE window closes."
 
-# --- Open in IDE ---
-# `--wait` blocks until that IDE window closes, which makes cleanup lifecycle
-# depend on the window itself instead of a long-running background task.
-agy --new-window --wait "${WORKTREE_PATH}"
-cleanup_worktree
+# --- Write lockfile ---
+PARENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+mkdir -p "${LOCK_DIR}"
+node -e "
+  const fs = require('fs');
+  const data = {
+    worktreeName: process.argv[1],
+    worktreePath: process.argv[2],
+    repoRoot: process.argv[3],
+    parentBranch: process.argv[4],
+    spawnedAt: new Date().toISOString()
+  };
+  fs.writeFileSync(process.argv[5], JSON.stringify(data, null, 2) + '\n');
+" "${WORKTREE_NAME}" "${WORKTREE_PATH}" "${REPO_ROOT}" "${PARENT_BRANCH}" "${LOCK_DIR}/${WORKTREE_NAME}.lock"
+
+echo "Lockfile written: ${LOCK_DIR}/${WORKTREE_NAME}.lock"
+
+# --- Start daemon if not already running ---
+ensure_daemon
+
+# --- Open in IDE (non-blocking) ---
+agy --new-window "${WORKTREE_PATH}"
+echo "IDE opened. Daemon will clean up after branch is merged into ${PARENT_BRANCH}."

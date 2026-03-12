@@ -1,0 +1,77 @@
+CODEX (GPT-5.4) ANALYSIS: Worktree Test Harness Architecture Decisions
+======================================================================
+
+Summary: Most of these are real concerns. The must-fix ones are pkill, merge/reset
+on the user's branch, destructive cleanup without guardrails, and the daemon's eval.
+The B7/B10 issue is also a real deterministic harness bug, not just a theoretical concern.
+
+1. pkill -f — I agree. Severity: HIGH.
+   full_cleanup() kills the repo PID first, then does pkill -f "worktreeDaemon.sh"
+   (line 216), which will kill unrelated daemons on the machine. That is only acceptable
+   in a disposable personal environment. Safer fix: kill only the PID from this repo's
+   daemon.pid after verifying the command line matches this repo, or use
+   pgrep -f "worktreeDaemon.sh ${REPO_ROOT}" and kill only those PIDs. Best fix: run
+   tests in a temp repo / temp lock dir so the harness owns the daemon namespace.
+
+2. git merge on real branch — I agree. Severity: HIGH.
+   B7 and B10 merge into the current checked-out branch and then git reset --hard HEAD~1
+   to undo it (lines 630, 698). If interrupted, the merge stays; if cleanup runs later,
+   reset --hard is destructive. Use a throwaway parent branch in the same repo instead.
+   That still gives real merge fidelity for the daemon without touching the user's
+   working branch.
+
+3. Fixed sleep durations — I agree. Severity: MEDIUM.
+   Fixed sleep 15 / sleep 20 around a 10-second scan interval is slow and flaky.
+   Prefer polling for the expected state with a deadline, for example every second up
+   to 25-30 seconds. Tradeoff: polling is slightly more code and can hide timing bugs
+   if too loose; fixed sleep is simpler and sometimes clearer in manual scripts. Here,
+   polling is the better default.
+
+4. Daemon lifecycle bug — I agree that it is a real bug. Severity: HIGH.
+   The daemon explicitly exits when no lockfiles remain (worktreeDaemon.sh:56), B7
+   removes the last lockfile, and B10 never restarts the daemon before waiting 20
+   seconds (line 716). The suggested order (line 1060) is therefore invalid as written.
+   This is not fundamentally unfixable; an ensure_daemon call in B10 is the immediate
+   fix. The deeper issue is that tests relying on daemon state should establish that
+   precondition themselves.
+
+5. No trap on exit — I agree. Severity: HIGH.
+   There is no trap in the harness; the main flow is just interactive prompts plus
+   optional cleanup at the end (line 1112). For a harness that creates worktrees,
+   branches, PID files, tmux sessions, and daemons, you should have an exit trap.
+   Downsides are real: cleanup can erase evidence, run twice, or mask the original
+   failure. The right pattern is an idempotent cleanup trap with a guard flag,
+   preserving the original exit code, plus an opt-out like KEEP_TEST_ARTIFACTS=1
+   for debugging.
+
+6. Destructive cleanup — I agree. Severity: CRITICAL.
+   git worktree remove --force || rm -rf, git branch -D, and pkill (line 223)
+   are appropriate only if the target set is provably test-owned. Add guardrails:
+   require names to match a strict test prefix, reject empty variables, resolve paths
+   and verify they live under an expected temp parent, and refuse to delete the repo
+   root, home, or arbitrary branches. If you keep using the real repo, these checks
+   are not optional.
+
+7. Test isolation — I agree, with nuance. Severity: MEDIUM.
+   Shared state can be acceptable in a manual scenario-driven suite, but here the
+   dependencies are implicit and already caused a real failure. B8 and B7 literally
+   say "run A1 first" (lines 581, 626). That is brittle. My recommendation is not
+   necessarily "every test must be fully isolated," but "every test must explicitly
+   set up or verify its prerequisites." If some tests are intentionally scenario-based,
+   group them as one scenario rather than pretending they are independent cases.
+
+8. eval injection — I agree. Severity: CRITICAL.
+   worktreeDaemon.sh:77 does eval "${node_output}" after reading attacker-controlled
+   JSON fields from the lockfile, so valid JSON can execute shell code. This is a real
+   security bug, not just a coverage gap. Yes, the suite should include a regression
+   test, but only after the daemon is fixed to avoid eval. The fix is to stop generating
+   shell assignments entirely; use a safe transport format like NUL-delimited output or
+   a JSON parser that does not require eval. Then add a non-destructive test payload,
+   e.g. a touch marker, and assert it does not execute.
+
+Prioritized fix order:
+  1. eval removal
+  2. delete-guardrails
+  3. branch-isolation for B7/B10
+  4. daemon ownership/traps
+  5. convert sleeps to polling

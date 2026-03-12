@@ -1,0 +1,187 @@
+MULTI-LLM DEBATE SYNTHESIS: Worktree Test Harness Architecture
+==============================================================
+Sources: Claude Opus 4.6 (security-auditor) | Gemini 3.1 Pro | Codex GPT-5.4
+Date: 2026-03-12
+
+
+CROSS-MODEL AGREEMENT MATRIX
+-----------------------------
+
+Point                          Claude    Gemini    Codex     Consensus
+-----                          ------    ------    -----     ---------
+1. pkill system-wide           HIGH      HIGH      HIGH      HIGH (unanimous)
+2. merge on real branch        CRITICAL  HIGH      HIGH      CRITICAL*
+3. fixed sleeps                MEDIUM    MEDIUM    MEDIUM    MEDIUM (unanimous)
+4. B10 daemon lifecycle bug    HIGH      HIGH      HIGH      HIGH (unanimous)
+5. no trap on exit             HIGH      HIGH      HIGH      HIGH (unanimous)
+6. destructive cleanup         HIGH      CRITICAL  CRITICAL  HIGH-CRITICAL**
+7. test isolation              MEDIUM    MEDIUM    MEDIUM    MEDIUM (unanimous)
+8. eval injection              CRITICAL  CRITICAL  CRITICAL  CRITICAL (unanimous)
+
+* Claude escalated to CRITICAL because git reset --hard also destroys staged/unstaged
+  changes irrecoverably. Gemini/Codex rated HIGH focusing on the merge commit.
+  Claude's reasoning is more thorough here -- CRITICAL is warranted.
+
+** Gemini/Codex rated CRITICAL due to empty-variable rm -rf risk. Claude rated HIGH
+   noting that set -u already mitigates empty vars, and the real risk is a correct-but-wrong
+   value. Both perspectives valid. Codex's note that guardrails are "not optional" when
+   using the real repo tips this toward CRITICAL for defense-in-depth.
+
+
+AREAS OF DISAGREEMENT
+---------------------
+
+None. All three models agreed on every finding being a real concern. The only
+variation was in severity gradations (see matrix above). No model dismissed any
+concern or identified false positives.
+
+
+UNIQUE CONTRIBUTIONS BY MODEL
+------------------------------
+
+Claude security-auditor (most detailed):
+  - Identified the SECONDARY injection vector: lockfile path interpolated into
+    node -e single-quoted string (worktreeDaemon.sh:67). Single quote in filename
+    breaks out of JS string literal. No other model caught this.
+  - Provided the null-delimited read pattern as the concrete fix (process.argv +
+    read -d ''), which is the most robust approach proposed.
+  - Mapped the full dependency graph for test isolation (A1->A2, A1->A3, etc.)
+  - Noted that HEAD~1 is fragile even without interruption -- intervening commits
+    from another terminal would cause reset to destroy the wrong commit.
+  - Found that cleanup_on_exit should store PRE_MERGE_SHA and restore in the trap.
+
+Gemini (most actionable code examples):
+  - Provided a concrete wait_for_condition() polling helper with usage example.
+  - Suggested grouping dependent tests into "scenario" functions instead of
+    pretending they're independent.
+  - Proposed the throwaway integration branch pattern (git checkout -b test-harness-base)
+    as the cleanest merge isolation approach.
+  - Recommended the jq-based approach for JSON parsing (simpler than null-delimited read).
+
+Codex GPT-5.4 (most pragmatic):
+  - Unique recommendation: KEEP_TEST_ARTIFACTS=1 env var to skip cleanup for debugging.
+    This addresses the real concern about traps erasing evidence of failures.
+  - Noted the correct nuance on test isolation: "every test must explicitly set up or
+    verify its prerequisites" rather than requiring full isolation.
+  - Best fix for pkill: "run tests in a temp repo / temp lock dir so the harness owns
+    the daemon namespace" -- most architecturally clean but highest effort.
+  - Provided the clearest priority ordering for fixes.
+
+
+SYNTHESIZED FIX PRIORITY (combining all three models)
+------------------------------------------------------
+
+Priority 1 — CRITICAL (fix before ANY use):
+
+  A. eval injection in worktreeDaemon.sh:77
+     - Eliminate eval entirely
+     - Use null-delimited output with read -d '' (Claude's approach)
+       OR jq (Gemini's approach, simpler but adds dependency)
+     - Pass lockfile via process.argv, not string interpolation
+     - Add input validation: worktreeName matches [a-zA-Z0-9_-]
+     - Add injection regression test (B11)
+
+  B. git merge/reset on user's working branch (B7 line 634, B10 line 698)
+     - Create disposable branch: __test_merge_target_$(date +%s)
+     - Point lockfile's parentBranch at the disposable branch
+     - Store PRE_MERGE_SHA before any merge
+     - Include branch restoration in the exit trap
+
+Priority 2 — HIGH (fix before relying on results):
+
+  C. Add trap cleanup_on_exit EXIT at script top
+     - Make cleanup idempotent (CLEANUP_DONE flag)
+     - Restore PRE_MERGE_SHA if set
+     - Support KEEP_TEST_ARTIFACTS=1 for debugging (Codex idea)
+
+  D. Remove pkill -f "worktreeDaemon.sh"
+     - The PID-file kill at test-worktree-scripts.sh:205-211 already handles the normal case
+     - If stray fallback needed, scope: pgrep -f "worktreeDaemon.sh ${REPO_ROOT}"
+
+  E. Add ensure_daemon call in B10 setup
+     - After writing lockfile, before waiting for daemon scan
+     - Or better: use spawnBGClaudeWT.sh instead of manual setup
+
+  F. Add prefix guardrails to full_cleanup
+     - [[ "${wt}" != test_* ]] → refuse to delete
+     - [[ "${wt_path}" != */test_* ]] → refuse rm -rf
+     - Add phantom_wt and orphan_parent_test to cleanup list
+
+Priority 3 — MEDIUM (improve when practical):
+
+  G. Replace fixed sleeps with wait_for_condition() polling helper
+     - Check daemon.log for expected output every 1s, timeout at 30s
+     - Faster on fast systems, more reliable under load
+
+  H. Add precondition checks to all dependent tests
+     - Skip with message if prerequisites not met
+     - Consider auto-running prerequisites for single-test mode
+
+  H2. Squash-merge detection gap (worktreeDaemon.sh:104)
+     - `git branch --merged PARENT | grep -qw BRANCH` fails for squash merges,
+       cherry-picks, and rebases (commit hashes differ).
+     - This is GitHub's default merge strategy for many repos.
+     - No model in the original debate identified this limitation.
+     - Alternatives: content diff (`git diff PARENT...BRANCH --quiet`),
+       GitHub API (`gh pr list --state merged`), or
+       `git merge-base --is-ancestor` (still fails for squash).
+
+Priority 4 — LOW (cleanup):
+
+  I. Remove dead subshell in test_C1 (lines 915-925)
+  J. Extract write_lockfile() helper (duplicated 5 times)
+  K. Use ((PASS_COUNT += 1)) instead of ((PASS_COUNT++)) for future-proofing
+
+
+RECOMMENDED FIX FOR eval (consensus best approach)
+---------------------------------------------------
+
+All three models agree eval must go. The synthesized best approach combines
+Claude's null-delimited read with Gemini's simplicity preference:
+
+  # Replace worktreeDaemon.sh lines 66-77 with:
+  {
+    IFS= read -r -d '' WORKTREE_NAME
+    IFS= read -r -d '' WORKTREE_PATH
+    IFS= read -r -d '' REPO_ROOT_PARSED
+    IFS= read -r -d '' PARENT_BRANCH
+  } < <(node -e "
+    const d = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+    process.stdout.write(d.worktreeName + '\0');
+    process.stdout.write(d.worktreePath + '\0');
+    process.stdout.write(d.repoRoot + '\0');
+    process.stdout.write(d.parentBranch + '\0');
+  " "${lockfile}" 2>/dev/null) || {
+    log "WARNING: Failed to parse ${lockfile}. Skipping."
+    continue
+  }
+
+  # Validate parsed values
+  if [[ ! "${WORKTREE_NAME}" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    log "WARNING: Invalid worktree name in ${lockfile}. Skipping."
+    continue
+  fi
+
+This eliminates both the eval injection and the lockfile path injection vectors.
+
+
+CONCLUSION
+----------
+
+The review produced unanimous agreement across all three AI models on all 8
+architecture concerns. No false positives were identified. The test harness is
+well-structured and covers the right scenarios, but has safety gaps that could
+damage the user's working environment if the script is interrupted or if
+variables resolve incorrectly. The eval injection in the daemon is a genuine
+security vulnerability in production code that should be fixed independent of
+the test suite.
+
+Total findings: 8 debate points + 4 additional (Claude) + 1 post-audit (squash merge gap),
+  12 unique issues.
+Models used: Claude Opus 4.6, Gemini 3.1 Pro Preview, Codex GPT-5.4
+
+Accuracy audit performed 2026-03-12: all claims verified against source code and
+authoritative references (RFC 8259, OWASP CWE-78/CWE-95, ShellCheck SC2091,
+Shellharden, Greg's Wiki BashPitfalls #37/SignalTrap/ProcessManagement,
+CVE-2021-42740, git-worktree(1)). 3 line-number references corrected (cosmetic).
+1 new finding added (squash merge detection gap).
