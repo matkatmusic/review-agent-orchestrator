@@ -1,175 +1,151 @@
 #!/usr/bin/env bash
-set -euo pipefail
-shopt -s nullglob
-
-# worktreeDaemon.sh — Polling daemon that cleans up worktrees after their
-# branches are merged back into the parent branch.
+# worktreeDaemon.sh — Polling daemon that manages worktree lifecycle.
+# NO set -e — uses explicit error checking throughout. A transient git
+# command failure must not kill the long-running daemon.
 #
-# Usage: worktreeDaemon.sh <repo-root> [--verbose]
+# State derived from: git worktree list + .managed-worktree marker + tmux + process table.
+# No lockfiles.
+#
+# Usage: worktreeDaemon.sh <repo-root> [--verbose|-v]
 
 if [ $# -lt 1 ]; then
-  echo "Usage: $0 <repo-root> [--verbose]"
+  echo "Usage: $0 <repo-root> [--verbose|-v]"
   exit 1
 fi
 
-REPO_ROOT="$1"
+REPO_ROOT=$(realpath "$1")
 if [ "${2:-}" = "--verbose" ] || [ "${2:-}" = "-v" ]; then
   VERBOSE=true
 else
   VERBOSE=false
 fi
-LOCK_DIR="${REPO_ROOT}/.worktree-locks"
-PID_FILE="${LOCK_DIR}/daemon.pid"
-SCAN_INTERVAL=10
-GRACE_PERIOD=60
+
+POLL_INTERVAL=5
+PIDFILE="${REPO_ROOT}/.worktree-daemon.pid"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/worktreeLib.sh"
 
-log() {
-  echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*"
-}
+# ─── Singleton via PID file ─────────────────────────────────────────────────
 
-vlog() {
-  [ "${VERBOSE}" = true ] && log "[verbose] $*" || true
-}
-
-cleanup_daemon() {
-  log "Daemon shutting down (PID $$)."
-  rm -f "${PID_FILE}"
-  exit 0
-}
-
-trap cleanup_daemon SIGINT SIGTERM
-
-# --- Singleton check ---
-if [ -f "${PID_FILE}" ]; then
-  existing_pid="$(cat "${PID_FILE}")"
-  if kill -0 "${existing_pid}" 2>/dev/null && \
-     ps -p "${existing_pid}" -o command= 2>/dev/null | grep -q "worktreeDaemon"; then
-    log "Daemon already running (PID ${existing_pid}). Exiting."
-    exit 0
-  else
-    log "Stale PID file found (PID ${existing_pid}). Taking over."
-    rm -f "${PID_FILE}"
+if [ -f "${PIDFILE}" ]; then
+  existing_pid=$(<"${PIDFILE}") || existing_pid=""
+  if [ -n "${existing_pid}" ] && kill -0 "${existing_pid}" 2>/dev/null; then
+    # Verify it's actually our daemon (not PID reuse)
+    if ps -p "${existing_pid}" -o command= 2>/dev/null | grep -q "worktreeDaemon"; then
+      log "Daemon already running (PID ${existing_pid}). Exiting."
+      exit 0
+    fi
   fi
+  log "Stale PID file found (PID ${existing_pid:-?}). Taking over."
+  rm -f "${PIDFILE}"
 fi
 
-echo $$ > "${PID_FILE}"
+echo $$ > "${PIDFILE}"
+
+# ─── Trap ALL signals → cleanup PID file ────────────────────────────────────
+
+cleanup_pidfile() {
+  log "Daemon shutting down (PID $$)."
+  rm -f "${PIDFILE}"
+}
+trap 'cleanup_pidfile; exit 0' EXIT SIGINT SIGTERM SIGHUP
+
 log "Daemon started (PID $$)."
-vlog "VERBOSE mode enabled"
+vlog "VERBOSE mode enabled. POLL_INTERVAL=${POLL_INTERVAL}s"
 
-# --- Main scan loop ---
+# Startup grace period: give the IDE time to launch before checking processes.
+# Without this, the daemon can exit before the IDE process is registered.
+STARTUP_GRACE=15
+ELAPSED_SINCE_START=0
+
+# ─── Main Loop ──────────────────────────────────────────────────────────────
+
 while true; do
-  lockfiles=("${LOCK_DIR}"/*.lock)
 
-  # With nullglob enabled, no matches produce an empty array.
-  if [ ${#lockfiles[@]} -eq 0 ] || [ ! -e "${lockfiles[0]}" ]; then
-    log "No lockfiles remain. Daemon exiting."
-    rm -f "${PID_FILE}"
-    exit 0
+  # ── M.1: CHECK ANY PROJECT IDE ALIVE ──────────────────────────────────────
+
+  if ! any_project_ide_alive "${REPO_ROOT}"; then
+    if [ "${ELAPSED_SINCE_START}" -lt "${STARTUP_GRACE}" ]; then
+      vlog "No IDE found yet, but within startup grace period (${ELAPSED_SINCE_START}/${STARTUP_GRACE}s). Waiting."
+    else
+      log "All IDEs closed for project. Daemon exiting."
+      exit 0
+    fi
   fi
 
-  log "--- scan cycle start: ${#lockfiles[@]} lockfile(s) found ---"
-  vlog "lockfiles: ${lockfiles[*]}"
+  # ── M.2: DISCOVER MANAGED WORKTREES ──────────────────────────────────────
 
-  for lockfile in "${lockfiles[@]}"; do
-    [ -f "${lockfile}" ] || continue
+  managed_count=0
+  while IFS=' ' read -r wt_path branch_name; do
+    [ -z "${wt_path}" ] && continue
+    ((managed_count += 1))
 
-    log "Processing lockfile: ${lockfile}"
+    vlog "Processing: ${branch_name} at ${wt_path}"
 
-    # Parse all fields via null-delimited output (no eval — see CWE-78/CWE-95).
-    {
-      IFS= read -r -d '' WORKTREE_NAME
-      IFS= read -r -d '' WORKTREE_PATH
-      IFS= read -r -d '' REPO_ROOT_PARSED
-      IFS= read -r -d '' PARENT_BRANCH
-      IFS= read -r -d '' SPAWNED_AT
-    } < <(node -e "
-      const d = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
-      process.stdout.write(d.worktreeName + '\0');
-      process.stdout.write(d.worktreePath + '\0');
-      process.stdout.write(d.repoRoot + '\0');
-      process.stdout.write(d.parentBranch + '\0');
-      process.stdout.write((d.spawnedAt || '') + '\0');
-    " "${lockfile}" 2>/dev/null) || {
-      log "WARNING: Failed to parse ${lockfile}. Skipping."
+    # ── M.3.1: CHECK WORKTREE IDE ALIVE ────────────────────────────────────
+
+    local_ide_alive=false
+    if ide_is_running_for_path "${wt_path}"; then
+      local_ide_alive=true
+      vlog "${branch_name}: IDE is running"
+    else
+      vlog "${branch_name}: IDE not running"
+      # Kill tmux session if IDE closed (R7)
+      if tmux has-session -t "${branch_name}" 2>/dev/null; then
+        tmux kill-session -t "${branch_name}"
+        log "${branch_name}: IDE closed, tmux session killed."
+      fi
+    fi
+
+    # ── M.3.2: CHECK MERGE STATUS (R8) ────────────────────────────────────
+
+    merged=false
+    merge_type=""
+
+    if is_worktree_merged "${branch_name}" "${REPO_ROOT}"; then
+      merged=true
+      merge_type="--no-ff merge"
+    elif is_worktree_squash_merged "${branch_name}" "${REPO_ROOT}"; then
+      merged=true
+      merge_type="squash/rebase merge"
+    fi
+
+    if [ "${merged}" = false ]; then
+      vlog "${branch_name}: not merged. No action."
+      continue
+    fi
+
+    log "${branch_name}: MERGED (detected via ${merge_type}). Evaluating cleanup."
+
+    # ── M.3.3: GUARDED CLEANUP ────────────────────────────────────────────
+
+    # a) Skip if IDE is still open
+    if [ "${local_ide_alive}" = true ]; then
+      log "${branch_name}: WARNING: IDE still open. Skipping cleanup."
+      continue
+    fi
+
+    # b) Get branch tip for re-verification
+    detected_tip=$(git -C "${REPO_ROOT}" rev-parse "refs/heads/${branch_name}" 2>/dev/null) || {
+      log "${branch_name}: WARNING: Could not resolve branch tip. Skipping."
       continue
     }
 
-    # Validate worktree name to prevent path traversal or injection.
-    if [[ ! "${WORKTREE_NAME}" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-      log "WARNING: Invalid worktree name '${WORKTREE_NAME}' in ${lockfile}. Skipping."
-      continue
-    fi
-
-    log "${WORKTREE_NAME}: parsed — path=${WORKTREE_PATH}, parent=${PARENT_BRANCH}"
-    vlog "${WORKTREE_NAME}: repoRoot=${REPO_ROOT_PARSED}"
-
-    # If the worktree directory is already gone, just clean up the leftovers.
-    if [ ! -d "${WORKTREE_PATH}" ]; then
-      log "${WORKTREE_NAME}: worktree path gone. Cleaning up remnants."
-      prune_out="$(git -C "${REPO_ROOT}" worktree prune 2>&1)" || true
-      vlog "${WORKTREE_NAME}: worktree prune: ${prune_out:-<no output>}"
-
-      if tmux has-session -t "${WORKTREE_NAME}" 2>/dev/null; then
-        tmux kill-session -t "${WORKTREE_NAME}"
-        log "${WORKTREE_NAME}: tmux session killed."
-      else
-        vlog "${WORKTREE_NAME}: no tmux session to kill"
-      fi
-
-      if git -C "${REPO_ROOT}" branch -d "${WORKTREE_NAME}" 2>/dev/null; then
-        log "${WORKTREE_NAME}: branch deleted."
-      else
-        vlog "${WORKTREE_NAME}: branch not found or not fully merged"
-      fi
-
-      rm -f "${lockfile}"
-      log "${WORKTREE_NAME}: lockfile removed."
-      continue
-    fi
-
-    # Check if the parent branch still exists.
-    if ! git -C "${REPO_ROOT}" rev-parse --verify "${PARENT_BRANCH}" >/dev/null 2>&1; then
-      log "WARNING: Parent branch '${PARENT_BRANCH}' not found for ${WORKTREE_NAME}. Skipping."
-      continue
-    fi
-
-    # Check if the worktree branch has been merged into the parent.
-    # NOTE: This detects standard and --no-ff merges only. Squash merges,
-    # cherry-picks, and rebases produce different commit hashes and will NOT
-    # be detected. For GitHub squash-merge workflows, consider content diff
-    # (git diff PARENT...BRANCH --quiet) or the GitHub API instead.
-    merged_list="$(git -C "${REPO_ROOT}" branch --merged "${PARENT_BRANCH}" 2>/dev/null)" || true
-    vlog "${WORKTREE_NAME}: branches merged into ${PARENT_BRANCH}: $(echo "${merged_list}" | xargs)"
-    if echo "${merged_list}" | grep -qw "${WORKTREE_NAME}"; then
-      # Grace period: skip cleanup if worktree was spawned recently.
-      # A freshly-created branch is trivially "merged" because it hasn't
-      # diverged from the parent yet — don't clean it up prematurely.
-      if [ -n "${SPAWNED_AT}" ]; then
-        age_seconds="$(node -e "process.stdout.write(String(Math.max(0, Math.floor((Date.now() - new Date(process.argv[1]).getTime()) / 1000))))" "${SPAWNED_AT}" 2>/dev/null)" || age_seconds=""
-        if [ -n "${age_seconds}" ] && [ "${age_seconds}" -lt "${GRACE_PERIOD}" ]; then
-          log "${WORKTREE_NAME}: branch appears merged but was spawned ${age_seconds}s ago (grace period: ${GRACE_PERIOD}s). Skipping."
-          continue
-        fi
-      fi
-
-      log "${WORKTREE_NAME}: MERGED into ${PARENT_BRANCH}. Starting cleanup."
-
-      if cleanup_worktree; then
-        log "${WORKTREE_NAME}: cleanup succeeded."
-      else
-        log "${WORKTREE_NAME}: cleanup returned non-zero (worktree may have local changes)."
-      fi
-
-      rm -f "${lockfile}"
-      log "${WORKTREE_NAME}: lockfile removed."
+    # c-f) Delegate to cleanup_worktree (handles re-verify, scaffold, dirty check, remove)
+    if cleanup_worktree "${wt_path}" "${branch_name}" "${REPO_ROOT}" "${detected_tip}"; then
+      log "${branch_name}: cleanup succeeded."
     else
-      log "${WORKTREE_NAME}: not merged into ${PARENT_BRANCH}. No action."
+      log "${branch_name}: cleanup returned non-zero (worktree may have local changes or IDE open)."
     fi
-  done
 
-  log "--- scan cycle end. Sleeping ${SCAN_INTERVAL}s ---"
-  sleep "${SCAN_INTERVAL}"
+  done < <(get_worktrees "${REPO_ROOT}")
+
+  vlog "Scan complete. ${managed_count} managed worktree(s) found."
+
+  # ── M.4: SLEEP ──────────────────────────────────────────────────────────
+
+  sleep "${POLL_INTERVAL}"
+  ELAPSED_SINCE_START=$((ELAPSED_SINCE_START + POLL_INTERVAL))
+
 done

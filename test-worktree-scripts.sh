@@ -2,10 +2,10 @@
 set -uo pipefail
 
 # =============================================================================
-# Manual Test Suite for Worktree Management Scripts
+# Manual Test Suite for Worktree Management Scripts (v2 — no lockfiles)
 # =============================================================================
-# Interactive test runner. Automates setup and verification where possible,
-# prompts for manual confirmation on IDE-window behavior.
+# Tests spawnWorktree.sh, worktreeDaemon.sh, worktreeLib.sh
+# State derived from: git worktree list + .managed-worktree marker + PID file
 #
 # Usage:
 #   bash test-worktree-scripts.sh [--verbose|-v] [test-id...]
@@ -14,17 +14,20 @@ set -uo pipefail
 #   bash test-worktree-scripts.sh                # Run all tests in suggested order
 #   bash test-worktree-scripts.sh A1             # Run only test A1
 #   bash test-worktree-scripts.sh --verbose A1   # Run A1 with verbose daemon/lib output
-#   bash test-worktree-scripts.sh -v B7          # Run B7 with verbose output
 # =============================================================================
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+REPO_ROOT="$(realpath "$(git rev-parse --show-toplevel)")"
 SCRIPT_DIR="${REPO_ROOT}"
-LOCK_DIR="${REPO_ROOT}/.worktree-locks"
-PID_FILE="${LOCK_DIR}/daemon.pid"
+
+# Source worktreeLib early for resolve_path helper
+source "${SCRIPT_DIR}/worktreeLib.sh"
+
+PIDFILE="${REPO_ROOT}/.worktree-daemon.pid"
+LOGFILE="${REPO_ROOT}/.worktree-daemon.log"
 TEST_WT_NAME="test_fresh_1"
 TEST_WT_NAME2="test_fresh_2"
-TEST_WT_PATH="${REPO_ROOT}/../${TEST_WT_NAME}"
-TEST_WT_PATH2="${REPO_ROOT}/../${TEST_WT_NAME2}"
+TEST_WT_PATH=$(resolve_path "${REPO_ROOT}/../${TEST_WT_NAME}")
+TEST_WT_PATH2=$(resolve_path "${REPO_ROOT}/../${TEST_WT_NAME2}")
 
 # --- Colors & formatting ---
 RED='\033[0;31m'
@@ -57,14 +60,12 @@ cleanup_on_exit() {
 
   if [ "${KEEP_TEST_ARTIFACTS:-}" = "1" ]; then
     echo "  KEEP_TEST_ARTIFACTS=1 — preserving files for debugging."
-    # Still kill daemon to avoid orphan processes.
-    if [ -f "${PID_FILE}" ]; then
-      kill "$(cat "${PID_FILE}")" 2>/dev/null || true
+    if [ -f "${PIDFILE}" ]; then
+      kill "$(<"${PIDFILE}")" 2>/dev/null || true
     fi
     return "${exit_code}"
   fi
 
-  # Delete throwaway branch if one was in use when we exited.
   if [ -n "${THROWAWAY_BRANCH}" ]; then
     git branch -D "${THROWAWAY_BRANCH}" 2>/dev/null || true
   fi
@@ -163,16 +164,11 @@ assert_branch_missing() {
   fi
 }
 
-assert_lockfile_valid_json() {
-  local lockfile="$1"
-  if [ ! -f "${lockfile}" ]; then
-    fail "Lockfile missing: ${lockfile}"
-    return
-  fi
-  if NODE_OPTIONS='' node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "${lockfile}" 2>/dev/null; then
-    pass "Lockfile is valid JSON: ${lockfile}"
+assert_managed_worktree() {
+  if [ -f "$1/.managed-worktree" ]; then
+    pass ".managed-worktree marker exists: $1"
   else
-    fail "Lockfile is not valid JSON: ${lockfile}"
+    fail ".managed-worktree marker missing: $1"
   fi
 }
 
@@ -210,8 +206,8 @@ assert_exit_code() {
 }
 
 daemon_pid() {
-  if [ -f "${PID_FILE}" ]; then
-    cat "${PID_FILE}"
+  if [ -f "${PIDFILE}" ]; then
+    cat "${PIDFILE}"
   else
     echo ""
   fi
@@ -232,27 +228,7 @@ wait_prompt() {
   read -rp "  Press Enter to continue..." _
 }
 
-# Write a lockfile using process.argv (no string interpolation injection).
-write_lockfile() {
-  local name="$1"
-  local wt_path="$2"
-  local parent="$3"
-  local spawned_at="${4:-}"
-  mkdir -p "${LOCK_DIR}"
-  NODE_OPTIONS='' node -e "
-    const fs = require('fs');
-    const data = {
-      worktreeName: process.argv[1],
-      worktreePath: process.argv[2],
-      repoRoot: process.argv[3],
-      parentBranch: process.argv[4],
-      spawnedAt: process.argv[6] || new Date().toISOString()
-    };
-    fs.writeFileSync(process.argv[5], JSON.stringify(data, null, 2) + '\n');
-  " "${name}" "${wt_path}" "${REPO_ROOT}" "${parent}" "${LOCK_DIR}/${name}.lock" "${spawned_at}"
-}
-
-# Poll daemon.log for a pattern instead of using fixed sleeps.
+# Poll daemon log for a pattern.
 # Usage: wait_for_log "pattern" <start_line> [timeout_seconds]
 wait_for_log() {
   local pattern="$1"
@@ -261,7 +237,7 @@ wait_for_log() {
   local elapsed=0
 
   while [ "${elapsed}" -lt "${timeout}" ]; do
-    if tail -n +"$((start_line + 1))" "${LOCK_DIR}/daemon.log" 2>/dev/null | grep -qF "${pattern}"; then
+    if tail -n +"$((start_line + 1))" "${LOGFILE}" 2>/dev/null | grep -qF "${pattern}"; then
       return 0
     fi
     sleep 1
@@ -271,12 +247,11 @@ wait_for_log() {
   return 1
 }
 
-# Show recent daemon.log lines since a given line number (verbose mode only).
 show_daemon_log_tail() {
-  if [ "${VERBOSE}" = true ] && [ -f "${LOCK_DIR}/daemon.log" ]; then
+  if [ "${VERBOSE}" = true ] && [ -f "${LOGFILE}" ]; then
     local start_line="${1:-0}"
     local new_lines
-    new_lines="$(tail -n +$((start_line + 1)) "${LOCK_DIR}/daemon.log" 2>/dev/null)"
+    new_lines="$(tail -n +$((start_line + 1)) "${LOGFILE}" 2>/dev/null)"
     if [ -n "${new_lines}" ]; then
       echo -e "  ${DIM}--- daemon.log (new lines) ---${RESET}"
       echo "${new_lines}" | sed 's/^/    /'
@@ -285,33 +260,36 @@ show_daemon_log_tail() {
   fi
 }
 
+log_line_count() {
+  wc -l < "${LOGFILE}" 2>/dev/null | tr -d ' ' || echo 0
+}
+
 # --- Full cleanup (between tests or at start) ---
 
 full_cleanup() {
   section "Cleaning up test artifacts"
 
-  # Kill daemon by PID file (scoped to this repo, no pkill).
-  if [ -f "${PID_FILE}" ]; then
+  # Kill daemon by PID file
+  if [ -f "${PIDFILE}" ]; then
     local pid
-    pid="$(cat "${PID_FILE}")"
+    pid="$(<"${PIDFILE}")"
     if kill -0 "${pid}" 2>/dev/null; then
       kill "${pid}" 2>/dev/null || true
       sleep 1
     fi
-    rm -f "${PID_FILE}"
+    rm -f "${PIDFILE}"
   fi
 
-  # Remove test worktrees — with prefix guardrails.
-  for wt in "${TEST_WT_NAME}" "${TEST_WT_NAME2}" "phantom_wt" "orphan_parent_test"; do
-    # Refuse to touch anything that doesn't match a test prefix.
+  # Remove test worktrees — with prefix guardrails
+  for wt in "${TEST_WT_NAME}" "${TEST_WT_NAME2}" "phantom_wt" "orphan_parent_test" "test_manual_wt" "test_managed_c5" "test_unmanaged_c5"; do
     if [[ "${wt}" != test_* ]] && [[ "${wt}" != phantom_* ]] && [[ "${wt}" != orphan_* ]]; then
       echo "  SKIPPING non-test worktree: ${wt}"
       continue
     fi
 
-    local wt_path="${REPO_ROOT}/../${wt}"
+    local wt_path
+    wt_path=$(resolve_path "${REPO_ROOT}/../${wt}")
 
-    # Refuse to rm -rf if path doesn't resolve under the expected parent.
     if [ -d "${wt_path}" ]; then
       local resolved
       resolved="$(cd "${wt_path}" && pwd)"
@@ -322,14 +300,7 @@ full_cleanup() {
       git worktree remove --force "${wt_path}" 2>/dev/null || rm -rf "${wt_path}"
     fi
     git branch -D "${wt}" 2>/dev/null || true
-    rm -f "${LOCK_DIR}/${wt}.lock"
   done
-
-  # Remove test lockfiles
-  rm -f "${LOCK_DIR}/corrupt.lock"
-  rm -f "${LOCK_DIR}/phantom.lock"
-  rm -f "${LOCK_DIR}/phantom_wt.lock"
-  rm -f "${LOCK_DIR}/orphan_parent_test.lock"
 
   git worktree prune 2>/dev/null || true
 
@@ -339,7 +310,7 @@ full_cleanup() {
   tmux kill-session -t "phantom_wt" 2>/dev/null || true
   tmux kill-session -t "orphan_parent_test" 2>/dev/null || true
 
-  # Clean up any leftover throwaway branches from B7/B10.
+  # Clean up throwaway branches
   local branch
   for branch in $(git branch --list '__test_merge_target_*' 2>/dev/null); do
     git branch -D "${branch}" 2>/dev/null || true
@@ -355,16 +326,15 @@ full_cleanup() {
 # --- A1: Fresh create (happy path) ---
 test_A1() {
   banner "A1: Fresh create (happy path)"
-  echo "  Run: bash spawnBGClaudeWT.sh \"test fresh 1\""
-  echo "  Expect: new branch, worktree, settings, tasks.json, lockfile, daemon, IDE"
+  echo "  Run: bash spawnWorktree.sh \"test fresh 1\""
+  echo "  Expect: new branch, worktree, .managed-worktree marker, scaffold, daemon, IDE"
   echo ""
 
   local output
-  output="$(bash "${SCRIPT_DIR}/spawnBGClaudeWT.sh" "test fresh 1" 2>&1)" || true
+  output="$(bash "${SCRIPT_DIR}/spawnWorktree.sh" "test fresh 1" 2>&1)" || true
   echo "${output}"
 
   # Make a diverging commit so daemon doesn't consider the branch "merged"
-  # (a branch created from HEAD is trivially merged into the parent).
   if [ -d "${TEST_WT_PATH}" ]; then
     (cd "${TEST_WT_PATH}" && echo "test marker" > test_marker.txt && git add test_marker.txt && git commit -m "test: diverge from parent" --no-verify) >/dev/null 2>&1
   fi
@@ -372,10 +342,12 @@ test_A1() {
   section "Automated checks"
   assert_branch_exists "${TEST_WT_NAME}"
   assert_dir_exists "${TEST_WT_PATH}"
+  assert_managed_worktree "${TEST_WT_PATH}"
   assert_file_exists "${TEST_WT_PATH}/.claude/settings.json"
   assert_file_exists "${TEST_WT_PATH}/.vscode/tasks.json"
+  assert_file_exists "${TEST_WT_PATH}/.vscode/settings.json"
 
-  # Check tasks.json contains correct worktree name
+  # Check tasks.json contains correct worktree name (rendered from template)
   if [ -f "${TEST_WT_PATH}/.vscode/tasks.json" ]; then
     if grep -q "worktree-${TEST_WT_NAME}" "${TEST_WT_PATH}/.vscode/tasks.json"; then
       pass "tasks.json references worktree-${TEST_WT_NAME}"
@@ -384,12 +356,29 @@ test_A1() {
     fi
   fi
 
-  assert_file_exists "${LOCK_DIR}/${TEST_WT_NAME}.lock"
-  assert_lockfile_valid_json "${LOCK_DIR}/${TEST_WT_NAME}.lock"
-  assert_output_contains "${output}" "Lockfile written"
-  assert_output_contains "${output}" "Daemon started"
+  # Check .managed-worktree has birth_commit
+  if [ -f "${TEST_WT_PATH}/.managed-worktree" ]; then
+    if grep -q "^birth_commit=" "${TEST_WT_PATH}/.managed-worktree"; then
+      pass ".managed-worktree contains birth_commit"
+    else
+      fail ".managed-worktree missing birth_commit"
+    fi
+  fi
 
-  # Check daemon is running
+  # Scaffold files should NOT appear in git status (excluded via .git/info/exclude)
+  local git_status
+  git_status="$(git -C "${TEST_WT_PATH}" status --porcelain -- .managed-worktree .claude/settings.json .vscode/tasks.json .vscode/settings.json 2>/dev/null)"
+  if [ -z "${git_status}" ]; then
+    pass "Scaffold files excluded from git status"
+  else
+    fail "Scaffold files appear in git status: ${git_status}"
+  fi
+
+  # No lockfile (v2 doesn't use lockfiles)
+  assert_dir_missing "${REPO_ROOT}/.worktree-locks"
+
+  # Daemon should be running
+  assert_output_contains "${output}" "Daemon started"
   if daemon_is_running; then
     pass "Daemon process is running (PID $(daemon_pid))"
   else
@@ -403,37 +392,152 @@ test_A1() {
 # --- A2: Reopen existing worktree ---
 test_A2() {
   banner "A2: Reopen existing worktree"
-  echo "  Run: bash spawnBGClaudeWT.sh \"test fresh 1\" (same name again)"
-  echo "  Expect: 'Reopening' message, no 'Lockfile written', no 'Daemon started'"
+  echo "  Run: bash spawnWorktree.sh \"test fresh 1\" (same name again)"
+  echo "  Expect: CASE A reopen, scaffold refreshed, no new 'Daemon started'"
   echo ""
 
-  # Precondition: worktree must exist from A1.
   if [ ! -d "${TEST_WT_PATH}" ]; then
     skip "test_fresh_1 worktree missing — run A1 first"
     return
   fi
 
   local output
-  output="$(bash "${SCRIPT_DIR}/spawnBGClaudeWT.sh" "test fresh 1" 2>&1)" || true
+  output="$(bash "${SCRIPT_DIR}/spawnWorktree.sh" "test fresh 1" 2>&1)" || true
   echo "${output}"
 
   section "Automated checks"
-  assert_output_contains "${output}" "Reopening existing worktree"
-  assert_output_not_contains "${output}" "Lockfile written" "No 'Lockfile written' message (already exists)"
+  assert_output_contains "${output}" "CASE A"
   assert_output_not_contains "${output}" "Daemon started" "No 'Daemon started' message (already running)"
+  assert_managed_worktree "${TEST_WT_PATH}"
 
   section "Manual checks"
   manual_check "IDE window opened at ${TEST_WT_PATH}"
 }
 
-# --- B1: Singleton — won't start twice ---
-test_B1() {
-  banner "B1: Singleton — daemon won't start twice"
-  echo "  Run: bash worktreeDaemon.sh \"<repo-root>\" while daemon already runs"
-  echo "  Expect: 'Daemon already running' message"
+# --- A3: Reopen with --force ---
+test_A3() {
+  banner "A3: Reopen with --force skips overwrite prompt"
+  echo "  Setup: modify scaffold, reopen with --force"
   echo ""
 
-  # Precondition: daemon must already be running.
+  if [ ! -d "${TEST_WT_PATH}" ]; then
+    skip "test_fresh_1 worktree missing — run A1 first"
+    return
+  fi
+
+  section "Setup"
+  # Modify a scaffold file
+  echo '{"modified": true}' > "${TEST_WT_PATH}/.claude/settings.json"
+
+  section "Execute"
+  local output
+  output="$(bash "${SCRIPT_DIR}/spawnWorktree.sh" --force "test fresh 1" 2>&1)" || true
+  echo "${output}"
+
+  section "Automated checks"
+  assert_output_contains "${output}" "CASE A"
+  assert_output_contains "${output}" "--force"
+
+  # settings.json should be restored to template
+  if diff -q "${REPO_ROOT}/v1/templates/settings.json" "${TEST_WT_PATH}/.claude/settings.json" >/dev/null 2>&1; then
+    pass "settings.json restored to template after --force"
+  else
+    fail "settings.json not restored after --force"
+  fi
+
+  section "Manual checks"
+  manual_check "IDE window opened at ${TEST_WT_PATH}"
+}
+
+# --- A4: Path exists but branch doesn't ---
+test_A4() {
+  banner "A4: Path exists but branch doesn't (CASE C error)"
+  echo "  Setup: create worktree, delete branch, try to reopen"
+  echo ""
+
+  section "Setup"
+  git worktree remove --force "${TEST_WT_PATH}" 2>/dev/null || rm -rf "${TEST_WT_PATH}"
+  git branch -D "${TEST_WT_NAME}" 2>/dev/null || true
+  git worktree prune 2>/dev/null || true
+
+  git worktree add -b "${TEST_WT_NAME}" "${TEST_WT_PATH}" HEAD 2>/dev/null || true
+
+  # Detach HEAD and delete branch
+  (cd "${TEST_WT_PATH}" && git checkout --detach HEAD 2>/dev/null) || true
+  git branch -D "${TEST_WT_NAME}" 2>/dev/null || true
+
+  assert_dir_exists "${TEST_WT_PATH}"
+  assert_branch_missing "${TEST_WT_NAME}"
+
+  section "Execute"
+  local output exit_code
+  output="$(bash "${SCRIPT_DIR}/spawnWorktree.sh" "test fresh 1" 2>&1)" || exit_code=$?
+  exit_code=${exit_code:-0}
+  echo "${output}"
+
+  section "Automated checks"
+  assert_output_contains "${output}" "CASE C" "Shows CASE C error path"
+  assert_exit_code "${exit_code}" 1
+
+  # Cleanup
+  section "Teardown"
+  git worktree remove --force "${TEST_WT_PATH}" 2>/dev/null || rm -rf "${TEST_WT_PATH}"
+  git worktree prune 2>/dev/null || true
+}
+
+# --- A5: Branch exists but path doesn't ---
+test_A5() {
+  banner "A5: Branch exists but path doesn't (CASE B re-create)"
+  echo "  Setup: create branch, ensure no worktree path, run spawn"
+  echo ""
+
+  section "Setup"
+  git worktree remove --force "${TEST_WT_PATH}" 2>/dev/null || rm -rf "${TEST_WT_PATH}"
+  git branch -D "${TEST_WT_NAME}" 2>/dev/null || true
+  git worktree prune 2>/dev/null || true
+
+  git branch "${TEST_WT_NAME}" HEAD
+  assert_branch_exists "${TEST_WT_NAME}"
+  assert_dir_missing "${TEST_WT_PATH}"
+
+  section "Execute"
+  local output
+  output="$(bash "${SCRIPT_DIR}/spawnWorktree.sh" "test fresh 1" 2>&1)" || true
+  echo "${output}"
+
+  section "Automated checks"
+  assert_output_contains "${output}" "CASE B"
+  assert_dir_exists "${TEST_WT_PATH}"
+  assert_managed_worktree "${TEST_WT_PATH}"
+  assert_file_exists "${TEST_WT_PATH}/.claude/settings.json"
+  assert_file_exists "${TEST_WT_PATH}/.vscode/tasks.json"
+
+  section "Manual checks"
+  manual_check "IDE window opened at ${TEST_WT_PATH}"
+}
+
+# --- A6: Name validation ---
+test_A6() {
+  banner "A6: Name validation rejects invalid characters"
+  echo "  Run: bash spawnWorktree.sh \"invalid.name/here\""
+  echo ""
+
+  local output exit_code
+  output="$(bash "${SCRIPT_DIR}/spawnWorktree.sh" "invalid.name/here" 2>&1)" || exit_code=$?
+  exit_code=${exit_code:-0}
+  echo "${output}"
+
+  section "Automated checks"
+  assert_output_contains "${output}" "Invalid worktree name"
+  assert_exit_code "${exit_code}" 1
+}
+
+# --- B1: Daemon singleton ---
+test_B1() {
+  banner "B1: Singleton — daemon won't start twice"
+  echo "  Run: worktreeDaemon.sh while daemon already runs"
+  echo ""
+
   if ! daemon_is_running; then
     skip "Daemon not running — run A1 first to start it"
     return
@@ -455,82 +559,17 @@ test_B1() {
   fi
 }
 
-# --- A3: Reopen writes lockfile if missing ---
-test_A3() {
-  banner "A3: Reopen writes lockfile if missing"
-  echo "  Setup: remove lockfile, then reopen"
-  echo ""
-
-  # Precondition: worktree must exist from A1.
-  if [ ! -d "${TEST_WT_PATH}" ]; then
-    skip "test_fresh_1 worktree missing — run A1 first"
-    return
-  fi
-
-  section "Setup"
-  rm -f "${LOCK_DIR}/${TEST_WT_NAME}.lock"
-  assert_file_missing "${LOCK_DIR}/${TEST_WT_NAME}.lock"
-
-  section "Execute"
-  local output
-  output="$(bash "${SCRIPT_DIR}/spawnBGClaudeWT.sh" "test fresh 1" 2>&1)" || true
-  echo "${output}"
-
-  section "Automated checks"
-  assert_output_contains "${output}" "Reopening existing worktree"
-  assert_output_contains "${output}" "Lockfile written"
-  assert_file_exists "${LOCK_DIR}/${TEST_WT_NAME}.lock"
-  assert_lockfile_valid_json "${LOCK_DIR}/${TEST_WT_NAME}.lock"
-
-  section "Manual checks"
-  manual_check "IDE window opened at ${TEST_WT_PATH}"
-}
-
-# --- B9: SIGINT/SIGTERM — clean shutdown ---
-test_B9() {
-  banner "B9: SIGTERM — clean daemon shutdown"
-  echo "  Run: kill daemon PID"
-  echo "  Expect: 'Daemon shutting down', PID file removed"
-  echo ""
-
-  if ! daemon_is_running; then
-    fail "Daemon not running — cannot test SIGTERM"
-    return
-  fi
-
-  local pid
-  pid="$(daemon_pid)"
-  echo "  Sending SIGTERM to daemon PID ${pid}..."
-  kill "${pid}"
-  sleep 2
-
-  section "Automated checks"
-  if ! kill -0 "${pid}" 2>/dev/null; then
-    pass "Daemon process ${pid} is no longer running"
-  else
-    fail "Daemon process ${pid} still running after SIGTERM"
-  fi
-
-  assert_file_missing "${PID_FILE}"
-
-  # Check daemon.log for shutdown message
-  if [ -f "${LOCK_DIR}/daemon.log" ] && grep -q "Daemon shutting down (PID ${pid})" "${LOCK_DIR}/daemon.log"; then
-    pass "daemon.log contains shutdown message for PID ${pid}"
-  else
-    fail "daemon.log missing shutdown message for PID ${pid}"
-  fi
-}
-
 # --- B2: Stale PID detection ---
 test_B2() {
   banner "B2: Stale PID detection"
-  echo "  Setup: ensure daemon running, hard-kill it, verify stale PID takeover"
+  echo "  Setup: hard-kill daemon, verify stale PID takeover"
   echo ""
 
   section "Setup — start a daemon if not running"
-  # Start daemon fresh
-  nohup bash "${SCRIPT_DIR}/worktreeDaemon.sh" "${REPO_ROOT}" ${DAEMON_VERBOSE_FLAG} >> "${LOCK_DIR}/daemon.log" 2>&1 &
-  sleep 2
+  if ! daemon_is_running; then
+    nohup bash "${SCRIPT_DIR}/worktreeDaemon.sh" "${REPO_ROOT}" ${DAEMON_VERBOSE_FLAG} >> "${LOGFILE}" 2>&1 &
+    sleep 2
+  fi
 
   if ! daemon_is_running; then
     fail "Could not start daemon for stale PID test"
@@ -543,21 +582,18 @@ test_B2() {
   kill -9 "${old_pid}" 2>/dev/null || true
   sleep 1
 
-  # PID file should still exist (stale)
-  assert_file_exists "${PID_FILE}"
+  assert_file_exists "${PIDFILE}"
 
   section "Execute — start daemon again (should detect stale PID)"
-  # Truncate the end of daemon.log so we can check new output
   local log_lines_before
-  log_lines_before="$(wc -l < "${LOCK_DIR}/daemon.log" 2>/dev/null || echo 0)"
+  log_lines_before="$(log_line_count)"
 
-  nohup bash "${SCRIPT_DIR}/worktreeDaemon.sh" "${REPO_ROOT}" ${DAEMON_VERBOSE_FLAG} >> "${LOCK_DIR}/daemon.log" 2>&1 &
+  nohup bash "${SCRIPT_DIR}/worktreeDaemon.sh" "${REPO_ROOT}" ${DAEMON_VERBOSE_FLAG} >> "${LOGFILE}" 2>&1 &
   sleep 2
 
   section "Automated checks"
-  # Check new log output
   local new_output
-  new_output="$(tail -n +$((log_lines_before + 1)) "${LOCK_DIR}/daemon.log" 2>/dev/null)"
+  new_output="$(tail -n +$((log_lines_before + 1)) "${LOGFILE}" 2>/dev/null)"
 
   assert_output_contains "${new_output}" "Stale PID file found (PID ${old_pid})" "Log shows stale PID detection"
   assert_output_contains "${new_output}" "Daemon started" "Log shows new daemon started"
@@ -577,200 +613,174 @@ test_B2() {
   show_daemon_log_tail "${log_lines_before}"
 }
 
-# --- B4: Corrupt lockfile — skip without crash ---
-test_B4() {
-  banner "B4: Corrupt lockfile — daemon skips without crash"
-  echo "  Setup: write bad JSON to a lockfile"
+# --- B3: PID file lifecycle ---
+test_B3() {
+  banner "B3: PID file lifecycle"
+  echo "  Verify: PID file created on start, removed on clean exit"
   echo ""
 
-  section "Setup"
-  echo "bad json" > "${LOCK_DIR}/corrupt.lock"
-  assert_file_exists "${LOCK_DIR}/corrupt.lock"
-
-  # Record log position
-  local log_lines_before
-  log_lines_before="$(wc -l < "${LOCK_DIR}/daemon.log" 2>/dev/null || echo 0)"
-
-  echo "  Waiting for daemon to encounter corrupt lockfile..."
-  if ! wait_for_log "WARNING: Failed to parse" "${log_lines_before}" 30; then
-    fail "Daemon did not warn about corrupt lockfile within timeout"
-  fi
-
-  section "Automated checks"
-  local new_output
-  new_output="$(tail -n +$((log_lines_before + 1)) "${LOCK_DIR}/daemon.log" 2>/dev/null)"
-
-  assert_output_contains "${new_output}" "WARNING: Failed to parse" "Log warns about corrupt lockfile"
-
+  section "Setup — kill any existing daemon"
   if daemon_is_running; then
-    pass "Daemon still running after encountering corrupt lockfile"
+    kill "$(daemon_pid)" 2>/dev/null || true
+    sleep 2
+  fi
+  rm -f "${PIDFILE}"
+
+  section "Execute — start daemon"
+  nohup bash "${SCRIPT_DIR}/worktreeDaemon.sh" "${REPO_ROOT}" ${DAEMON_VERBOSE_FLAG} >> "${LOGFILE}" 2>&1 &
+  sleep 2
+
+  assert_file_exists "${PIDFILE}"
+  local pid
+  pid="$(daemon_pid)"
+
+  if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+    pass "Daemon running with PID ${pid}"
   else
-    fail "Daemon crashed on corrupt lockfile"
+    fail "Daemon not running"
+    return
   fi
 
-  show_daemon_log_tail "${log_lines_before}"
+  echo "  Sending SIGTERM..."
+  kill "${pid}"
+  sleep 2
 
-  # Cleanup
-  rm -f "${LOCK_DIR}/corrupt.lock"
+  section "Automated checks"
+  if ! kill -0 "${pid}" 2>/dev/null; then
+    pass "Daemon process ${pid} is no longer running"
+  else
+    fail "Daemon process ${pid} still running after SIGTERM"
+  fi
+
+  assert_file_missing "${PIDFILE}"
+
+  if [ -f "${LOGFILE}" ] && grep -q "Daemon shutting down (PID ${pid})" "${LOGFILE}"; then
+    pass "daemon.log contains shutdown message for PID ${pid}"
+  else
+    fail "daemon.log missing shutdown message for PID ${pid}"
+  fi
 }
 
-# --- B5: Worktree path gone — cleanup remnants ---
-test_B5() {
-  banner "B5: Worktree path gone — daemon cleans up remnants"
-  echo "  Setup: create lockfile pointing to non-existent path"
+# --- B4: Merge detection via merge commit parents ---
+test_B4() {
+  banner "B4: Merge detection — awk-based merge commit parent scan"
+  echo "  Setup: create worktree, merge with --no-ff, verify detection"
   echo ""
 
   section "Setup"
-  # Create a lockfile for a phantom worktree
-  local phantom_name="phantom_wt"
-  local phantom_path="${REPO_ROOT}/../${phantom_name}"
-
-  # Create a branch so the daemon can delete it
-  git branch "${phantom_name}" HEAD 2>/dev/null || true
-
-  local current_branch
-  current_branch="$(git rev-parse --abbrev-ref HEAD)"
-  write_lockfile "${phantom_name}" "${phantom_path}" "${current_branch}"
-  assert_file_exists "${LOCK_DIR}/${phantom_name}.lock"
-  assert_dir_missing "${phantom_path}"
-
-  local log_lines_before
-  log_lines_before="$(wc -l < "${LOCK_DIR}/daemon.log" 2>/dev/null || echo 0)"
-
-  echo "  Waiting for daemon to detect missing path..."
-  if ! wait_for_log "worktree path gone. Cleaning up remnants" "${log_lines_before}" 30; then
-    fail "Daemon did not detect missing path within timeout"
-  fi
-
-  section "Automated checks"
-  local new_output
-  new_output="$(tail -n +$((log_lines_before + 1)) "${LOCK_DIR}/daemon.log" 2>/dev/null)"
-
-  assert_output_contains "${new_output}" "worktree path gone. Cleaning up remnants" "Daemon detects missing path"
-  assert_output_contains "${new_output}" "lockfile removed" "Lockfile removed"
-  assert_file_missing "${LOCK_DIR}/${phantom_name}.lock"
-  assert_branch_missing "${phantom_name}"
-
-  show_daemon_log_tail "${log_lines_before}"
-}
-
-# --- B6: Parent branch missing — skip ---
-test_B6() {
-  banner "B6: Parent branch missing — daemon skips gracefully"
-  echo "  Setup: lockfile with non-existent parentBranch"
-  echo ""
-
-  section "Setup"
-  local orphan_name="orphan_parent_test"
-  local orphan_path="${REPO_ROOT}/../${orphan_name}"
-
-  # Create actual worktree so the path exists (daemon won't hit B5 path-gone)
-  git worktree add -b "${orphan_name}" "${orphan_path}" HEAD 2>/dev/null || true
-
-  write_lockfile "${orphan_name}" "${orphan_path}" "nonexistent_parent_branch_xyz"
-  assert_file_exists "${LOCK_DIR}/${orphan_name}.lock"
-
-  local log_lines_before
-  log_lines_before="$(wc -l < "${LOCK_DIR}/daemon.log" 2>/dev/null || echo 0)"
-
-  echo "  Waiting for daemon to detect missing parent branch..."
-  if ! wait_for_log "WARNING: Parent branch 'nonexistent_parent_branch_xyz' not found" "${log_lines_before}" 30; then
-    fail "Daemon did not warn about missing parent within timeout"
-  fi
-
-  section "Automated checks"
-  local new_output
-  new_output="$(tail -n +$((log_lines_before + 1)) "${LOCK_DIR}/daemon.log" 2>/dev/null)"
-
-  assert_output_contains "${new_output}" "WARNING: Parent branch 'nonexistent_parent_branch_xyz' not found" "Warns about missing parent branch"
-  assert_file_exists "${LOCK_DIR}/${orphan_name}.lock"
-  pass "Lockfile NOT removed (keeps retrying)"
-
-  show_daemon_log_tail "${log_lines_before}"
-
-  # Cleanup
-  rm -f "${LOCK_DIR}/${orphan_name}.lock"
-  git worktree remove --force "${orphan_path}" 2>/dev/null || rm -rf "${orphan_path}"
-  git branch -D "${orphan_name}" 2>/dev/null || true
+  git worktree remove --force "${TEST_WT_PATH}" 2>/dev/null || rm -rf "${TEST_WT_PATH}"
+  git branch -D "${TEST_WT_NAME}" 2>/dev/null || true
   git worktree prune 2>/dev/null || true
-}
 
-# --- B8: Branch not merged — no action ---
-test_B8() {
-  banner "B8: Branch not merged — no action"
-  echo "  Setup: worktree with unmerged commits"
-  echo ""
+  # Create worktree with diverging commit
+  git worktree add -b "${TEST_WT_NAME}" "${TEST_WT_PATH}" HEAD
+  (cd "${TEST_WT_PATH}" && echo "merge test content" > merge_test.txt && git add merge_test.txt && git commit -m "commit for merge test" --no-verify) >/dev/null 2>&1
 
-  section "Setup"
-  # Ensure test_fresh_1 has a commit not on parent
-  if [ -d "${TEST_WT_PATH}" ]; then
-    (cd "${TEST_WT_PATH}" && echo "unmerged content" > unmerged_file.txt && git add unmerged_file.txt && git commit -m "unmerged test commit" --no-verify)
-  else
-    fail "test_fresh_1 worktree does not exist — run A1 first"
-    return
-  fi
+  # Write .managed-worktree marker (needed for is_worktree_merged)
+  source "${SCRIPT_DIR}/worktreeLib.sh"
+  scaffold_worktree "${TEST_WT_PATH}" "${TEST_WT_NAME}" "${REPO_ROOT}"
 
-  # Ensure lockfile exists
-  if [ ! -f "${LOCK_DIR}/${TEST_WT_NAME}.lock" ]; then
-    local current_branch
-    current_branch="$(git rev-parse --abbrev-ref HEAD)"
-    write_lockfile "${TEST_WT_NAME}" "${TEST_WT_PATH}" "${current_branch}"
-  fi
-
-  local log_lines_before
-  log_lines_before="$(wc -l < "${LOCK_DIR}/daemon.log" 2>/dev/null || echo 0)"
-
-  # Negative check: wait 2 scan intervals to confirm daemon does NOT act.
-  echo "  Waiting 2 daemon scan intervals (25 seconds) to confirm no action..."
-  sleep 25
-
-  section "Automated checks"
-  local new_output
-  new_output="$(tail -n +$((log_lines_before + 1)) "${LOCK_DIR}/daemon.log" 2>/dev/null)"
-
-  assert_output_not_contains "${new_output}" "${TEST_WT_NAME}: branch merged" "No 'branch merged' message for unmerged worktree"
-  assert_file_exists "${LOCK_DIR}/${TEST_WT_NAME}.lock"
-  pass "Lockfile remains, daemon keeps polling"
-  assert_dir_exists "${TEST_WT_PATH}"
-  pass "Worktree still exists"
-
-  show_daemon_log_tail "${log_lines_before}"
-}
-
-# --- B7 + C1: Branch merged, no meaningful changes — full cleanup ---
-test_B7() {
-  banner "B7 + C1: Branch merged (no meaningful changes) — full cleanup"
-  echo "  Setup: merge worktree branch into parent, let daemon clean up"
-  echo ""
-
-  section "Setup"
-  # Make sure worktree exists with the lockfile
-  if [ ! -d "${TEST_WT_PATH}" ]; then
-    fail "test_fresh_1 worktree missing — run A1 first"
-    return
-  fi
-
-  # Merge into a throwaway branch (never touch the user's working branch)
+  # Merge into a throwaway branch
   local original_branch
   original_branch="$(git rev-parse --abbrev-ref HEAD)"
-  local throwaway="__test_merge_target_$(date +%s)_b7"
+  local throwaway="__test_merge_target_$(date +%s)_b4"
   THROWAWAY_BRANCH="${throwaway}"
   git checkout -b "${throwaway}" HEAD
-  echo "  Merging ${TEST_WT_NAME} into throwaway branch ${throwaway} with --no-ff..."
-  git merge --no-ff "${TEST_WT_NAME}" -m "test merge for B7" || {
+  git merge --no-ff "${TEST_WT_NAME}" -m "test merge for B4" || {
     git checkout "${original_branch}"
     fail "Merge failed"
     return
   }
   git checkout "${original_branch}"
 
-  # Write lockfile pointing at the throwaway branch (use old timestamp to
-  # bypass daemon grace period — this simulates a branch that has been alive
-  # long enough for cleanup to be valid).
-  write_lockfile "${TEST_WT_NAME}" "${TEST_WT_PATH}" "${throwaway}" "2020-01-01T00:00:00.000Z"
+  section "Execute"
+  source "${SCRIPT_DIR}/worktreeLib.sh"
+  REPO_ROOT=$(realpath "$(git rev-parse --show-toplevel)")
+
+  if is_worktree_merged "${TEST_WT_NAME}" "${REPO_ROOT}"; then
+    pass "is_worktree_merged correctly detects --no-ff merge"
+  else
+    fail "is_worktree_merged failed to detect --no-ff merge"
+  fi
+
+  section "Teardown"
+  git worktree remove --force "${TEST_WT_PATH}" 2>/dev/null || rm -rf "${TEST_WT_PATH}"
+  git branch -D "${TEST_WT_NAME}" 2>/dev/null || true
+  git branch -D "${throwaway}" 2>/dev/null || true
+  git worktree prune 2>/dev/null || true
+  THROWAWAY_BRANCH=""
+}
+
+# --- B5: No false positive on fresh branch ---
+test_B5() {
+  banner "B5: No false positive — fresh branch is NOT considered merged"
+  echo "  Setup: create worktree, diverge, check is_worktree_merged returns false"
+  echo ""
+
+  section "Setup"
+  git worktree remove --force "${TEST_WT_PATH}" 2>/dev/null || rm -rf "${TEST_WT_PATH}"
+  git branch -D "${TEST_WT_NAME}" 2>/dev/null || true
+  git worktree prune 2>/dev/null || true
+
+  git worktree add -b "${TEST_WT_NAME}" "${TEST_WT_PATH}" HEAD
+  (cd "${TEST_WT_PATH}" && echo "diverge" > diverge.txt && git add diverge.txt && git commit -m "diverge" --no-verify) >/dev/null 2>&1
+
+  section "Execute"
+  source "${SCRIPT_DIR}/worktreeLib.sh"
+  REPO_ROOT=$(realpath "$(git rev-parse --show-toplevel)")
+
+  if is_worktree_merged "${TEST_WT_NAME}" "${REPO_ROOT}"; then
+    fail "is_worktree_merged false positive on fresh unmerged branch"
+  else
+    pass "is_worktree_merged correctly returns false for unmerged branch"
+  fi
+
+  section "Teardown"
+  git worktree remove --force "${TEST_WT_PATH}" 2>/dev/null || rm -rf "${TEST_WT_PATH}"
+  git branch -D "${TEST_WT_NAME}" 2>/dev/null || true
+  git worktree prune 2>/dev/null || true
+}
+
+# --- B6: Daemon cleanup after merge ---
+test_B6() {
+  banner "B6: Daemon detects merge and cleans up"
+  echo "  Setup: create managed worktree, merge with --no-ff, let daemon handle it"
+  echo ""
+
+  section "Setup"
+  git worktree remove --force "${TEST_WT_PATH}" 2>/dev/null || rm -rf "${TEST_WT_PATH}"
+  git branch -D "${TEST_WT_NAME}" 2>/dev/null || true
+  git worktree prune 2>/dev/null || true
+
+  # Create worktree via spawnWorktree.sh for full scaffold
+  local spawn_output
+  spawn_output="$(bash "${SCRIPT_DIR}/spawnWorktree.sh" "test fresh 1" 2>&1)" || true
+
+  # Diverge
+  (cd "${TEST_WT_PATH}" && echo "merge daemon test" > daemon_merge_test.txt && git add daemon_merge_test.txt && git commit -m "commit for daemon merge test" --no-verify) >/dev/null 2>&1
+
+  # Merge into throwaway branch
+  local original_branch
+  original_branch="$(git rev-parse --abbrev-ref HEAD)"
+  local throwaway="__test_merge_target_$(date +%s)_b6"
+  THROWAWAY_BRANCH="${throwaway}"
+  git checkout -b "${throwaway}" HEAD
+  git merge --no-ff "${TEST_WT_NAME}" -m "test merge for B6" || {
+    git checkout "${original_branch}"
+    fail "Merge failed"
+    return
+  }
+  git checkout "${original_branch}"
+
+  # Ensure daemon is running
+  if ! daemon_is_running; then
+    rm -f "${PIDFILE}"
+    nohup bash "${SCRIPT_DIR}/worktreeDaemon.sh" "${REPO_ROOT}" ${DAEMON_VERBOSE_FLAG} >> "${LOGFILE}" 2>&1 &
+    sleep 2
+  fi
 
   local log_lines_before
-  log_lines_before="$(wc -l < "${LOCK_DIR}/daemon.log" 2>/dev/null || echo 0)"
+  log_lines_before="$(log_line_count)"
 
   echo "  Waiting for daemon to detect merge and clean up..."
   if ! wait_for_log "cleanup succeeded" "${log_lines_before}" 30; then
@@ -779,64 +789,59 @@ test_B7() {
 
   section "Automated checks"
   local new_output
-  new_output="$(tail -n +$((log_lines_before + 1)) "${LOCK_DIR}/daemon.log" 2>/dev/null)"
+  new_output="$(tail -n +$((log_lines_before + 1)) "${LOGFILE}" 2>/dev/null)"
 
-  assert_output_contains "${new_output}" "${TEST_WT_NAME}: branch merged into ${throwaway}" "Daemon detects merge"
+  assert_output_contains "${new_output}" "MERGED" "Daemon detects merge"
   assert_output_contains "${new_output}" "cleanup succeeded" "Cleanup succeeded"
-  assert_output_contains "${new_output}" "lockfile removed" "Lockfile removed"
   assert_dir_missing "${TEST_WT_PATH}"
-  assert_file_missing "${LOCK_DIR}/${TEST_WT_NAME}.lock"
   assert_branch_missing "${TEST_WT_NAME}"
 
   show_daemon_log_tail "${log_lines_before}"
 
-  # Clean up throwaway branch (no git reset --hard needed)
   git branch -D "${throwaway}" 2>/dev/null || true
   THROWAWAY_BRANCH=""
 }
 
-# --- B10 + C2: Branch merged, with local changes — cleanup blocked ---
-test_B10() {
-  banner "B10 + C2: Branch merged with local changes — cleanup blocked"
-  echo "  Setup: create worktree, merge branch, add uncommitted changes"
+# --- B7: Daemon skips cleanup when dirty ---
+test_B7() {
+  banner "B7: Daemon skips cleanup when worktree has uncommitted changes"
+  echo "  Setup: create managed worktree, merge, add dirty file"
   echo ""
 
-  section "Setup — create fresh worktree"
-  # Clean slate
+  section "Setup"
   git worktree remove --force "${TEST_WT_PATH}" 2>/dev/null || rm -rf "${TEST_WT_PATH}"
   git branch -D "${TEST_WT_NAME}" 2>/dev/null || true
   git worktree prune 2>/dev/null || true
-  rm -f "${LOCK_DIR}/${TEST_WT_NAME}.lock"
 
-  # Create worktree with a commit
+  # Create and scaffold
   git worktree add -b "${TEST_WT_NAME}" "${TEST_WT_PATH}" HEAD
-  (cd "${TEST_WT_PATH}" && echo "merged content" > merged_file.txt && git add merged_file.txt && git commit -m "commit for B10 test" --no-verify)
+  source "${SCRIPT_DIR}/worktreeLib.sh"
+  REPO_ROOT=$(realpath "$(git rev-parse --show-toplevel)")
+  scaffold_worktree "${TEST_WT_PATH}" "${TEST_WT_NAME}" "${REPO_ROOT}"
 
-  # Merge into a throwaway branch (never touch the user's working branch)
+  (cd "${TEST_WT_PATH}" && echo "merged content" > merged_file.txt && git add merged_file.txt && git commit -m "commit for B7" --no-verify) >/dev/null 2>&1
+
+  # Merge into throwaway
   local original_branch
   original_branch="$(git rev-parse --abbrev-ref HEAD)"
-  local throwaway="__test_merge_target_$(date +%s)_b10"
+  local throwaway="__test_merge_target_$(date +%s)_b7"
   THROWAWAY_BRANCH="${throwaway}"
   git checkout -b "${throwaway}" HEAD
-  git merge --no-ff "${TEST_WT_NAME}" -m "test merge for B10"
+  git merge --no-ff "${TEST_WT_NAME}" -m "test merge for B7"
   git checkout "${original_branch}"
 
-  # Now add uncommitted changes to the worktree
+  # Add uncommitted change (this is a real file, not scaffold)
   echo "dirty local change" > "${TEST_WT_PATH}/local_edit.txt"
 
-  # Write lockfile pointing at the throwaway branch
-  write_lockfile "${TEST_WT_NAME}" "${TEST_WT_PATH}" "${throwaway}"
-
-  # Ensure daemon is running (B7 may have caused it to exit)
+  # Ensure daemon is running
   if ! daemon_is_running; then
-    echo "  Restarting daemon (previous test may have caused exit)..."
-    rm -f "${PID_FILE}"
-    nohup bash "${SCRIPT_DIR}/worktreeDaemon.sh" "${REPO_ROOT}" ${DAEMON_VERBOSE_FLAG} >> "${LOCK_DIR}/daemon.log" 2>&1 &
+    rm -f "${PIDFILE}"
+    nohup bash "${SCRIPT_DIR}/worktreeDaemon.sh" "${REPO_ROOT}" ${DAEMON_VERBOSE_FLAG} >> "${LOGFILE}" 2>&1 &
     sleep 2
   fi
 
   local log_lines_before
-  log_lines_before="$(wc -l < "${LOCK_DIR}/daemon.log" 2>/dev/null || echo 0)"
+  log_lines_before="$(log_line_count)"
 
   echo "  Waiting for daemon to detect merge and attempt cleanup..."
   if ! wait_for_log "cleanup returned non-zero" "${log_lines_before}" 30; then
@@ -845,18 +850,16 @@ test_B10() {
 
   section "Automated checks"
   local new_output
-  new_output="$(tail -n +$((log_lines_before + 1)) "${LOCK_DIR}/daemon.log" 2>/dev/null)"
+  new_output="$(tail -n +$((log_lines_before + 1)) "${LOGFILE}" 2>/dev/null)"
 
-  assert_output_contains "${new_output}" "branch merged" "Daemon detects merge"
-  assert_output_contains "${new_output}" "cleanup returned non-zero" "Cleanup returned non-zero (local changes)"
+  assert_output_contains "${new_output}" "MERGED" "Daemon detects merge"
+  assert_output_contains "${new_output}" "cleanup returned non-zero" "Cleanup blocked by dirty files"
   assert_dir_exists "${TEST_WT_PATH}"
-  pass "Worktree kept (has local changes)"
-  assert_file_missing "${LOCK_DIR}/${TEST_WT_NAME}.lock"
-  pass "Lockfile still removed (branch is merged, cleanup attempted)"
+  pass "Worktree kept (has uncommitted changes)"
 
   show_daemon_log_tail "${log_lines_before}"
 
-  # Cleanup for next tests (no git reset --hard needed)
+  # Teardown
   section "Teardown"
   rm -f "${TEST_WT_PATH}/local_edit.txt"
   git worktree remove --force "${TEST_WT_PATH}" 2>/dev/null || rm -rf "${TEST_WT_PATH}"
@@ -866,193 +869,138 @@ test_B10() {
   THROWAWAY_BRANCH=""
 }
 
-# --- A4: Path exists but branch doesn't ---
-test_A4() {
-  banner "A4: Path exists but branch doesn't"
-  echo "  Setup: create worktree, delete branch, try to reopen"
+# --- B8: Daemon ignores unmanaged worktrees ---
+test_B8() {
+  banner "B8: Daemon ignores manually-created worktrees (no marker)"
+  echo "  Setup: create worktree manually (no .managed-worktree), verify daemon ignores it"
   echo ""
 
   section "Setup"
-  # Create worktree normally
-  git worktree add -b "${TEST_WT_NAME}" "${TEST_WT_PATH}" HEAD 2>/dev/null || true
+  local manual_name="test_manual_wt"
+  local manual_path
+  manual_path=$(resolve_path "${REPO_ROOT}/../${manual_name}")
 
-  # Delete branch (this will fail if worktree is using it — we need to detach first)
-  (cd "${TEST_WT_PATH}" && git checkout --detach HEAD 2>/dev/null) || true
-  git branch -D "${TEST_WT_NAME}" 2>/dev/null || true
-
-  assert_dir_exists "${TEST_WT_PATH}"
-  assert_branch_missing "${TEST_WT_NAME}"
-
-  section "Execute"
-  local output exit_code
-  output="$(bash "${SCRIPT_DIR}/spawnBGClaudeWT.sh" "test fresh 1" 2>&1)" || exit_code=$?
-  exit_code=${exit_code:-0}
-  echo "${output}"
-
-  section "Automated checks"
-  assert_output_contains "${output}" "path exists but branch" "Error message about path/branch mismatch"
-  assert_exit_code "${exit_code}" 1
-
-  # Cleanup
-  section "Teardown"
-  git worktree remove --force "${TEST_WT_PATH}" 2>/dev/null || rm -rf "${TEST_WT_PATH}"
+  git worktree remove --force "${manual_path}" 2>/dev/null || rm -rf "${manual_path}"
+  git branch -D "${manual_name}" 2>/dev/null || true
   git worktree prune 2>/dev/null || true
-}
 
-# --- A5: Branch exists but path doesn't ---
-test_A5() {
-  banner "A5: Branch exists but path doesn't"
-  echo "  Setup: create branch, ensure no worktree path, run spawn"
-  echo ""
+  git worktree add -b "${manual_name}" "${manual_path}" HEAD
+  # Deliberately NOT creating .managed-worktree marker
 
-  section "Setup"
-  # Ensure clean state
-  git worktree remove --force "${TEST_WT_PATH}" 2>/dev/null || rm -rf "${TEST_WT_PATH}"
-  git branch -D "${TEST_WT_NAME}" 2>/dev/null || true
-  git worktree prune 2>/dev/null || true
-  rm -f "${LOCK_DIR}/${TEST_WT_NAME}.lock"
-
-  # Create branch without worktree
-  git branch "${TEST_WT_NAME}" HEAD
-  assert_branch_exists "${TEST_WT_NAME}"
-  assert_dir_missing "${TEST_WT_PATH}"
-
-  section "Execute"
-  local output
-  output="$(bash "${SCRIPT_DIR}/spawnBGClaudeWT.sh" "test fresh 1" 2>&1)" || true
-  echo "${output}"
-
-  section "Automated checks"
-  assert_output_contains "${output}" "Reusing existing branch" "Shows 'Reusing existing branch'"
-  assert_dir_exists "${TEST_WT_PATH}"
-  assert_file_exists "${TEST_WT_PATH}/.claude/settings.json"
-  assert_file_exists "${TEST_WT_PATH}/.vscode/tasks.json"
-  assert_file_exists "${LOCK_DIR}/${TEST_WT_NAME}.lock"
-  assert_lockfile_valid_json "${LOCK_DIR}/${TEST_WT_NAME}.lock"
-  assert_output_contains "${output}" "Lockfile written"
-
-  section "Manual checks"
-  manual_check "IDE window opened at ${TEST_WT_PATH}"
-}
-
-# --- A6: ensure_daemon — no double-start ---
-test_A6() {
-  banner "A6: ensure_daemon — no double-start"
-  echo "  Run: create a second worktree while daemon already runs"
-  echo "  Expect: no 'Daemon started', only one daemon process"
-  echo ""
-
-  # Daemon should be running from A5
   if ! daemon_is_running; then
-    echo "  Starting daemon first..."
-    nohup bash "${SCRIPT_DIR}/worktreeDaemon.sh" "${REPO_ROOT}" ${DAEMON_VERBOSE_FLAG} >> "${LOCK_DIR}/daemon.log" 2>&1 &
+    rm -f "${PIDFILE}"
+    nohup bash "${SCRIPT_DIR}/worktreeDaemon.sh" "${REPO_ROOT}" ${DAEMON_VERBOSE_FLAG} >> "${LOGFILE}" 2>&1 &
     sleep 2
   fi
-
-  section "Execute"
-  local output
-  output="$(bash "${SCRIPT_DIR}/spawnBGClaudeWT.sh" "test fresh 2" 2>&1)" || true
-  echo "${output}"
-
-  section "Automated checks"
-  assert_output_not_contains "${output}" "Daemon started" "No 'Daemon started' (already running)"
-
-  local count
-  count="$(count_daemon_processes)"
-  if [ "${count}" -le 1 ]; then
-    pass "Only ${count} daemon process(es) running"
-  else
-    fail "Expected <=1 daemon process, found ${count}"
-  fi
-
-  assert_dir_exists "${TEST_WT_PATH2}"
-  assert_file_exists "${LOCK_DIR}/${TEST_WT_NAME2}.lock"
-
-  section "Manual checks"
-  manual_check "IDE window opened at ${TEST_WT_PATH2}"
-}
-
-# --- B3: No lockfiles — immediate exit ---
-test_B3() {
-  banner "B3: No lockfiles — daemon exits immediately"
-  echo "  Setup: remove all lockfiles, start daemon"
-  echo ""
-
-  section "Setup"
-  # Kill existing daemon
-  if daemon_is_running; then
-    kill "$(daemon_pid)" 2>/dev/null || true
-    sleep 2
-  fi
-  rm -f "${PID_FILE}"
-
-  # Remove all lockfiles
-  rm -f "${LOCK_DIR}"/*.lock
 
   local log_lines_before
-  log_lines_before="$(wc -l < "${LOCK_DIR}/daemon.log" 2>/dev/null || echo 0)"
+  log_lines_before="$(log_line_count)"
 
-  section "Execute"
-  bash "${SCRIPT_DIR}/worktreeDaemon.sh" "${REPO_ROOT}" ${DAEMON_VERBOSE_FLAG} >> "${LOCK_DIR}/daemon.log" 2>&1 &
-  local daemon_bg_pid=$!
-  sleep 3
+  echo "  Waiting 2 poll intervals (15s) to confirm daemon ignores it..."
+  sleep 15
 
   section "Automated checks"
   local new_output
-  new_output="$(tail -n +$((log_lines_before + 1)) "${LOCK_DIR}/daemon.log" 2>/dev/null)"
+  new_output="$(tail -n +$((log_lines_before + 1)) "${LOGFILE}" 2>/dev/null)"
 
-  assert_output_contains "${new_output}" "Daemon started" "Daemon started message"
-  assert_output_contains "${new_output}" "No lockfiles remain. Daemon exiting." "Daemon exited due to no lockfiles"
+  assert_output_not_contains "${new_output}" "${manual_name}" "Daemon doesn't reference unmanaged worktree"
+  assert_dir_exists "${manual_path}"
+  pass "Unmanaged worktree untouched"
 
-  if ! kill -0 "${daemon_bg_pid}" 2>/dev/null; then
-    pass "Daemon process exited"
-  else
-    fail "Daemon process still running (should have exited)"
-    kill "${daemon_bg_pid}" 2>/dev/null || true
-  fi
+  show_daemon_log_tail "${log_lines_before}"
 
-  assert_file_missing "${PID_FILE}"
+  # Teardown
+  git worktree remove --force "${manual_path}" 2>/dev/null || rm -rf "${manual_path}"
+  git branch -D "${manual_name}" 2>/dev/null || true
+  git worktree prune 2>/dev/null || true
 }
 
-# =============================================================================
-# C-series (worktreeLib.sh spot checks)
-# =============================================================================
+# --- B9: SIGTERM clean shutdown ---
+test_B9() {
+  banner "B9: SIGTERM — clean daemon shutdown"
+  echo "  Run: kill daemon PID"
+  echo "  Expect: 'Daemon shutting down', PID file removed"
+  echo ""
 
+  if ! daemon_is_running; then
+    echo "  Starting daemon first..."
+    nohup bash "${SCRIPT_DIR}/worktreeDaemon.sh" "${REPO_ROOT}" ${DAEMON_VERBOSE_FLAG} >> "${LOGFILE}" 2>&1 &
+    sleep 2
+  fi
+
+  if ! daemon_is_running; then
+    fail "Daemon not running — cannot test SIGTERM"
+    return
+  fi
+
+  local pid
+  pid="$(daemon_pid)"
+  echo "  Sending SIGTERM to daemon PID ${pid}..."
+  kill "${pid}"
+  sleep 2
+
+  section "Automated checks"
+  if ! kill -0 "${pid}" 2>/dev/null; then
+    pass "Daemon process ${pid} is no longer running"
+  else
+    fail "Daemon process ${pid} still running after SIGTERM"
+  fi
+
+  assert_file_missing "${PIDFILE}"
+
+  if [ -f "${LOGFILE}" ] && grep -q "Daemon shutting down (PID ${pid})" "${LOGFILE}"; then
+    pass "daemon.log contains shutdown message for PID ${pid}"
+  else
+    fail "daemon.log missing shutdown message for PID ${pid}"
+  fi
+}
+
+# --- C1: scaffold_worktree populates .git/info/exclude ---
 test_C1() {
-  banner "C1: Ignored files only — cleanup proceeds"
-  echo "  Setup: worktree with only .claude/settings.json and .vscode/tasks.json"
+  banner "C1: scaffold_worktree populates .git/info/exclude"
+  echo "  Verify: scaffold files are excluded from git tracking"
   echo ""
 
   section "Setup"
-  # Clean slate
   git worktree remove --force "${TEST_WT_PATH}" 2>/dev/null || rm -rf "${TEST_WT_PATH}"
   git branch -D "${TEST_WT_NAME}" 2>/dev/null || true
   git worktree prune 2>/dev/null || true
 
   git worktree add -b "${TEST_WT_NAME}" "${TEST_WT_PATH}" HEAD
-  mkdir -p "${TEST_WT_PATH}/.claude" "${TEST_WT_PATH}/.vscode"
-  cp "${REPO_ROOT}/v1/templates/settings.json" "${TEST_WT_PATH}/.claude/settings.json"
-  echo '{}' > "${TEST_WT_PATH}/.vscode/tasks.json"
 
   section "Execute"
-  local result
-  result="$( (
-    export WORKTREE_PATH="${TEST_WT_PATH}"
-    export WORKTREE_NAME="${TEST_WT_NAME}"
-    export REPO_ROOT="${REPO_ROOT}"
-    source "${SCRIPT_DIR}/worktreeLib.sh"
-    if has_meaningful_changes; then
-      echo "HAS_CHANGES"
-    else
-      echo "NO_CHANGES"
-    fi
-  ) )"
+  source "${SCRIPT_DIR}/worktreeLib.sh"
+  REPO_ROOT=$(realpath "$(git rev-parse --show-toplevel)")
+  scaffold_worktree "${TEST_WT_PATH}" "${TEST_WT_NAME}" "${REPO_ROOT}"
 
   section "Automated checks"
-  if [ "${result}" = "NO_CHANGES" ]; then
-    pass "has_meaningful_changes returns 1 (no meaningful changes) — only ignored files"
+  # Find the exclude file
+  local gitdir
+  gitdir=$(git -C "${TEST_WT_PATH}" rev-parse --git-dir 2>/dev/null)
+  if [[ "${gitdir}" != /* ]]; then
+    gitdir="${TEST_WT_PATH}/${gitdir}"
+  fi
+  local exclude_file="${gitdir}/info/exclude"
+
+  if [ -f "${exclude_file}" ]; then
+    for entry in ".managed-worktree" ".claude/settings.json" ".vscode/tasks.json" ".vscode/settings.json"; do
+      if grep -qxF "${entry}" "${exclude_file}"; then
+        pass "Exclude file contains: ${entry}"
+      else
+        fail "Exclude file missing: ${entry}"
+      fi
+    done
   else
-    fail "has_meaningful_changes detected changes when only ignored files present"
+    fail "Exclude file not found: ${exclude_file}"
+  fi
+
+  # Verify scaffold files don't show in git status
+  local status
+  status="$(git -C "${TEST_WT_PATH}" status --porcelain 2>/dev/null)"
+  if [ -z "${status}" ]; then
+    pass "Scaffold files invisible to git status"
+  else
+    fail "Scaffold files visible in git status: ${status}"
   fi
 
   # Cleanup
@@ -1061,9 +1009,9 @@ test_C1() {
   git worktree prune 2>/dev/null || true
 }
 
+# --- C2: has_non_scaffold_changes returns correctly ---
 test_C2() {
-  banner "C2: Real changes — cleanup blocked"
-  echo "  Setup: worktree with an edited source file"
+  banner "C2: has_non_scaffold_changes detects real changes only"
   echo ""
 
   section "Setup"
@@ -1072,48 +1020,24 @@ test_C2() {
   git worktree prune 2>/dev/null || true
 
   git worktree add -b "${TEST_WT_NAME}" "${TEST_WT_PATH}" HEAD
+  source "${SCRIPT_DIR}/worktreeLib.sh"
+  REPO_ROOT=$(realpath "$(git rev-parse --show-toplevel)")
+  scaffold_worktree "${TEST_WT_PATH}" "${TEST_WT_NAME}" "${REPO_ROOT}"
+
+  section "Test 1: scaffold only → no changes"
+  if has_non_scaffold_changes "${TEST_WT_PATH}"; then
+    fail "False positive — scaffold-only worktree reported as having changes"
+  else
+    pass "Scaffold-only worktree correctly reports no changes"
+  fi
+
+  section "Test 2: add a real file → has changes"
   echo "real edit" > "${TEST_WT_PATH}/real_change.txt"
-
-  section "Execute"
-  local result
-  result="$( (
-    export WORKTREE_PATH="${TEST_WT_PATH}"
-    export WORKTREE_NAME="${TEST_WT_NAME}"
-    export REPO_ROOT="${REPO_ROOT}"
-    source "${SCRIPT_DIR}/worktreeLib.sh"
-    if has_meaningful_changes; then
-      echo "HAS_CHANGES"
-    else
-      echo "NO_CHANGES"
-    fi
-  ) )"
-
-  section "Automated checks"
-  if [ "${result}" = "HAS_CHANGES" ]; then
-    pass "has_meaningful_changes returns 0 (has changes) — real file detected"
+  if has_non_scaffold_changes "${TEST_WT_PATH}"; then
+    pass "Real change correctly detected"
   else
-    fail "has_meaningful_changes missed real changes"
+    fail "Real change not detected"
   fi
-
-  # Also test cleanup_worktree returns 1
-  local cleanup_exit
-  (
-    export WORKTREE_PATH="${TEST_WT_PATH}"
-    export WORKTREE_NAME="${TEST_WT_NAME}"
-    export REPO_ROOT="${REPO_ROOT}"
-    source "${SCRIPT_DIR}/worktreeLib.sh"
-    cleanup_worktree
-  ) 2>&1 || cleanup_exit=$?
-  cleanup_exit=${cleanup_exit:-0}
-
-  if [ "${cleanup_exit}" -ne 0 ]; then
-    pass "cleanup_worktree returns non-zero when real changes present"
-  else
-    fail "cleanup_worktree returned 0 despite real changes"
-  fi
-
-  assert_dir_exists "${TEST_WT_PATH}"
-  pass "Worktree kept"
 
   # Cleanup
   rm -f "${TEST_WT_PATH}/real_change.txt"
@@ -1122,9 +1046,9 @@ test_C2() {
   git worktree prune 2>/dev/null || true
 }
 
+# --- C3: discard_scaffold_files removes scaffold ---
 test_C3() {
-  banner "C3: discard_ignored_changes removes scaffolding"
-  echo "  Verify: .claude/ and .vscode/ cleaned before worktree removal"
+  banner "C3: discard_scaffold_files removes scaffold files"
   echo ""
 
   section "Setup"
@@ -1133,30 +1057,57 @@ test_C3() {
   git worktree prune 2>/dev/null || true
 
   git worktree add -b "${TEST_WT_NAME}" "${TEST_WT_PATH}" HEAD
-  mkdir -p "${TEST_WT_PATH}/.claude" "${TEST_WT_PATH}/.vscode"
-  cp "${REPO_ROOT}/v1/templates/settings.json" "${TEST_WT_PATH}/.claude/settings.json"
-  echo '{}' > "${TEST_WT_PATH}/.vscode/tasks.json"
+  source "${SCRIPT_DIR}/worktreeLib.sh"
+  REPO_ROOT=$(realpath "$(git rev-parse --show-toplevel)")
+  scaffold_worktree "${TEST_WT_PATH}" "${TEST_WT_NAME}" "${REPO_ROOT}"
+
+  assert_file_exists "${TEST_WT_PATH}/.managed-worktree"
+  assert_file_exists "${TEST_WT_PATH}/.claude/settings.json"
+  assert_file_exists "${TEST_WT_PATH}/.vscode/tasks.json"
 
   section "Execute"
-  (
-    export WORKTREE_PATH="${TEST_WT_PATH}"
-    export WORKTREE_NAME="${TEST_WT_NAME}"
-    export REPO_ROOT="${REPO_ROOT}"
-    source "${SCRIPT_DIR}/worktreeLib.sh"
-    discard_ignored_changes
-  ) 2>&1
+  discard_scaffold_files "${TEST_WT_PATH}"
 
   section "Automated checks"
-  if [ ! -f "${TEST_WT_PATH}/.claude/settings.json" ]; then
-    pass ".claude/settings.json removed by discard_ignored_changes"
+  assert_file_missing "${TEST_WT_PATH}/.managed-worktree"
+  assert_file_missing "${TEST_WT_PATH}/.claude/settings.json"
+  assert_file_missing "${TEST_WT_PATH}/.vscode/tasks.json"
+  assert_file_missing "${TEST_WT_PATH}/.vscode/settings.json"
+
+  # Cleanup
+  git worktree remove --force "${TEST_WT_PATH}" 2>/dev/null || rm -rf "${TEST_WT_PATH}"
+  git branch -D "${TEST_WT_NAME}" 2>/dev/null || true
+  git worktree prune 2>/dev/null || true
+}
+
+# --- C4: check_scaffold_modified detects changes ---
+test_C4() {
+  banner "C4: check_scaffold_modified detects modified scaffold"
+  echo ""
+
+  section "Setup"
+  git worktree remove --force "${TEST_WT_PATH}" 2>/dev/null || rm -rf "${TEST_WT_PATH}"
+  git branch -D "${TEST_WT_NAME}" 2>/dev/null || true
+  git worktree prune 2>/dev/null || true
+
+  git worktree add -b "${TEST_WT_NAME}" "${TEST_WT_PATH}" HEAD
+  source "${SCRIPT_DIR}/worktreeLib.sh"
+  REPO_ROOT=$(realpath "$(git rev-parse --show-toplevel)")
+  scaffold_worktree "${TEST_WT_PATH}" "${TEST_WT_NAME}" "${REPO_ROOT}"
+
+  section "Test 1: unmodified → returns 1 (not modified)"
+  if check_scaffold_modified "${TEST_WT_PATH}" "${TEST_WT_NAME}" "${REPO_ROOT}"; then
+    fail "False positive — fresh scaffold reported as modified"
   else
-    fail ".claude/settings.json still exists"
+    pass "Fresh scaffold correctly reports unmodified"
   fi
 
-  if [ ! -f "${TEST_WT_PATH}/.vscode/tasks.json" ]; then
-    pass ".vscode/tasks.json removed by discard_ignored_changes"
+  section "Test 2: modify settings.json → returns 0 (modified)"
+  echo '{"modified": true}' > "${TEST_WT_PATH}/.claude/settings.json"
+  if check_scaffold_modified "${TEST_WT_PATH}" "${TEST_WT_NAME}" "${REPO_ROOT}"; then
+    pass "Modified scaffold correctly detected"
   else
-    fail ".vscode/tasks.json still exists"
+    fail "Modified scaffold not detected"
   fi
 
   # Cleanup
@@ -1165,12 +1116,63 @@ test_C3() {
   git worktree prune 2>/dev/null || true
 }
 
+# --- C5: get_worktrees filters correctly ---
+test_C5() {
+  banner "C5: get_worktrees returns only managed worktrees"
+  echo ""
+
+  section "Setup — create one managed and one unmanaged worktree"
+  local managed_name="test_managed_c5"
+  local unmanaged_name="test_unmanaged_c5"
+  local managed_path unmanaged_path
+  managed_path=$(resolve_path "${REPO_ROOT}/../${managed_name}")
+  unmanaged_path=$(resolve_path "${REPO_ROOT}/../${unmanaged_name}")
+
+  git worktree remove --force "${managed_path}" 2>/dev/null || rm -rf "${managed_path}"
+  git worktree remove --force "${unmanaged_path}" 2>/dev/null || rm -rf "${unmanaged_path}"
+  git branch -D "${managed_name}" 2>/dev/null || true
+  git branch -D "${unmanaged_name}" 2>/dev/null || true
+  git worktree prune 2>/dev/null || true
+
+  git worktree add -b "${managed_name}" "${managed_path}" HEAD
+  git worktree add -b "${unmanaged_name}" "${unmanaged_path}" HEAD
+
+  source "${SCRIPT_DIR}/worktreeLib.sh"
+  REPO_ROOT=$(realpath "$(git rev-parse --show-toplevel)")
+  scaffold_worktree "${managed_path}" "${managed_name}" "${REPO_ROOT}"
+
+  section "Execute"
+  local output
+  output="$(get_worktrees "${REPO_ROOT}")"
+  echo "  get_worktrees output:"
+  echo "${output}" | sed 's/^/    /'
+
+  section "Automated checks"
+  if echo "${output}" | grep -q "${managed_name}"; then
+    pass "Managed worktree '${managed_name}' found"
+  else
+    fail "Managed worktree '${managed_name}' missing from output"
+  fi
+
+  if echo "${output}" | grep -q "${unmanaged_name}"; then
+    fail "Unmanaged worktree '${unmanaged_name}' should not appear"
+  else
+    pass "Unmanaged worktree '${unmanaged_name}' correctly filtered out"
+  fi
+
+  # Cleanup
+  git worktree remove --force "${managed_path}" 2>/dev/null || rm -rf "${managed_path}"
+  git worktree remove --force "${unmanaged_path}" 2>/dev/null || rm -rf "${unmanaged_path}"
+  git branch -D "${managed_name}" 2>/dev/null || true
+  git branch -D "${unmanaged_name}" 2>/dev/null || true
+  git worktree prune 2>/dev/null || true
+}
+
 # =============================================================================
 # RUNNER
 # =============================================================================
 
-# Suggested test order from the plan
-SUGGESTED_ORDER=(A1 A2 B1 A3 B9 B2 B4 B5 B6 B8 B7 B10 A4 A5 A6 B3 C1 C2 C3)
+SUGGESTED_ORDER=(A1 A2 A3 A6 A4 A5 B1 B2 B3 B4 B5 B6 B7 B8 B9 C1 C2 C3 C4 C5)
 
 run_test() {
   local test_id="$1"
@@ -1190,10 +1192,11 @@ run_test() {
     B7) test_B7 ;;
     B8) test_B8 ;;
     B9) test_B9 ;;
-    B10) test_B10 ;;
     C1) test_C1 ;;
     C2) test_C2 ;;
     C3) test_C3 ;;
+    C4) test_C4 ;;
+    C5) test_C5 ;;
     *)
       echo "Unknown test: ${test_id}"
       echo "Valid tests: ${SUGGESTED_ORDER[*]}"
@@ -1223,7 +1226,6 @@ print_summary() {
 
 # --- Main ---
 main() {
-  # Parse flags
   local test_args=()
   for arg in "$@"; do
     case "${arg}" in
@@ -1233,10 +1235,11 @@ main() {
   done
   set -- "${test_args[@]+"${test_args[@]}"}"
 
-  banner "Worktree Scripts — Manual Test Suite"
+  banner "Worktree Scripts — Test Suite (v2)"
   echo "  Repo root: ${REPO_ROOT}"
-  echo "  Lock dir:  ${LOCK_DIR}"
-  echo "  Scripts:   spawnBGClaudeWT.sh, worktreeDaemon.sh, worktreeLib.sh"
+  echo "  PID file:  ${PIDFILE}"
+  echo "  Log file:  ${LOGFILE}"
+  echo "  Scripts:   spawnWorktree.sh, worktreeDaemon.sh, worktreeLib.sh"
   if [ "${VERBOSE}" = true ]; then
     echo "  Verbose:   ON"
   fi
@@ -1265,12 +1268,10 @@ main() {
   fi
 
   if [ $# -gt 0 ]; then
-    # Run specific test(s)
     for test_id in "$@"; do
       run_test "${test_id}"
     done
   else
-    # Run all tests in suggested order
     for test_id in "${SUGGESTED_ORDER[@]}"; do
       run_test "${test_id}"
       echo ""
@@ -1282,7 +1283,6 @@ main() {
     done
   fi
 
-  # Final cleanup offer
   echo ""
   read -rp "  Run full cleanup now? [Y/n]: " do_final_cleanup
   if [ "${do_final_cleanup}" != "n" ] && [ "${do_final_cleanup}" != "N" ]; then

@@ -4,12 +4,21 @@
     {
       "label": "Spawn Claude Worktree",
       "type": "shell",
-      "command": "${workspaceFolder}/spawnBGClaudeWT.sh",
+      "command": "${workspaceFolder}/spawnWorktree.sh",
       "args": ["${input:worktreeName}"],
       "presentation": {
         "reveal": "always",
         "panel": "shared"
       },
+      "problemMatcher": []
+    },
+    {
+      "label": "Worktree Daemon",
+      "type": "shell",
+      "command": "nohup ${workspaceFolder}/worktreeDaemon.sh '${workspaceFolder}' >> '${workspaceFolder}/.worktree-daemon.log' 2>&1 & disown",
+      "runOptions": { "runOn": "folderOpen" },
+      "presentation": { "reveal": "silent", "panel": "shared", "showReuseMessage": false },
+      "isBackground": false,
       "problemMatcher": []
     }
   ],
