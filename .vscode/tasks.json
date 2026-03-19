@@ -2,10 +2,25 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Build Worktree Util",
+      "type": "shell",
+      "command": "npm run build",
+      "options": {
+        "cwd": "${workspaceFolder}/worktree-spawn-util"
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      },
+      "problemMatcher": [
+        "$tsc"
+      ]
+    },
+    {
       "label": "Spawn Claude Worktree",
       "type": "shell",
-      "command": "${workspaceFolder}/spawnWorktree.sh",
-      "args": ["${input:worktreeName}"],
+      "command": "node ${workspaceFolder}/worktree-spawn-util/dist/cli/spawn.js ${input:worktreeName}",
+      "dependsOn": "Build Worktree Util",
       "presentation": {
         "reveal": "always",
         "panel": "shared"
@@ -15,11 +30,54 @@
     {
       "label": "Worktree Daemon",
       "type": "shell",
-      "command": "nohup ${workspaceFolder}/worktreeDaemon.sh '${workspaceFolder}' >> '${workspaceFolder}/.worktree-daemon.log' 2>&1 & disown",
-      "runOptions": { "runOn": "folderOpen" },
-      "presentation": { "reveal": "silent", "panel": "shared", "showReuseMessage": false },
-      "isBackground": false,
+      "command": "node ${workspaceFolder}/worktree-spawn-util/dist/cli/daemon.js ${workspaceFolder}",
+      "dependsOn": "Build Worktree Util",
+      "runOptions": {
+        "runOn": "folderOpen"
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared",
+        "showReuseMessage": false
+      },
       "problemMatcher": []
+    },
+    {
+      "label": "Build (worktree-spawn-util)",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "build"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/worktree-spawn-util"
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "silent"
+      },
+      "problemMatcher": [
+        "$tsc"
+      ]
+    },
+    {
+      "label": "Worktree: Pick Repository",
+      "type": "shell",
+      "command": "node",
+      "args": [
+        "${workspaceFolder}/worktree-spawn-util/dist/cli/pick-repo.js",
+        "${input:worktreeName}"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": true
+      },
+      "problemMatcher": [],
+      "dependsOn": [
+        "Build (worktree-spawn-util)"
+      ]
     }
   ],
   "inputs": [
