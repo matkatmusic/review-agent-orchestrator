@@ -2,47 +2,6 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Build Worktree Util",
-      "type": "shell",
-      "command": "npm run build",
-      "options": {
-        "cwd": "${workspaceFolder}/worktree-spawn-util"
-      },
-      "presentation": {
-        "reveal": "silent",
-        "panel": "shared"
-      },
-      "problemMatcher": [
-        "$tsc"
-      ]
-    },
-    {
-      "label": "Spawn Claude Worktree",
-      "type": "shell",
-      "command": "node ${workspaceFolder}/worktree-spawn-util/dist/cli/spawn.js ${input:worktreeName}",
-      "dependsOn": "Build Worktree Util",
-      "presentation": {
-        "reveal": "always",
-        "panel": "shared"
-      },
-      "problemMatcher": []
-    },
-    {
-      "label": "Worktree Daemon",
-      "type": "shell",
-      "command": "node ${workspaceFolder}/worktree-spawn-util/dist/cli/daemon.js ${workspaceFolder}",
-      "dependsOn": "Build Worktree Util",
-      "runOptions": {
-        "runOn": "folderOpen"
-      },
-      "presentation": {
-        "reveal": "silent",
-        "panel": "shared",
-        "showReuseMessage": false
-      },
-      "problemMatcher": []
-    },
-    {
       "label": "Build (worktree-spawn-util)",
       "type": "shell",
       "command": "npm",
@@ -84,7 +43,7 @@
     {
       "id": "worktreeName",
       "type": "promptString",
-      "description": "Worktree name (used as branch name and folder name)"
+      "description": "Worktree name"
     }
   ]
 }
