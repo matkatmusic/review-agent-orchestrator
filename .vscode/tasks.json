@@ -2,15 +2,82 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Build Worktree Util",
+      "type": "shell",
+      "command": "npm run build",
+      "options": {
+        "cwd": "${workspaceFolder}/worktree-spawn-util"
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      },
+      "problemMatcher": [
+        "$tsc"
+      ]
+    },
+    {
       "label": "Spawn Claude Worktree",
       "type": "shell",
-      "command": "${workspaceFolder}/spawnBGClaudeWT.sh",
-      "args": ["${input:worktreeName}"],
+      "command": "node ${workspaceFolder}/worktree-spawn-util/dist/cli/spawn.js ${input:worktreeName}",
+      "dependsOn": "Build Worktree Util",
       "presentation": {
         "reveal": "always",
         "panel": "shared"
       },
       "problemMatcher": []
+    },
+    {
+      "label": "Worktree Daemon",
+      "type": "shell",
+      "command": "node ${workspaceFolder}/worktree-spawn-util/dist/cli/daemon.js ${workspaceFolder}",
+      "dependsOn": "Build Worktree Util",
+      "runOptions": {
+        "runOn": "folderOpen"
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared",
+        "showReuseMessage": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build (worktree-spawn-util)",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "build"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/worktree-spawn-util"
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "silent"
+      },
+      "problemMatcher": [
+        "$tsc"
+      ]
+    },
+    {
+      "label": "Worktree: Pick Repository",
+      "type": "shell",
+      "command": "node",
+      "args": [
+        "${workspaceFolder}/worktree-spawn-util/dist/cli/pick-repo.js",
+        "${input:worktreeName}"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": true
+      },
+      "problemMatcher": [],
+      "dependsOn": [
+        "Build (worktree-spawn-util)"
+      ]
     }
   ],
   "inputs": [

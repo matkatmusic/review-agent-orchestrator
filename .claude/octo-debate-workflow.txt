@@ -8,7 +8,7 @@ Step: create a file called <topic>_debate_prompt.txt in the repo root folder /De
 
 Step: Launch gemini/codex agents in parallel using Bash
 
-  gemini -m <preferred_model> < <file.txt> 
+  gemini -m <preferred_model> -p "read <file.txt> and follow all instructions within it"
 
   codex exec -m <preferred_model> -c 'model_reasoning_effort="high"' < <file.txt> 
 
