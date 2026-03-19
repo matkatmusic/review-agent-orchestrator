@@ -2,48 +2,16 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Build (worktree-spawn-util)",
+      "label": "Say Hello",
       "type": "shell",
-      "command": "npm",
-      "args": [
-        "run",
-        "build"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}/worktree-spawn-util"
-      },
-      "group": "build",
-      "presentation": {
-        "reveal": "silent"
-      },
-      "problemMatcher": [
-        "$tsc"
-      ]
-    },
-    {
-      "label": "Worktree: Pick Repository",
-      "type": "shell",
-      "command": "node",
-      "args": [
-        "${workspaceFolder}/worktree-spawn-util/dist/cli/pick-repo.js",
-        "${input:worktreeName}"
-      ],
+      "command": "echo",
+      "args": ["hello"],
       "presentation": {
         "reveal": "always",
         "panel": "new",
         "focus": true
       },
-      "problemMatcher": [],
-      "dependsOn": [
-        "Build (worktree-spawn-util)"
-      ]
-    }
-  ],
-  "inputs": [
-    {
-      "id": "worktreeName",
-      "type": "promptString",
-      "description": "Worktree name"
+      "problemMatcher": []
     }
   ]
 }
