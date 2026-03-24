@@ -5,13 +5,47 @@
       "label": "Say Hello",
       "type": "shell",
       "command": "echo",
-      "args": ["hello"],
+      "args": [
+        "hello"
+      ],
       "presentation": {
         "reveal": "always",
         "panel": "new",
         "focus": true
       },
       "problemMatcher": []
+    },
+    {
+      "label": "Worktree: Pick Repository",
+      "type": "shell",
+      /*
+      Optional args:
+         --inspectHB: show heartbeat & daemon panels in worktree IDE
+         --pick <path/to/repo>: force manual folder picker (skip submodule auto-detect)
+ 
+         Daemon-specific args (passed through when daemon starts):
+         --heartbeat-timeout=<ms>: cleanup delay after last heartbeat (default 15000)
+         --check-interval=<ms>: how often daemon checks for expired worktrees (default 5000)
+      */
+      "command": "npm run build && node dist/cli/pick-repo.js ${input:worktreeName}",
+      "options": {
+        "cwd": "${workspaceFolder}/worktree-spawn-util"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": true
+      },
+      "problemMatcher": [
+        "$tsc"
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "id": "worktreeName",
+      "type": "promptString",
+      "description": "Worktree name"
     }
   ]
 }
