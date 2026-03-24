@@ -1,2 +1,9 @@
 - [ ] create a skill that encapsulates sending key commands into the tmux pane for claude. This skill will be used by the orchestrator to send commands to the claude instance in the worktree. This skill should be invoked every time a new user response is added to the database.  The skill should have a node script that is used to send key commands into the tmux pane for claude.  The script should take the worktree name and message as the arguments, and the tmux session with worktree name <name> should be targeted for receiving the send-key messages. the usage would be '/reply <message>'
 - [ ] create a skill that the worktree-agent can invoke to send messages into the database. This skill should be invoked every time the worktree-agent wants to send a message to the user. The skill should have a node script that is used to send messages into the database. The script should take the worktree name and message as the arguments, and the database should be updated with the message.  The usage would be '/reply <message>', and the node script would know how to send <message> into the database for the current worktree, so the message is assigned to the correct conversation. 
+- [ ] when creating a new IDE window, add a task for spinning up claude instances, that spins up 2 instances in a split group: 
+    - top claude's name: <thing being worked on> (max 10 letters)
+    - bottom claude's name: <review> 
+    - purpose: Help myself keep track of what a claude instance was working on, and have a 2nd instance to review plans made by the first instance. 
+    - this feature should be available on every computer that I put the dotfiles on
+- [ ] figure out how to get every claude instance to spawn using /context-mode (included in dotfiles)
+- [ ] instruct claude that I never want to run 'node <file>' or 'npm run build' directly, and that I want a task or launch config to do that for me automatically.
