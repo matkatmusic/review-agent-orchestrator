@@ -33,6 +33,7 @@ const [
     { TrashView },
     { useMockStore },
     { DetailView },
+    { handleGlobalKey },
 ] = await Promise.all([
     import('react'),
     import('ink'),
@@ -42,6 +43,7 @@ const [
     import('./trash-view.js'),
     import('./use-mock-store.js'),
     import('./detail.js'),
+    import('./global-keys.js'),
 ]);
 
 import type { View } from './views.js';
@@ -95,9 +97,14 @@ export function AppWrapper() {
         setViewStack([{ type: ViewType.Home }]);
     }, [savedSelectedMessage]);
 
-    // Global quit — only from Home view to avoid killing the app when typing 'q' in text inputs
+    // Global key handling — suppressed for Detail and Trash which have their own useInput
     useInput((input, key) => {
-        if (input === 'q' && currentView.type === ViewType.Home) exit();
+        if (currentView.type === ViewType.Detail || currentView.type === ViewType.Trash) return;
+        handleGlobalKey(input, key, currentView.type, {
+            onBack: goBack,
+            onQuit: () => exit(),
+            onNavigate: navigateToView,
+        });
     });
 
     const onResize = useCallback(() => {
@@ -162,7 +169,7 @@ export function AppWrapper() {
                     initialSelectedMessage={savedSelectedMessage.get(inum)}
                     onBack={(sel) => saveSelectedAndGoBack(inum, sel)}
                     onHome={(sel) => saveSelectedAndGoHome(inum, sel)}
-                    onSend={() => {}}
+                    onSend={(message) => mockStoreWithUpdater.appendResponseCallback(inum, message)}
                     onNavigateIssue={(inumTo) => replaceCurrentView({ type: ViewType.Detail, inum: inumTo })}
                     onOpenPicker={(mode) => navigateToView({ type: ViewType.IssuePicker, mode, inum })}
                     onQuit={() => exit()}
@@ -170,6 +177,44 @@ export function AppWrapper() {
                     onThreadStateChange={(info) => setThreadInfo(info)}
                 />
             );
+        }
+
+        if (currentView.type === ViewType.Trash) {
+            const trashedIssues = mockStoreWithUpdater.mockDataStore.issues.filter(
+                i => i.status === IssueStatus.Trashed
+            );
+            return (
+                <TrashView
+                    issues={trashedIssues}
+                    terminalProps={terminal}
+                    layoutProps={layout}
+                    setFooterShortcuts={setFooterShortcuts}
+                    setHeaderSubtitleOverride={setHeaderSubtitleOverride}
+                    onRestoreIssue={mockStoreWithUpdater.restoreIssueCallback}
+                    onPermanentDelete={mockStoreWithUpdater.permanentDeleteCallback}
+                    onEmptyTrash={mockStoreWithUpdater.emptyTrashCallback}
+                />
+            );
+        }
+
+        if (currentView.type === ViewType.NewIssue) {
+            return <Text>New Issue (placeholder) — press Esc to go back</Text>;
+        }
+
+        if (currentView.type === ViewType.AgentStatus) {
+            return <Text>Agent Status (placeholder) — press Esc to go back</Text>;
+        }
+
+        if (currentView.type === ViewType.BlockingMap) {
+            return <Text>Blocking Map (placeholder) — press Esc to go back</Text>;
+        }
+
+        if (currentView.type === ViewType.GroupView) {
+            return <Text>Group View (placeholder) — press Esc to go back</Text>;
+        }
+
+        if (currentView.type === ViewType.IssuePicker) {
+            return <Text>Issue Picker (placeholder) — press Esc to go back</Text>;
         }
 
         return null;

@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
 import { loadMockData, saveMockData } from './mock-store.js';
 import type { MockStore } from './mock-store.js';
-import { IssueStatus } from '../types.js';
+import { IssueStatus, AuthorType, ResponseType } from '../types.js';
 import type { ChangedStatusProps } from '../types.js';
+import { createMessage, createResponseNode } from './thread-builders.js';
 
 export interface MockStoreWithUpdater {
     mockDataStore: MockStore;
@@ -11,6 +12,7 @@ export interface MockStoreWithUpdater {
     restoreIssueCallback: (inum: number) => void;
     permanentDeleteCallback: (inum: number) => void;
     emptyTrashCallback: () => void;
+    appendResponseCallback: (inum: number, messageBody: string) => void;
 }
 
 function isBlockerCleared(status: IssueStatus): boolean {
@@ -240,6 +242,39 @@ export function useMockStore(): MockStoreWithUpdater {
         [],
     );
 
+    const appendResponseCallback = useCallback(
+        (inum: number, messageBody: string) => {
+            updateMockStoreData((prev) => {
+                const detail = prev.detailData[inum];
+                if (!detail || !detail.rootResponse) return prev;
+
+                const id = prev.nextResponseId;
+                const now = new Date().toISOString();
+                const msg = createMessage(AuthorType.User, ResponseType.None, messageBody, now, now);
+                const newNode = createResponseNode(id, msg, false);
+
+                // Walk to the tail of the response chain
+                let tail = detail.rootResponse;
+                while (tail.response) {
+                    tail = tail.response;
+                }
+
+                // Link new node to tail
+                tail.response = newNode;
+                newNode.responding_to = tail;
+
+                const next: MockStore = {
+                    ...prev,
+                    nextResponseId: id + 1,
+                };
+
+                saveMockData(next);
+                return next;
+            });
+        },
+        [],
+    );
+
     const result: MockStoreWithUpdater = {
         mockDataStore: mockDataStore,
         updateIssueStatusCallback: updateIssueStatusCallback,
@@ -247,6 +282,7 @@ export function useMockStore(): MockStoreWithUpdater {
         restoreIssueCallback: restoreIssueCallback,
         permanentDeleteCallback: permanentDeleteCallback,
         emptyTrashCallback: emptyTrashCallback,
+        appendResponseCallback: appendResponseCallback,
     };
     return result;
 }

@@ -20,10 +20,10 @@ export function createMessage(
     return { author, type, body, timestamp, seen };
 }
 
-/** Create a single Response node (unlinked). */
-function makeResponseNode(message: Message, isContinuation = false): Response {
+/** Create a single Response node (unlinked) with an explicit id. */
+export function createResponseNode(id: number, message: Message, isContinuation = false): Response {
     return {
-        id: nextId++,
+        id: id,
         content: message,
         responding_to: null,
         response: null,
@@ -33,6 +33,11 @@ function makeResponseNode(message: Message, isContinuation = false): Response {
         thread_resolved_at: null,
         quoted_response_id: null,
     };
+}
+
+/** Create a single Response node (unlinked) using the internal id counter. */
+function makeResponseNode(message: Message, isContinuation = false): Response {
+    return createResponseNode(nextId++, message, isContinuation);
 }
 
 /** Link an array of Response nodes into a .response/.responding_to chain. */
