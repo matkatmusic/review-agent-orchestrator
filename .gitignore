@@ -11,3 +11,4 @@ package-lock.json
 .worktree-daemon.pid
 .worktree-daemon.log
 .claude/skills/
+.worktrees
