@@ -10,3 +10,4 @@ package-lock.json
 .DS_Store
 .worktree-daemon.pid
 .worktree-daemon.log
+.claude/skills/
