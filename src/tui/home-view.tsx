@@ -260,6 +260,7 @@ export interface HomeViewProps {
     onStatusHotkeyPressed?: (changedStatusProps: ChangedStatusProps) => void;
     setFooterShortcuts?: (shortcuts: readonly Shortcut[]) => void;
     onTrashIssue?: (inum: number) => void;
+    onSelect?: (inum: number) => void;
     setHeaderSubtitleOverride?: (s: string | undefined) => void;
 }
 
@@ -365,6 +366,12 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
         if (input === 'x' && homeViewProps.issues.length > 0) {
             const idx = Math.min(cursorRef.current, Math.max(0, homeViewProps.issues.length - 1));
             setConfirmTrashInum(homeViewProps.issues[idx].inum);
+            return;
+        }
+
+        if (key.return && homeViewProps.onSelect && homeViewProps.issues.length > 0) {
+            const idx = Math.min(cursorRef.current, Math.max(0, homeViewProps.issues.length - 1));
+            homeViewProps.onSelect(homeViewProps.issues[idx].inum);
             return;
         }
 

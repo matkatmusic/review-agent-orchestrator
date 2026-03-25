@@ -26,12 +26,13 @@ processResetFlag();
 // Dynamic imports — these load mock-data.ts which reads from the (now reset) JSON
 const [
     { default: React, useState, useEffect, useCallback },
-    { render, useStdout, useInput, useApp },
+    { render, useStdout, useInput, useApp, Text },
     { AppShell },
     { ViewType },
     { HomeView },
     { TrashView },
     { useMockStore },
+    { DetailView },
 ] = await Promise.all([
     import('react'),
     import('ink'),
@@ -40,6 +41,7 @@ const [
     import('./home-view.js'),
     import('./trash-view.js'),
     import('./use-mock-store.js'),
+    import('./detail.js'),
 ]);
 
 import type { View } from './views.js';
@@ -53,18 +55,50 @@ export function AppWrapper() {
     const { exit } = useApp();
     const stream = stdout as WriteStream | undefined;
 
-    // Phase 1: minimal input handler keeps Ink alive in raw mode.
-    // Phase 2 replaces this with full navigation key handling.
-    useInput((input, key) => {
-        if (input === 'q') exit();
-    });
-
     const [dims, setDims] = useState({
         columns: stream?.columns ?? DEFAULT_COLUMNS,
         rows: stream?.rows ?? DEFAULT_ROWS,
     });
 
     const mockStoreWithUpdater = useMockStore();
+
+    // View stack navigation
+    const [viewStack, setViewStack] = useState<View[]>([{ type: ViewType.Home }]);
+    const [savedSelectedMessage] = useState(() => new Map<number, number>());
+    const [threadInfo, setThreadInfo] = useState<{ inThread: boolean }>({ inThread: false });
+
+    const currentView = viewStack[viewStack.length - 1];
+
+    const navigateToView = useCallback((view: View) => {
+        setViewStack(prev => [...prev, view]);
+    }, []);
+
+    const goBack = useCallback(() => {
+        setViewStack(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
+    }, []);
+
+    const goHome = useCallback(() => {
+        setViewStack([{ type: ViewType.Home }]);
+    }, []);
+
+    const replaceCurrentView = useCallback((view: View) => {
+        setViewStack(prev => [...prev.slice(0, -1), view]);
+    }, []);
+
+    const saveSelectedAndGoBack = useCallback((inum: number, sel: number) => {
+        savedSelectedMessage.set(inum, sel);
+        setViewStack(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
+    }, [savedSelectedMessage]);
+
+    const saveSelectedAndGoHome = useCallback((inum: number, sel: number) => {
+        savedSelectedMessage.set(inum, sel);
+        setViewStack([{ type: ViewType.Home }]);
+    }, [savedSelectedMessage]);
+
+    // Global quit — only from Home view to avoid killing the app when typing 'q' in text inputs
+    useInput((input, key) => {
+        if (input === 'q' && currentView.type === ViewType.Home) exit();
+    });
 
     const onResize = useCallback(() => {
         if (stream) {
@@ -79,8 +113,67 @@ export function AppWrapper() {
         }
     }, [stream, onResize]);
 
-    // TEMPORARY: revert to ViewType.Home when Trash debugging is done
-    const currentView: View = { type: ViewType.Trash };
+    const renderContent = (
+        setFooterOptions: any,
+        setFooterShortcuts: any,
+        terminal: any,
+        layout: any,
+        setHeaderSubtitleOverride: any,
+    ) => {
+        if (currentView.type === ViewType.Home) {
+            return (
+                <HomeView
+                    issues={mockStoreWithUpdater.mockDataStore.issues.filter(i => i.status !== IssueStatus.Trashed)}
+                    unreadInums={mockStoreWithUpdater.mockDataStore.unreadInums}
+                    maxAgents={mockStoreWithUpdater.mockDataStore.maxAgents}
+                    terminalProps={terminal}
+                    layoutProps={layout}
+                    setFooterShortcuts={setFooterShortcuts}
+                    setHeaderSubtitleOverride={setHeaderSubtitleOverride}
+                    onStatusHotkeyPressed={mockStoreWithUpdater.updateIssueStatusCallback}
+                    onTrashIssue={mockStoreWithUpdater.trashIssueCallback}
+                    onSelect={(inum) => navigateToView({ type: ViewType.Detail, inum })}
+                />
+            );
+        }
+
+        if (currentView.type === ViewType.Detail) {
+            const inum = currentView.inum;
+            const mockData = mockStoreWithUpdater.mockDataStore.detailData[inum];
+            if (!mockData) {
+                return <Text color="red">Issue I-{inum} not found</Text>;
+            }
+            const allIssues = mockStoreWithUpdater.mockDataStore.issues;
+            const blocks = allIssues.filter(i => i.blocked_by.includes(inum)).map(i => i.inum);
+            return (
+                <DetailView
+                    inum={inum}
+                    issue={mockData.issue}
+                    rootResponse={mockData.rootResponse}
+                    blockedBy={mockData.issue.blocked_by}
+                    blocks={blocks}
+                    group={''}
+                    columns={dims.columns}
+                    rows={dims.rows}
+                    containers={[]}
+                    allIssues={allIssues}
+                    unreadInums={mockStoreWithUpdater.mockDataStore.unreadInums}
+                    userLastViewedAt={mockData.issue.user_last_viewed_at}
+                    initialSelectedMessage={savedSelectedMessage.get(inum)}
+                    onBack={(sel) => saveSelectedAndGoBack(inum, sel)}
+                    onHome={(sel) => saveSelectedAndGoHome(inum, sel)}
+                    onSend={() => {}}
+                    onNavigateIssue={(inumTo) => replaceCurrentView({ type: ViewType.Detail, inum: inumTo })}
+                    onOpenPicker={(mode) => navigateToView({ type: ViewType.IssuePicker, mode, inum })}
+                    onQuit={() => exit()}
+                    onFooterFocusChange={() => {}}
+                    onThreadStateChange={(info) => setThreadInfo(info)}
+                />
+            );
+        }
+
+        return null;
+    };
 
     return (
         <AppShell
@@ -89,20 +182,9 @@ export function AppWrapper() {
             currentView={currentView}
             maxAgents={mockStoreWithUpdater.mockDataStore.maxAgents}
             unreadCount={mockStoreWithUpdater.mockDataStore.unreadInums.size}
+            threadInfo={threadInfo}
         >
-            {(setFooterOptions, setFooterShortcuts, terminal, layout, setHeaderSubtitleOverride) => (
-                // TEMPORARY: swap back to HomeView when Trash debugging is done
-                <TrashView
-                    issues={mockStoreWithUpdater.mockDataStore.issues.filter(i => i.status === IssueStatus.Trashed)}
-                    terminalProps={terminal}
-                    layoutProps={layout}
-                    setFooterShortcuts={setFooterShortcuts}
-                    setHeaderSubtitleOverride={setHeaderSubtitleOverride}
-                    onRestoreIssue={mockStoreWithUpdater.restoreIssueCallback}
-                    onPermanentDelete={mockStoreWithUpdater.permanentDeleteCallback}
-                    onEmptyTrash={mockStoreWithUpdater.emptyTrashCallback}
-                />
-            )}
+            {renderContent}
         </AppShell>
     );
 }
