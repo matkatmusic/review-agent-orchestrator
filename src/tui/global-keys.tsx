@@ -37,5 +37,9 @@ export function handleGlobalKey(
         callbacks.onNavigate?.({ type: ViewType.NewIssue });
         return true;
     }
+    if (input === 't' && currentView !== ViewType.Trash) {
+        callbacks.onNavigate?.({ type: ViewType.Trash });
+        return true;
+    }
     return false;
 }

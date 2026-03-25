@@ -97,9 +97,9 @@ export function AppWrapper() {
         setViewStack([{ type: ViewType.Home }]);
     }, [savedSelectedMessage]);
 
-    // Global key handling — suppressed for Detail and Trash which have their own useInput
+    // Global key handling — suppressed for Detail which has its own useInput
     useInput((input, key) => {
-        if (currentView.type === ViewType.Detail || currentView.type === ViewType.Trash) return;
+        if (currentView.type === ViewType.Detail) return;
         handleGlobalKey(input, key, currentView.type, {
             onBack: goBack,
             onQuit: () => exit(),

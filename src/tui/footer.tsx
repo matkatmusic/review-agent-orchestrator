@@ -92,13 +92,13 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
 const dimShortcut: Shortcut = { key: comboKey(KeyCombinations.SHIFT_D), label: 'Dim unrelated issues' };
 
 export const STATUS_SHORTCUTS: Record<IssueStatus, readonly Shortcut[]> = {
-    [IssueStatus.Active]:   [{ key: 'd', label: 'Defer' }, { key: 'r', label: 'Resolve' }, { key: 'x', label: 'Trash' }, dimShortcut, { key: 'q', label: 'Quit' }],
-    [IssueStatus.InQueue]:  [{ key: 'd', label: 'Defer' }, { key: 'r', label: 'Resolve' }, { key: 'f', label: 'Force active' }, { key: 'x', label: 'Trash' }, dimShortcut, { key: 'q', label: 'Quit' }],
-    [IssueStatus.Blocked]:  [{ key: 'b', label: 'Show blockers' }, { key: 'x', label: 'Trash' }, dimShortcut, { key: 'q', label: 'Quit' }],
-    [IssueStatus.Deferred]: [{ key: 'e', label: 'Enqueue' }, { key: 'r', label: 'Resolve' }, { key: 'x', label: 'Trash' }, dimShortcut, { key: 'q', label: 'Quit' }],
-    [IssueStatus.Resolved]: [{ key: 'e', label: 'Add comment to re-enqueue' }, { key: 'x', label: 'Trash' }, dimShortcut, { key: 'q', label: 'Quit' }],
-    [IssueStatus.Trashed]:  [dimShortcut, { key: 'q', label: 'Quit' }],
-    [IssueStatus.Inactive]: [{ key: 'f', label: 'Activate' }, { key: 'e', label: 'Enqueue' }, { key: 'x', label: 'Trash' }, dimShortcut, { key: 'q', label: 'Quit' }],
+    [IssueStatus.Active]:   [{ key: 'd', label: 'Defer' }, { key: 'r', label: 'Resolve' }, { key: 'x', label: 'Move to Trash' }, { key: 't', label: 'Trash view' }, dimShortcut, { key: 'q', label: 'Quit' }],
+    [IssueStatus.InQueue]:  [{ key: 'd', label: 'Defer' }, { key: 'r', label: 'Resolve' }, { key: 'f', label: 'Force active' }, { key: 'x', label: 'Move to Trash' }, { key: 't', label: 'Trash view' }, dimShortcut, { key: 'q', label: 'Quit' }],
+    [IssueStatus.Blocked]:  [{ key: 'b', label: 'Show blockers' }, { key: 'x', label: 'Move to Trash' }, { key: 't', label: 'Trash view' }, dimShortcut, { key: 'q', label: 'Quit' }],
+    [IssueStatus.Deferred]: [{ key: 'e', label: 'Enqueue' }, { key: 'r', label: 'Resolve' }, { key: 'x', label: 'Move to Trash' }, { key: 't', label: 'Trash view' }, dimShortcut, { key: 'q', label: 'Quit' }],
+    [IssueStatus.Resolved]: [{ key: 'e', label: 'Add comment to re-enqueue' }, { key: 'x', label: 'Move to Trash' }, { key: 't', label: 'Trash view' }, dimShortcut, { key: 'q', label: 'Quit' }],
+    [IssueStatus.Trashed]:  [{ key: 't', label: 'Trash view' }, dimShortcut, { key: 'q', label: 'Quit' }],
+    [IssueStatus.Inactive]: [{ key: 'f', label: 'Activate' }, { key: 'e', label: 'Enqueue' }, { key: 'x', label: 'Move to Trash' }, { key: 't', label: 'Trash view' }, dimShortcut, { key: 'q', label: 'Quit' }],
 };
 
 export const CONFIRM_TRASH_SHORTCUTS: readonly Shortcut[] = [
