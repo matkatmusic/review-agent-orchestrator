@@ -396,6 +396,7 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
         const idx = Math.min(cursorRef.current, Math.max(0, homeViewProps.issues.length - 1));
         const selectedIssue = homeViewProps.issues[idx];
         const status = selectedIssue.status;
+        process.stderr.write(`[hotkey] input=${JSON.stringify(input)} status=${status} inum=${selectedIssue.inum}\n`);
 
         if (input === 'e') {
             if (status === IssueStatus.Blocked) {
@@ -409,6 +410,8 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
             } else if (status === IssueStatus.Resolved) {
                 // Phase 3: open Detail, enqueue on submit. Stub: direct enqueue.
                 homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.InQueue });
+            } else if (status === IssueStatus.Inactive) {
+                homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.InQueue });
             }
         } else if (input === 'd') {
             if (status === IssueStatus.Active || status === IssueStatus.InQueue) {
@@ -421,7 +424,7 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
                 homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.Resolved });
             }
         } else if (input === 'f') {
-            if (status === IssueStatus.InQueue) {
+            if (status === IssueStatus.InQueue || status === IssueStatus.Inactive) {
                 // Phase 2: capacity gate + swap modal. Stub: direct activate.
                 homeViewProps.onStatusHotkeyPressed({ inum: selectedIssue.inum, newStatus: IssueStatus.Active });
             }
