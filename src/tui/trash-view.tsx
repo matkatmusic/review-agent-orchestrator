@@ -142,6 +142,7 @@ export interface TrashViewProps {
     onRestoreIssue?: (inum: number) => void;
     onPermanentDelete?: (inum: number) => void;
     onEmptyTrash?: () => void;
+    onBack?: () => void;
 }
 
 export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashViewProps) => {
@@ -219,6 +220,8 @@ export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashV
             setConfirmDeleteInum(props.issues[idx].inum);
         } else if (input === 'e' && props.issues.length > 0) {
             setEmptyTrashTyped('');
+        } else if (key.escape) {
+            props.onBack?.();
         }
     });
 

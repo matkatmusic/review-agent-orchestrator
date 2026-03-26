@@ -2,50 +2,36 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Say Hello",
+      "label": "Heartbeat: trash",
       "type": "shell",
-      "command": "echo",
-      "args": [
-        "hello"
-      ],
-      "presentation": {
-        "reveal": "always",
-        "panel": "new",
-        "focus": true
+      "command": "node \"/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator/worktree-spawn-util/dist/cli/heartbeat.js\" --repo-root \"/Users/matkatmusicllc/Programming/authv5-workspace/review-agent-orchestrator\" --worktree \"trash\"",
+      "runOptions": {
+        "runOn": "folderOpen"
       },
+      "presentation": {
+        "reveal": "never",
+        "panel": "shared",
+        "group": "heartbeat-trash",
+        "focus": false
+      },
+      "isBackground": true,
       "problemMatcher": []
     },
     {
-      "label": "Worktree: Pick Repository",
+      "label": "Worktree: trash",
       "type": "shell",
-      /*
-      Optional args:
-         --inspectHB: show heartbeat & daemon panels in worktree IDE
-         --pick <path/to/repo>: force manual folder picker (skip submodule auto-detect)
- 
-         Daemon-specific args (passed through when daemon starts):
-         --heartbeat-timeout=<ms>: cleanup delay after last heartbeat (default 15000)
-         --check-interval=<ms>: how often daemon checks for expired worktrees (default 5000)
-      */
-      "command": "npm run build && node dist/cli/pick-repo.js ${input:worktreeName}",
-      "options": {
-        "cwd": "${workspaceFolder}/worktree-spawn-util"
+      "command": "tmux attach -t trash",
+      "runOptions": {
+        "runOn": "folderOpen"
       },
       "presentation": {
         "reveal": "always",
-        "panel": "new",
+        "panel": "dedicated",
+        "group": "worktree-trash",
         "focus": true
       },
-      "problemMatcher": [
-        "$tsc"
-      ]
-    }
-  ],
-  "inputs": [
-    {
-      "id": "worktreeName",
-      "type": "promptString",
-      "description": "Worktree name"
+      "isBackground": true,
+      "problemMatcher": []
     }
   ]
 }

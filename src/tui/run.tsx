@@ -99,7 +99,7 @@ export function AppWrapper() {
 
     // Global key handling — suppressed for Detail which has its own useInput
     useInput((input, key) => {
-        if (currentView.type === ViewType.Detail) return;
+        if (currentView.type === ViewType.Detail || currentView.type === ViewType.Trash) return;
         handleGlobalKey(input, key, currentView.type, {
             onBack: goBack,
             onQuit: () => exit(),
@@ -193,6 +193,7 @@ export function AppWrapper() {
                     onRestoreIssue={mockStoreWithUpdater.restoreIssueCallback}
                     onPermanentDelete={mockStoreWithUpdater.permanentDeleteCallback}
                     onEmptyTrash={mockStoreWithUpdater.emptyTrashCallback}
+                    onBack={goBack}
                 />
             );
         }
