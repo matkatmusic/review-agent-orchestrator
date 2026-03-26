@@ -19,7 +19,7 @@ Working document. User plays with the TUI, reports what they want to do, I cross
 
 ---
 
-## Issue 2: Esc double-fires in Trash view when modal is open — BUG
+## Issue 2: Esc double-fires in Trash view when modal is open — DONE
 
 **What the user wants:** Pressing Esc while a confirmation modal is shown (delete, empty trash) should dismiss the modal only, not also navigate back to Home.
 
@@ -27,13 +27,12 @@ Working document. User plays with the TUI, reports what they want to do, I cross
 
 **AUDIT.md reference:** Item #2 (Global Key Wiring) — the broader problem of global keys conflicting with view-internal keys.
 
-**Prerequisites:**
-1. A mechanism for views to signal "I consumed this key, don't let global handler act on it." Ink has no built-in key consumption, so this needs a shared state flag (e.g., `modalOpen` state) or a ref that the global handler checks before acting.
-
-**Specific implementation items:**
-- Option A: TrashView exposes a `modalOpen` boolean (via callback or ref) that run.tsx checks before forwarding Esc to handleGlobalKey
-- Option B: Add an `onBack` prop to TrashView; TrashView calls it on Esc only when no modal is open. Re-suppress Trash in run.tsx's global handler.
-- Option B is more consistent with how DetailView works (Detail has onBack and handles its own Esc internally)
+**Implementation (Option B — matches DetailView pattern):**
+- run.tsx: suppressed global handler for Trash view (line 102 guard, same as Detail)
+- trash-view.tsx: added `onBack` prop to TrashViewProps
+- trash-view.tsx: added Esc handler in normal state that calls `props.onBack()`
+- run.tsx: passed `onBack={goBack}` to TrashView JSX
+- Verified via tmux send-keys: delete modal Esc, empty-trash modal Esc, and bare Esc all behave correctly
 
 ---
 
@@ -124,7 +123,48 @@ Trashed issues pending deletion
 
 ---
 
-## Issue 6: (awaiting user input)
+## Issue 6: Home footer shortcuts persist in Detail view — BUG
+
+**What the user wants:** Detail view should show its own footer shortcuts, not Home's.
+
+**Why:** User navigated from Home to Detail and noticed the footer still shows Home shortcuts instead of Detail ones (Send, Scroll, Thread, Resolve, Back, etc.).
+
+**Root cause:** `app-shell.tsx:40` — `footerShortcuts ?? getFooterShortcuts(viewType, footerOptions)`. HomeView calls `setFooterShortcuts(...)` with status-dependent shortcuts, which persists in AppShell state. DetailView never receives or calls `setFooterShortcuts`, so HomeView's overrides remain and the `getFooterShortcuts(ViewType.Detail)` fallback never fires.
+
+**AUDIT.md reference:** TBD.
+
+**Prerequisites:** None.
+
+**Specific implementation items:**
+- Option A (recommended): Clear `footerShortcuts` state in AppShell via useEffect when `viewType` changes — call `setFooterShortcuts(undefined)`. Prevents same bug for any future view.
+- Option B: Pass `setFooterShortcuts` to DetailView.
+
+**Files:** `src/tui/app-shell.tsx` (lines 36, 40), `src/tui/run.tsx` (lines 156-179)
+
+---
+
+## Issue 7: Enter on "View Replies" resolves thread instead of entering it — BUG
+
+**What the user wants:** Select a response with replies, press Enter — should drill into replies. Instead the thread gets resolved.
+
+**Why:** User was testing thread navigation in Detail view. Pressed Enter on a message with reply threads. Thread was resolved instead of opened.
+
+**Root cause:** `detail.tsx:443-446` — the Enter handler for `focusedViewReplies` calls `this.resolveThread()` instead of `this.enterThread()`. The comment on line 442 ("toggles thread resolution") confirms wrong action was coded.
+
+**AUDIT.md reference:** TBD.
+
+**Prerequisites:** None.
+
+**Specific implementation items:**
+- `detail.tsx:444`: change `this.resolveThread()` to `this.enterThread()`
+- Verify `enterThread()` correctly pushes onto `threadStack`
+- Test: navigate to issue with replies, tab to "View Replies", Enter → reply thread should appear
+
+**Files:** `src/tui/detail.tsx` (line 442-446)
+
+---
+
+## Issue 8: (awaiting user input)
 
 ---
 
