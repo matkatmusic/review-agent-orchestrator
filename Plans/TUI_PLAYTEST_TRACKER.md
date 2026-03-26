@@ -76,7 +76,7 @@ Trashed issues pending deletion
 
 ---
 
-## Issue 4: Enqueue hotkey ('e') doesn't work for deferred issues — BUG
+## Issue 4: Enqueue hotkey ('e') doesn't work for deferred issues — FIXED
 
 **What the user wants:** Select a deferred issue on the Home screen, press 'e' to enqueue it. Nothing happens.
 

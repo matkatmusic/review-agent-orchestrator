@@ -1,0 +1,7 @@
+2026-03-25 — enqueue_hotkey session
+
+User prompt: "tackle @Plans/TUI_PLAYTEST_TRACKER.md issue 4"
+
+Issue 4: Enqueue hotkey ('e') doesn't work for deferred issues.
+Root cause: 'e' handler in home-view.tsx had no case for IssueStatus.Inactive. Restoring from trash sets Inactive status; footer shows [e] Enqueue but keypress fell through silently.
+Fix: Added Inactive branch to 'e' and 'f' handlers. Added stderr debug logging.
