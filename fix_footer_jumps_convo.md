@@ -6241,3 +6241,2914 @@ That launches the TUI. From there:
 
 ---
 
+
+
+# Code Changes (Edit/Write tool uses)
+
+## From session: 025496d7-8341-49a9-b307-adc7a5c33041.jsonl
+
+### WRITE: /Users/matkatmusicllc/.claude/plans/wiggly-hopping-shell.md
+
+```typescript
+# Plan: Fix Footer Jumps
+
+## Status: Awaiting task description
+
+Waiting for user to describe the footer jumping issue to investigate and plan a fix.
+
+```
+
+---
+
+### WRITE: /Users/matkatmusicllc/.claude/plans/wiggly-hopping-shell.md
+
+```typescript
+# Fix Footer Jumps in Home View
+
+## Context
+
+Scrolling through issues changes footer shortcuts per-status (50-111 chars total). At many terminal widths, different statuses produce different footer line counts, causing contentHeight to change and the layout to jump. Additionally, useEffect-based footer updates lag the cursor by one frame.
+
+## Root Cause (confirmed via capture-pane)
+
+- Footer line count varies per-status at most terminal widths (e.g. at 95 cols: Active=1 line, InQueue=2 lines)
+- useEffect double-render: cursor moves one frame before footer updates (confirmed: "Defer" rendered 4x vs "Force active" 1x for 2 keystrokes)
+- computeFooterLines uses inaccurate estimate vs actual greedy bin-packing
+
+## Fix: Split Global vs Per-Status Shortcuts Into Fixed Rows
+
+Restructure the home view footer into 2 explicit rows:
+
+Row 1 (per-status): changes based on selected issue's status
+Row 2 (global): always [t] Trash view, [D] Dim unrelated issues, [q] Quit
+
+Width analysis confirms both rows always fit on 1 line at 60+ columns:
+- Per-status max width: 59 chars (InQueue: d, r, f, x)
+- Global row width: 50 chars (t, D, q)
+
+### Step 1: Restructure STATUS_SHORTCUTS (footer.tsx)
+
+Split current STATUS_SHORTCUTS into:
+- HOME_GLOBAL_SHORTCUTS: [t, D, q] -- constant array
+- HOME_STATUS_SHORTCUTS: per-status arrays WITHOUT t, D, q entries:
+  - Active: [d] Defer, [r] Resolve, [x] Move to Trash
+  - InQueue: [d] Defer, [r] Resolve, [f] Force active, [x] Move to Trash
+  - Blocked: [b] Show blockers, [x] Move to Trash
+  - Deferred: [e] Enqueue, [r] Resolve, [x] Move to Trash
+  - Resolved: [e] Add comment to re-enqueue, [x] Move to Trash
+  - Trashed: [] (empty -- global row still shows)
+  - Inactive: [f] Activate, [e] Enqueue, [x] Move to Trash
+
+Keep existing STATUS_SHORTCUTS for non-home uses (getFooterShortcuts fallback).
+
+### Step 2: Render two explicit rows in Footer (footer.tsx)
+
+Add optional `globalShortcuts?: readonly Shortcut[]` prop to FooterProps. When provided:
+- Render per-status shortcuts on row 1 (using computeRows for wrapping)
+- Render globalShortcuts on row 2 (always its own row, never merged with row 1)
+
+When not provided: existing single-list behavior unchanged (detail view, trash view).
+
+### Step 3: Pass split shortcuts from AppShell (app-shell.tsx)
+
+When viewType === ViewType.Home:
+- footerLines = always 2 (1 per-status + 1 global)
+- Pass globalShortcuts={HOME_GLOBAL_SHORTCUTS} to Footer
+- Pass per-status shortcuts as the main shortcuts prop
+
+### Step 4: Move setFooterShortcuts from useEffect to input handlers (home-view.tsx)
+
+Move `setFooterShortcuts(HOME_STATUS_SHORTCUTS[status])` into the cursor movement handlers alongside setCursor. React 18 batches both state updates into one render. Remove the useEffect dependency on selectedIssueStatus.
+
+Keep confirmTrashInum useEffect (that transition is modal, not cursor-driven).
+
+### Step 5: Fix computeFooterLines accuracy (footer.tsx:148-155)
+
+Replace Math.ceil approximation with computeRows-based count. Benefits all views.
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| src/tui/footer.tsx | Split shortcuts, add globalShortcuts prop, fix computeFooterLines |
+| src/tui/app-shell.tsx | Import ViewType + new exports, use fixed 2-row footer for Home |
+| src/tui/home-view.tsx | Move setFooterShortcuts from useEffect to input handlers |
+| src/tui/footer.test.tsx | Update tests for new exports and computeFooterLines fix |
+| src/tui/app-shell.test.tsx | Update test 3 expected height for Home view (fixed 2 rows) |
+
+## Verification
+
+1. `npx vitest run src/tui/footer.test.tsx src/tui/app-shell.test.tsx`
+2. Run TUI. Scroll through all issue statuses. Footer row 2 (t, D, q) stays constant. Row 1 changes content but not line count. No screen jump.
+3. capture-pane: footer position (line number in pane) is fixed during scrolling.
+4. Resize terminal: layout reflows once, then stable during further scrolling.
+
+```
+
+---
+
+### WRITE: /Users/matkatmusicllc/.claude/plans/wiggly-hopping-shell.md
+
+```typescript
+# Fix Footer Jumps -- 2-Row Global + Contextual Footer
+
+## Context
+
+Scrolling through issues on the Home view changes footer shortcuts per-status. Different statuses produce different footer line counts at most terminal widths, causing contentHeight to change and the layout to jump. Fix: restructure footer into a fixed 2-row layout with global shortcuts (top) and contextual shortcuts (bottom).
+
+## Design Decisions (confirmed with user)
+
+- Row 1 (top): Global shortcuts -- always visible, always same 4 items
+- Row 2 (bottom): Contextual shortcuts -- per-view/per-status, paginated if overflow
+- Footer always exactly 2 rows (empty row 2 when no contextual shortcuts)
+- Non-applicable globals dimmed, not hidden
+- Overflow pagination via > / < (Shift+. / Shift+,) with placeholder styling
+- [t] Trash and [D] Dim move to Home contextual row (active)
+- View nav shortcuts (B, a, g, n) dimmed placeholders in Home contextual row
+- useEffect flicker fix deferred (TODO only)
+- Help view deferred ([?] dimmed everywhere)
+- View nav handler wiring deferred (just visual scaffolding)
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| src/tui/footer.tsx | New exports, 2-row rendering, pagination |
+| src/tui/app-shell.tsx | Global shortcut computation, pagination state, useInput for > < |
+| src/tui/app.tsx | Pass viewStackLength to AppShell |
+| src/tui/home-view.tsx | Use new HOME_ACTION_SHORTCUTS + HOME_ALWAYS_CONTEXTUAL |
+| src/tui/run.tsx | Pass viewStackLength if AppShell used here |
+
+## Step 1: footer.tsx -- New Data Structures
+
+### GLOBAL_SHORTCUTS_BASE (new export)
+
+Base array without disabled state (disabled computed at render time by AppShell):
+
+    { key: 'h', label: 'Home' }
+    { key: 'Esc', label: 'Back' }
+    { key: 'q', label: 'Quit' }
+    { key: '?', label: 'Help', disabled: true }
+
+### HOME_ALWAYS_CONTEXTUAL (new export)
+
+Always appended to Home's contextual row regardless of status:
+
+    { key: 't', label: 'Trash view' }              -- active
+    { key: comboKey(SHIFT_D), label: 'Dim unrelated issues' }  -- active
+    { key: 'B', label: 'Blocking Map', disabled: true }   -- dimmed placeholder
+    { key: 'a', label: 'Agent Status', disabled: true }   -- dimmed placeholder
+    { key: 'g', label: 'Groups', disabled: true }         -- dimmed placeholder
+    { key: 'n', label: 'New Issue', disabled: true }      -- dimmed placeholder
+
+Note: [B] (capital) avoids collision with [b] Show blockers on Blocked status.
+
+### HOME_ACTION_SHORTCUTS (new export)
+
+Record<IssueStatus, readonly Shortcut[]> -- per-status action shortcuts only (no q, Esc, t, D):
+
+    Active:   [d] Defer, [r] Resolve, [x] Move to Trash
+    InQueue:  [d] Defer, [r] Resolve, [f] Force active, [x] Move to Trash
+    Blocked:  [b] Show blockers, [x] Move to Trash
+    Deferred: [e] Enqueue, [r] Resolve, [x] Move to Trash
+    Resolved: [e] Add comment to re-enqueue, [x] Move to Trash
+    Trashed:  (empty)
+    Inactive: [f] Activate, [e] Enqueue, [x] Move to Trash
+
+Keep existing STATUS_SHORTCUTS unchanged (used by non-home flows).
+
+### computeGlobalShortcuts (new export)
+
+    function computeGlobalShortcuts(viewType: ViewType, viewStackLength: number): Shortcut[]
+
+Returns GLOBAL_SHORTCUTS_BASE with disabled flags:
+- [h] disabled when viewType === ViewType.Home
+- [Esc] disabled when viewStackLength <= 1
+- [?] always disabled (for now)
+- [q] never disabled
+
+### FOOTER_HEIGHT = 2 (new export, replaces deprecated FOOTER_LINES)
+
+Constant. Footer is always exactly 2 rows.
+
+### paginateRow (new internal function)
+
+    function paginateRow(shortcuts: readonly Shortcut[], columns: number): Shortcut[][]
+
+Splits shortcuts into pages where each page fits within columns width. Reserves space for < > (N/M) indicators when multiple pages exist. Returns array of pages, each page is a Shortcut[].
+
+Uses existing itemWidth() and greedy bin-packing logic from computeRows().
+
+## Step 2: footer.tsx -- 2-Row Rendering
+
+### New FooterProps additions
+
+    globalShortcuts?: readonly Shortcut[]
+    contextualPage?: number
+    contextualPageCount?: number
+
+### Rendering logic
+
+When globalShortcuts is provided:
+- Row 1: render globalShortcuts using existing row rendering (single row, no wrapping)
+- Row 2: render contextual shortcuts for current page
+  - If contextualPageCount > 1, show < indicator at left (dimmed if page 0) and > at right (dimmed if last page)
+  - Show (N/M) page indicator next to > 
+  - If no contextual shortcuts, render empty Box (preserves 2-row height)
+
+When globalShortcuts is NOT provided:
+- Existing behavior unchanged (single-list bin-packed rendering)
+- This preserves backward compat for any code path not yet migrated
+
+## Step 3: app-shell.tsx -- Orchestration
+
+### New prop: viewStackLength: number
+
+### New state: contextualPage (useState, init 0)
+
+Reset contextualPage to 0 whenever footerShortcuts changes (in setFooterShortcuts wrapper).
+
+### Compute global shortcuts
+
+    const globals = computeGlobalShortcuts(viewType, props.viewStackLength)
+
+(props used explicitly, no destructuring per coding conventions)
+
+### Strip global duplicates from contextual shortcuts
+
+Before rendering contextual shortcuts, filter out any that match a global key AND label. Match on both key+label to avoid stripping [Esc] Cancel from CONFIRM_TRASH_SHORTCUTS.
+
+    function isGlobalDuplicate(s: Shortcut): boolean
+    -- returns true if s.key matches a GLOBAL_SHORTCUTS_BASE entry's key AND s.label matches its label
+
+### Compute contextual page count
+
+    const pages = paginateRow(contextualShortcuts, columns)
+    const pageCount = pages.length
+    const currentPageShortcuts = pages[contextualPage] ?? []
+
+### useInput for pagination
+
+Add useInput hook:
+- On '>' (shift+.): if contextualPage < pageCount - 1, increment
+- On '<' (shift+,): if contextualPage > 0, decrement
+
+### footerLines = FOOTER_HEIGHT (constant 2)
+
+Replace: computeFooterLines(shortcuts, columns)
+With: FOOTER_HEIGHT
+
+### Pass to Footer
+
+    <Footer
+        viewType={viewType}
+        {...footerOptions}
+        shortcutOverrides={currentPageShortcuts}
+        globalShortcuts={globals}
+        contextualPage={contextualPage}
+        contextualPageCount={pageCount}
+        columns={columns}
+    />
+
+## Step 4: app.tsx -- Pass viewStackLength
+
+Add viewStackLength={this.viewStack.length} to AppShell instantiation.
+
+## Step 5: home-view.tsx -- Use New Shortcuts
+
+Change setFooterShortcuts calls:
+- Status change: setFooterShortcuts([...HOME_ACTION_SHORTCUTS[status], ...HOME_ALWAYS_CONTEXTUAL])
+- Confirm trash: setFooterShortcuts(CONFIRM_TRASH_SHORTCUTS) (unchanged)
+
+Import HOME_ACTION_SHORTCUTS and HOME_ALWAYS_CONTEXTUAL from footer.tsx.
+
+## Step 6: run.tsx -- Pass viewStackLength (if needed)
+
+Check if run.tsx also instantiates AppShell directly. If so, pass viewStackLength.
+
+## Edge Cases
+
+1. CONFIRM_TRASH_SHORTCUTS has [Esc] Cancel -- must NOT be stripped as global duplicate. Stripping matches on key AND label (only strips Esc+Back, not Esc+Cancel).
+
+2. Detail view has [Esc] Back and [Alt+H] Home in VIEW_SHORTCUTS -- the Esc+Back will be stripped (it's a global duplicate). Alt+H Home has a different key than h so it won't be stripped. Consider removing Alt+H from Detail VIEW_SHORTCUTS since global [h] replaces it. Defer to user.
+
+3. Terminal width < 60 columns: global row itself might not fit. computeRows handles wrapping but we want to keep footer at 2 rows. At very narrow widths, accept that globals may truncate. Minimum viable width is ~45 cols for all 4 globals.
+
+4. Empty contextual row: when a view has no contextual shortcuts after stripping globals, render an empty Box on row 2 to maintain 2-row height.
+
+5. Page state persistence: when navigating between views, contextualPage resets to 0. This is correct since different views have different contextual shortcuts.
+
+## Verification
+
+1. npx vitest run (if tests exist -- currently none for footer/app-shell)
+2. Run TUI, scroll through all issue statuses on Home view:
+   - Row 1 (global) stays constant: [h] [Esc] [q] [?]
+   - Row 2 (contextual) changes content but stays 1 row
+   - No screen jump -- footer position is fixed
+3. Navigate Home -> Detail -> Home:
+   - [h] dimmed on Home, active on Detail
+   - [Esc] dimmed on Home (stack=1), active on Detail (stack=2)
+4. Test pagination: if any view has enough shortcuts to overflow, press > and < to page
+5. Verify CONFIRM_TRASH flow: press x on an issue, footer row 2 shows [x] Confirm trash [Esc] Cancel, not stripped
+6. capture-pane: footer line position is constant across all status changes
+
+```
+
+---
+
+### WRITE: Todos/005_footer-useeffect-flicker-fix.md
+
+```typescript
+---
+id: 005
+title: Fix useEffect footer shortcut flicker on cursor movement
+status: open
+created: 2026-03-30T00:00:00-07:00
+branch: fix_footer_jumps
+---
+
+## Idea
+home-view.tsx updates footer shortcuts via useEffect watching selectedIssueStatus. This causes a 1-frame visual flicker where old contextual shortcuts render before the new ones appear (confirmed: "Defer" rendered 4x vs "Force active" 1x for 2 keystrokes).
+
+## Fix
+Move setFooterShortcuts call from useEffect into the cursor movement handlers (useInput callbacks) alongside setCursor. React 18 batches both state updates into one render, eliminating the lag frame.
+
+Keep the confirmTrashInum useEffect -- that transition is modal, not cursor-driven.
+
+## Files
+- src/tui/home-view.tsx: move setFooterShortcuts from useEffect to useInput handlers
+
+```
+
+---
+
+### WRITE: /Users/matkatmusicllc/.claude/plans/wiggly-hopping-shell.md
+
+```typescript
+# Fix Footer Jumps -- 2-Row Global + Contextual Footer
+
+## Context
+
+Scrolling through issues on Home view changes footer shortcuts per-status. Different statuses produce different footer line counts, causing contentHeight to change and the layout to jump. Fix: fixed 2-row footer with global shortcuts (top) and contextual shortcuts (bottom).
+
+## Confirmed Design Decisions
+
+Global row (Row 1, top) -- always visible, always same 4 items:
+- [Alt+H] Home -- dimmed on Home view, active elsewhere
+- [Esc] Back -- dimmed when viewStack.length <= 1
+- [q] Quit -- always active
+- [?] Help -- dimmed everywhere (Help view deferred)
+
+Contextual row (Row 2, bottom):
+- Per-view or per-status shortcuts (with global duplicates stripped by key match)
+- When no contextual shortcuts: empty row (footer always exactly 2 rows)
+- Overflow pagination via > / < with placeholder styling
+
+Home view contextual shortcuts:
+- Per-status actions (d/r/f/e/x depending on status) -- active
+- [t] Trash view, [D] Dim unrelated -- active
+- [B] Blocking Map, [a] Agent Status, [g] Groups, [n] New Issue -- all dimmed placeholders
+
+Confirm modals:
+- Convert all confirms (trash, delete, empty) to ConfirmModal stack views
+- ConfirmModal hides header + footer entirely
+- Top-aligned layout: "I-# Title\nConfirm message?" with hotkey hints below
+- onConfirm / onCancel callbacks stored as functions on the view object
+
+All views use 2-row footer immediately (no backward compat path).
+Pagination state + > < input handling owned by AppShell.
+Replace computeFooterLines with FOOTER_HEIGHT = 2 constant.
+Strip global duplicates by key-only match. No edge case with confirms since modals hide footer.
+useEffect flicker fix deferred (TODO #005).
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| src/tui/footer.tsx | GLOBAL_SHORTCUTS_BASE, HOME_ALWAYS_CONTEXTUAL, HOME_ACTION_SHORTCUTS, FOOTER_HEIGHT, paginateRow, 2-row rendering, remove computeFooterLines |
+| src/tui/app-shell.tsx | viewStackLength prop, pagination state, useInput for > <, computeGlobalShortcuts, strip duplicates, isModalView check to hide header+footer |
+| src/tui/app.tsx | Pass viewStackLength, push ConfirmModal views, route confirm callbacks |
+| src/tui/home-view.tsx | Replace confirmTrashInum with navigateToView(ConfirmModal), use HOME_ACTION_SHORTCUTS + HOME_ALWAYS_CONTEXTUAL |
+| src/tui/views.ts | Add ViewType.ConfirmModal, add ConfirmModalView interface with message/hotKeys/onConfirm/onCancel |
+| src/tui/confirm-modal.tsx | New file: ConfirmModal component (top-aligned message + hotkeys, useInput for confirm/cancel) |
+| src/tui/trash-view.tsx | Replace inline confirm states (delete, empty) with navigateToView(ConfirmModal) |
+| src/tui/run.tsx | Pass viewStackLength if it instantiates AppShell directly |
+
+## Step 1: views.ts -- Add ConfirmModal ViewType
+
+Add ViewType.ConfirmModal to the enum.
+
+Add ConfirmModalView interface:
+    type: ViewType.ConfirmModal
+    message: string             (e.g. "I-5 Fix auth bug\nConfirm trash?")
+    hotKeys: readonly Shortcut[] (e.g. [{ key: 'x', label: 'Yes' }, { key: 'Esc', label: 'Cancel' }])
+    onConfirm: () => void
+    onCancel: () => void
+
+Add isModalView(view: View): boolean helper -- returns true if view.type === ViewType.ConfirmModal.
+
+Update View union type to include ConfirmModalView.
+
+## Step 2: confirm-modal.tsx -- New ConfirmModal Component
+
+New file. Top-aligned layout:
+
+    Props: { view: ConfirmModalView, columns: number, rows: number }
+    
+    Renders:
+      Box flexDirection="column"
+        Text: view.message (may contain \n)
+        Box marginTop={1}:
+          Shortcut hints from view.hotKeys (same rendering style as footer shortcuts)
+
+    useInput:
+      Match key against view.hotKeys entries
+      If matched hotKey that triggers confirm: call view.onConfirm()
+      If matched hotKey that triggers cancel: call view.onCancel()
+
+Design: the first hotKey in the array is the confirm action, the last is the cancel action. Or match by key value against the hotKeys array and let the callbacks handle routing. Simpler: just iterate hotKeys, if input matches hotKey.key, call the corresponding callback.
+
+Actually: store callbacks per-hotkey. Change the interface:
+    hotKeys: readonly ConfirmHotKey[]
+    
+    interface ConfirmHotKey {
+      key: string
+      label: string
+      handler: () => void
+    }
+
+This removes the need for separate onConfirm/onCancel -- each hotkey has its own handler. More flexible for future modals with 3+ options.
+
+## Step 3: footer.tsx -- New Data Structures + 2-Row Rendering
+
+### New exports
+
+GLOBAL_SHORTCUTS_BASE: readonly Shortcut[] =
+    { key: comboKey(ALT_H), label: 'Home' }
+    { key: 'Esc', label: 'Back' }
+    { key: 'q', label: 'Quit' }
+    { key: '?', label: 'Help', disabled: true }
+
+HOME_ALWAYS_CONTEXTUAL: readonly Shortcut[] =
+    { key: 't', label: 'Trash view' }
+    { key: comboKey(SHIFT_D), label: 'Dim unrelated issues' }
+    { key: 'B', label: 'Blocking Map', disabled: true }
+    { key: 'a', label: 'Agent Status', disabled: true }
+    { key: 'g', label: 'Groups', disabled: true }
+    { key: 'n', label: 'New Issue', disabled: true }
+
+HOME_ACTION_SHORTCUTS: Record<IssueStatus, readonly Shortcut[]> =
+    Active:   [d] Defer, [r] Resolve, [x] Move to Trash
+    InQueue:  [d] Defer, [r] Resolve, [f] Force active, [x] Move to Trash
+    Blocked:  [b] Show blockers, [x] Move to Trash
+    Deferred: [e] Enqueue, [r] Resolve, [x] Move to Trash
+    Resolved: [e] Add comment to re-enqueue, [x] Move to Trash
+    Trashed:  (empty array)
+    Inactive: [f] Activate, [e] Enqueue, [x] Move to Trash
+
+FOOTER_HEIGHT = 2 (replaces deprecated FOOTER_LINES and computeFooterLines)
+
+### New function: computeGlobalShortcuts(viewType, viewStackLength)
+
+Returns a copy of GLOBAL_SHORTCUTS_BASE with disabled flags set:
+- [Alt+H] disabled when viewType === ViewType.Home
+- [Esc] disabled when viewStackLength <= 1
+- [?] always disabled
+- [q] never disabled
+
+### New function: paginateRow(shortcuts, columns)
+
+Splits shortcuts into pages that each fit on 1 terminal row. Uses itemWidth() and greedy packing. When multiple pages, reserves space at right edge for > indicator and (N/M) text. Returns Shortcut[][] (array of pages).
+
+### New function: stripGlobalDuplicates(shortcuts)
+
+Removes any shortcut whose key matches a GLOBAL_SHORTCUTS_BASE entry's key. Returns filtered array.
+
+### Updated FooterProps
+
+Add:
+    globalShortcuts: readonly Shortcut[]
+    contextualShortcuts: readonly Shortcut[]  (current page only)
+    contextualPage: number
+    contextualPageCount: number
+
+Remove: shortcutOverrides (replaced by contextualShortcuts)
+
+### Updated Footer rendering
+
+Always renders 2 rows:
+- Row 1: globalShortcuts (single row, same rendering style as before)
+- Row 2: contextualShortcuts with < > indicators when contextualPageCount > 1
+  - < shown at left (dimmed if page 0)
+  - > shown at right (dimmed if last page)
+  - (N/M) page indicator next to >
+  - If contextualShortcuts is empty, render empty Box (maintains 2-row height)
+
+Remove: old single-list rendering path, computeFooterLines export
+
+### Delete computeFooterLines
+
+Remove the function and its export.
+
+## Step 4: app-shell.tsx -- Orchestration
+
+### New prop: viewStackLength: number
+
+### New state: contextualPage (useState, init 0)
+
+### New logic: detect modal view
+
+    const currentViewIsModal = isModalView(currentView)
+
+When currentViewIsModal is true: hide Header and Footer entirely. Render children with full terminal height.
+
+### Compute global shortcuts
+
+    const globals = computeGlobalShortcuts(viewType, appShellProps.viewStackLength)
+
+### Build contextual shortcuts
+
+    const rawContextual = footerShortcuts ?? getFooterShortcuts(viewType, footerOptions)
+    const contextual = stripGlobalDuplicates(rawContextual)
+
+### Paginate
+
+    const pages = paginateRow(contextual, columns)
+    const pageCount = pages.length
+    const currentPageShortcuts = pages[contextualPage] ?? []
+
+### Reset page on shortcut change
+
+Wrap setFooterShortcuts to also reset contextualPage to 0.
+
+### useInput for > <
+
+    Only consume > when pageCount > 1 and contextualPage < pageCount - 1
+    Only consume < when pageCount > 1 and contextualPage > 0
+
+### contentHeight
+
+    When modal: contentHeight = rows (full terminal)
+    Otherwise: contentHeight = Math.max(0, rows - HEADER_LINES - FOOTER_HEIGHT)
+
+### Pass to Footer
+
+    <Footer
+        viewType={viewType}
+        globalShortcuts={globals}
+        contextualShortcuts={currentPageShortcuts}
+        contextualPage={contextualPage}
+        contextualPageCount={pageCount}
+        columns={columns}
+    />
+
+## Step 5: app.tsx -- Pass viewStackLength + ConfirmModal Support
+
+Pass viewStackLength={this.viewStack.length} to AppShell.
+
+Add ConfirmModal case in the view rendering switch:
+    case ViewType.ConfirmModal:
+        content = <ConfirmModal view={currentView} columns={columns} rows={rows} />
+
+Provide an onPushConfirm callback to child views that pushes a ConfirmModal view.
+
+## Step 6: home-view.tsx -- Use New Shortcuts + ConfirmModal
+
+Remove confirmTrashInum state.
+Remove CONFIRM_TRASH_SHORTCUTS import.
+Remove useEffect that sets footer based on confirmTrashInum.
+
+When user presses 'x' on an issue:
+    homeViewProps.onPushConfirm({
+        type: ViewType.ConfirmModal,
+        message: `I-${issue.inum} ${issue.title}\nConfirm trash?`,
+        hotKeys: [
+            { key: 'x', label: 'Yes', handler: () => { homeViewProps.onTrashIssue(issue.inum); homeViewProps.navigateBack(); } },
+            { key: 'Esc', label: 'Cancel', handler: () => { homeViewProps.navigateBack(); } },
+        ],
+    })
+
+Change setFooterShortcuts to use:
+    [...HOME_ACTION_SHORTCUTS[status], ...HOME_ALWAYS_CONTEXTUAL]
+
+## Step 7: trash-view.tsx -- Convert Confirm Flows
+
+Replace inline confirm states for delete and empty-trash with ConfirmModal views, same pattern as home-view.
+
+## Step 8: run.tsx -- Pass viewStackLength
+
+If run.tsx instantiates AppShell, pass viewStackLength.
+
+## Verification
+
+1. npx vitest run -- all existing tests pass
+2. Run TUI, scroll through all issue statuses on Home view:
+   - Row 1 (global) stays constant: [Alt+H] [Esc] [q] [?]
+   - Row 2 (contextual) changes content but row count stays at 2
+   - No screen jump
+3. Navigate Home -> Detail -> Home:
+   - [Alt+H] dimmed on Home, active on Detail
+   - [Esc] dimmed on Home (stack=1), active on Detail (stack=2)
+4. Press x on an issue: ConfirmModal appears, header+footer hidden
+   - Shows issue number + title + "Confirm trash?"
+   - x confirms and returns to Home, Esc cancels and returns
+5. Test pagination: if any view has enough contextual shortcuts to overflow, > and < page through them
+6. Trash view: delete and empty-trash confirmations show ConfirmModal
+7. capture-pane: footer line position is constant across all status changes
+
+```
+
+---
+
+### EDIT: src/tui/views.ts
+
+**Old:**
+```
+    Trash,
+}
+```
+
+**New:**
+```
+    Trash,
+    ConfirmModal,
+}
+```
+
+---
+
+### EDIT: src/tui/views.ts
+
+**Old:**
+```
+    [ViewType.Trash, "Trash"],
+]);
+```
+
+**New:**
+```
+    [ViewType.Trash, "Trash"],
+    [ViewType.ConfirmModal, "Confirm"],
+]);
+```
+
+---
+
+### EDIT: src/tui/views.ts
+
+**Old:**
+```
+    | { type: ViewType.Trash };
+```
+
+**New:**
+```
+    | { type: ViewType.Trash }
+    | ConfirmModalView;
+```
+
+---
+
+### EDIT: src/tui/views.ts
+
+**Old:**
+```
+export interface TerminalProps {
+```
+
+**New:**
+```
+export interface ConfirmHotKey {
+    readonly key: string;
+    readonly label: string;
+    readonly handler: () => void;
+}
+
+export interface ConfirmModalView {
+    readonly type: ViewType.ConfirmModal;
+    readonly message: string;
+    readonly hotKeys: readonly ConfirmHotKey[];
+}
+
+export function isModalView(view: View): boolean {
+    return view.type === ViewType.ConfirmModal;
+}
+
+export interface TerminalProps {
+```
+
+---
+
+### WRITE: src/tui/confirm-modal.tsx
+
+```typescript
+import React from 'react';
+import { Box, Text, useInput } from 'ink';
+import type { ConfirmModalView } from './views.js';
+
+export interface ConfirmModalProps {
+    readonly view: ConfirmModalView;
+    readonly columns: number;
+    readonly rows: number;
+}
+
+export const ConfirmModal: React.FC<ConfirmModalProps> = (props: ConfirmModalProps) => {
+    useInput((input, key) => {
+        for (let i = 0; i < props.view.hotKeys.length; i++) {
+            const hk = props.view.hotKeys[i];
+            if (hk.key === 'Esc' && key.escape) {
+                hk.handler();
+                return;
+            }
+            if (input === hk.key) {
+                hk.handler();
+                return;
+            }
+        }
+    });
+
+    const messageLines = props.view.message.split('\n');
+
+    return (
+        <Box flexDirection="column" height={props.rows}>
+            <Box flexDirection="column" paddingLeft={2} paddingTop={1}>
+                {messageLines.map((line, idx) => (
+                    <Text key={idx}>{line}</Text>
+                ))}
+                <Box marginTop={1}>
+                    {props.view.hotKeys.map((hk, i) => (
+                        <Box key={i} marginRight={i < props.view.hotKeys.length - 1 ? 2 : 0}>
+                            <Text><Text bold color="cyan">[{hk.key}]</Text> {hk.label}</Text>
+                        </Box>
+                    ))}
+                </Box>
+            </Box>
+        </Box>
+    );
+};
+
+```
+
+---
+
+### EDIT: src/tui/footer.tsx
+
+**Old:**
+```
+export const FOOTER_LINES = 1; // deprecated — use computeFooterLines()
+```
+
+**New:**
+```
+export const FOOTER_LINES = 1; // deprecated — use FOOTER_HEIGHT
+export const FOOTER_HEIGHT = 2;
+```
+
+---
+
+### EDIT: src/tui/footer.tsx
+
+**Old:**
+```
+const THREAD_SHORTCUTS: readonly Shortcut[] = [
+```
+
+**New:**
+```
+export const GLOBAL_SHORTCUTS_BASE: readonly Shortcut[] = [
+    { key: comboKey(KeyCombinations.ALT_H), label: 'Home' },
+    { key: 'Esc', label: 'Back' },
+    { key: 'q', label: 'Quit' },
+    { key: '?', label: 'Help', disabled: true },
+];
+
+const GLOBAL_KEYS = new Set(GLOBAL_SHORTCUTS_BASE.map(s => s.key));
+
+export const HOME_ALWAYS_CONTEXTUAL: readonly Shortcut[] = [
+    { key: 't', label: 'Trash view' },
+    dimShortcut,
+    { key: 'B', label: 'Blocking Map', disabled: true },
+    { key: 'a', label: 'Agent Status', disabled: true },
+    { key: 'g', label: 'Groups', disabled: true },
+    { key: 'n', label: 'New Issue', disabled: true },
+];
+
+export const HOME_ACTION_SHORTCUTS: Record<IssueStatus, readonly Shortcut[]> = {
+    [IssueStatus.Active]:   [{ key: 'd', label: 'Defer' }, { key: 'r', label: 'Resolve' }, { key: 'x', label: 'Move to Trash' }],
+    [IssueStatus.InQueue]:  [{ key: 'd', label: 'Defer' }, { key: 'r', label: 'Resolve' }, { key: 'f', label: 'Force active' }, { key: 'x', label: 'Move to Trash' }],
+    [IssueStatus.Blocked]:  [{ key: 'b', label: 'Show blockers' }, { key: 'x', label: 'Move to Trash' }],
+    [IssueStatus.Deferred]: [{ key: 'e', label: 'Enqueue' }, { key: 'r', label: 'Resolve' }, { key: 'x', label: 'Move to Trash' }],
+    [IssueStatus.Resolved]: [{ key: 'e', label: 'Add comment to re-enqueue' }, { key: 'x', label: 'Move to Trash' }],
+    [IssueStatus.Trashed]:  [],
+    [IssueStatus.Inactive]: [{ key: 'f', label: 'Activate' }, { key: 'e', label: 'Enqueue' }, { key: 'x', label: 'Move to Trash' }],
+};
+
+export function computeGlobalShortcuts(viewType: ViewType, viewStackLength: number): Shortcut[] {
+    const result: Shortcut[] = [];
+    for (let i = 0; i < GLOBAL_SHORTCUTS_BASE.length; i++) {
+        const base = GLOBAL_SHORTCUTS_BASE[i];
+        let disabled = base.disabled ?? false;
+        if (base.key === comboKey(KeyCombinations.ALT_H) && viewType === ViewType.Home) disabled = true;
+        if (base.key === 'Esc' && viewStackLength <= 1) disabled = true;
+        if (base.key === '?') disabled = true;
+        result.push(disabled !== (base.disabled ?? false) ? { key: base.key, label: base.label, disabled } : base);
+    }
+    return result;
+}
+
+export function stripGlobalDuplicates(shortcuts: readonly Shortcut[]): Shortcut[] {
+    const result: Shortcut[] = [];
+    for (let i = 0; i < shortcuts.length; i++) {
+        if (!GLOBAL_KEYS.has(shortcuts[i].key)) {
+            result.push(shortcuts[i]);
+        }
+    }
+    return result;
+}
+
+export function paginateRow(shortcuts: readonly Shortcut[], columns: number): Shortcut[][] {
+    if (shortcuts.length === 0) return [[]];
+    // Check if all fit on one row
+    let totalWidth = 0;
+    for (let i = 0; i < shortcuts.length; i++) {
+        if (i > 0) totalWidth += 2;
+        totalWidth += itemWidth(shortcuts[i]);
+    }
+    if (totalWidth <= columns) return [shortcuts.slice()];
+
+    // Multi-page: reserve space for indicator " (N/M) >" = ~10 chars
+    const indicatorSpace = 10;
+    const usable = Math.max(20, columns - indicatorSpace);
+    const pages: Shortcut[][] = [];
+    let currentPage: Shortcut[] = [];
+    let currentWidth = 0;
+
+    for (let i = 0; i < shortcuts.length; i++) {
+        const w = itemWidth(shortcuts[i]);
+        const needed = currentPage.length > 0 ? 2 + w : w;
+        if (currentWidth + needed > usable && currentPage.length > 0) {
+            pages.push(currentPage);
+            currentPage = [shortcuts[i]];
+            currentWidth = w;
+        } else {
+            currentPage.push(shortcuts[i]);
+            currentWidth += needed;
+        }
+    }
+    if (currentPage.length > 0) pages.push(currentPage);
+    return pages;
+}
+
+const THREAD_SHORTCUTS: readonly Shortcut[] = [
+```
+
+---
+
+### EDIT: src/tui/footer.tsx
+
+**Old:**
+```
+export interface FooterProps extends FooterOptions {
+    readonly viewType: ViewType;
+    readonly threadResolved?: boolean;
+    readonly focusedIndex?: number | null;
+    readonly columns?: number;
+    readonly shortcutOverrides?: readonly Shortcut[];
+}
+```
+
+**New:**
+```
+export interface FooterProps extends FooterOptions {
+    readonly viewType: ViewType;
+    readonly threadResolved?: boolean;
+    readonly focusedIndex?: number | null;
+    readonly columns?: number;
+    readonly shortcutOverrides?: readonly Shortcut[];
+    readonly globalShortcuts?: readonly Shortcut[];
+    readonly contextualShortcuts?: readonly Shortcut[];
+    readonly contextualPage?: number;
+    readonly contextualPageCount?: number;
+}
+```
+
+---
+
+### EDIT: src/tui/footer.tsx
+
+**Old:**
+```
+const FooterComponent: React.FC<FooterProps> = (footerProps: FooterProps) => {
+    const columns = footerProps.columns ?? 80;
+    const options: FooterOptions = {
+        inThread: footerProps.inThread,
+        responseSelected: footerProps.responseSelected,
+        hasReplies: footerProps.hasReplies,
+        isQuoting: footerProps.isQuoting,
+        focusedAction: footerProps.focusedAction,
+        inputFocused: footerProps.inputFocused,
+    };
+    const shortcuts = footerProps.shortcutOverrides ?? getFooterShortcuts(footerProps.viewType, options);
+
+    const focusable = getFocusableShortcuts(footerProps.viewType, options);
+    const rows = computeRows(shortcuts, columns);
+
+    return (
+        <Box flexDirection="column">
+            {rows.map((row, rowIdx) => (
+                <Box key={rowIdx}>
+                    {row.map((s, i) => {
+                        const focusIdx = focusable.indexOf(s);
+                        const isFocused = footerProps.focusedIndex != null && focusIdx !== -1 && focusIdx === footerProps.focusedIndex;
+                        const label = `[${s.key}] ${s.label}`;
+                        const marginRight = i < row.length - 1 ? 2 : 0;
+
+                        const content = isFocused
+                            ? <Text>{[...label].map((ch, ci) => <Text key={ci} inverse bold>{ch}</Text>)}</Text>
+                            : s.disabled
+                            ? <Text dimColor>{label}</Text>
+                            : <Text><Text bold color="cyan">[{s.key}]</Text> {s.label}</Text>;
+
+                        return (
+                            <Box key={i} marginRight={marginRight}>
+                                {content}
+                            </Box>
+                        );
+                    })}
+                </Box>
+            ))}
+        </Box>
+    );
+};
+```
+
+**New:**
+```
+function renderShortcutRow(shortcuts: readonly Shortcut[], focusable: Shortcut[], focusedIndex: number | null | undefined): React.ReactNode {
+    return (
+        <Box>
+            {shortcuts.map((s, i) => {
+                const focusIdx = focusable.indexOf(s);
+                const isFocused = focusedIndex != null && focusIdx !== -1 && focusIdx === focusedIndex;
+                const label = `[${s.key}] ${s.label}`;
+                const marginRight = i < shortcuts.length - 1 ? 2 : 0;
+
+                const content = isFocused
+                    ? <Text>{[...label].map((ch, ci) => <Text key={ci} inverse bold>{ch}</Text>)}</Text>
+                    : s.disabled
+                    ? <Text dimColor>{label}</Text>
+                    : <Text><Text bold color="cyan">[{s.key}]</Text> {s.label}</Text>;
+
+                return (
+                    <Box key={i} marginRight={marginRight}>
+                        {content}
+                    </Box>
+                );
+            })}
+        </Box>
+    );
+}
+
+const FooterComponent: React.FC<FooterProps> = (footerProps: FooterProps) => {
+    const columns = footerProps.columns ?? 80;
+
+    // 2-row mode: globalShortcuts provided
+    if (footerProps.globalShortcuts) {
+        const contextual = footerProps.contextualShortcuts ?? [];
+        const pageCount = footerProps.contextualPageCount ?? 1;
+        const page = footerProps.contextualPage ?? 0;
+
+        return (
+            <Box flexDirection="column">
+                {renderShortcutRow(footerProps.globalShortcuts, [], null)}
+                <Box>
+                    {contextual.length > 0
+                        ? renderShortcutRow(contextual, [], null)
+                        : <Text> </Text>}
+                    {pageCount > 1 && (
+                        <Box marginLeft={2}>
+                            {page > 0
+                                ? <Text bold color="cyan">{'<'}</Text>
+                                : <Text dimColor>{'<'}</Text>}
+                            <Text dimColor> ({page + 1}/{pageCount}) </Text>
+                            {page < pageCount - 1
+                                ? <Text bold color="cyan">{'>'}</Text>
+                                : <Text dimColor>{'>'}</Text>}
+                        </Box>
+                    )}
+                </Box>
+            </Box>
+        );
+    }
+
+    // Legacy mode: single-list rendering (for backward compat during migration)
+    const options: FooterOptions = {
+        inThread: footerProps.inThread,
+        responseSelected: footerProps.responseSelected,
+        hasReplies: footerProps.hasReplies,
+        isQuoting: footerProps.isQuoting,
+        focusedAction: footerProps.focusedAction,
+        inputFocused: footerProps.inputFocused,
+    };
+    const shortcuts = footerProps.shortcutOverrides ?? getFooterShortcuts(footerProps.viewType, options);
+    const focusable = getFocusableShortcuts(footerProps.viewType, options);
+    const rows = computeRows(shortcuts, columns);
+
+    return (
+        <Box flexDirection="column">
+            {rows.map((row, rowIdx) => (
+                <Box key={rowIdx}>
+                    {row.map((s, i) => {
+                        const focusIdx = focusable.indexOf(s);
+                        const isFocused = footerProps.focusedIndex != null && focusIdx !== -1 && focusIdx === footerProps.focusedIndex;
+                        const label = `[${s.key}] ${s.label}`;
+                        const marginRight = i < row.length - 1 ? 2 : 0;
+
+                        const content = isFocused
+                            ? <Text>{[...label].map((ch, ci) => <Text key={ci} inverse bold>{ch}</Text>)}</Text>
+                            : s.disabled
+                            ? <Text dimColor>{label}</Text>
+                            : <Text><Text bold color="cyan">[{s.key}]</Text> {s.label}</Text>;
+
+                        return (
+                            <Box key={i} marginRight={marginRight}>
+                                {content}
+                            </Box>
+                        );
+                    })}
+                </Box>
+            ))}
+        </Box>
+    );
+};
+```
+
+---
+
+### EDIT: src/tui/footer.tsx
+
+**Old:**
+```
+    [ViewType.Trash]: [
+        { key: 'r', label: 'Restore' },
+        { key: 'd', label: 'Delete' },
+        { key: 'e', label: 'Empty trash' },
+        { key: comboKey(KeyCombinations.SCROLL_UP_DOWN), label: 'Navigate' },
+        { key: 'Esc', label: 'Back' },
+        { key: 'q', label: 'Quit' },
+    ],
+};
+```
+
+**New:**
+```
+    [ViewType.Trash]: [
+        { key: 'r', label: 'Restore' },
+        { key: 'd', label: 'Delete' },
+        { key: 'e', label: 'Empty trash' },
+        { key: comboKey(KeyCombinations.SCROLL_UP_DOWN), label: 'Navigate' },
+        { key: 'Esc', label: 'Back' },
+        { key: 'q', label: 'Quit' },
+    ],
+    [ViewType.ConfirmModal]: [],
+};
+```
+
+---
+
+### WRITE: src/tui/app-shell.tsx
+
+```typescript
+import React, { useState, useCallback } from 'react';
+import { Box, useInput } from 'ink';
+import { type View, type TerminalProps, type LayoutProps, isModalView } from './views.js';
+import { Header, HEADER_LINES } from './header.js';
+import { Footer, FOOTER_HEIGHT, computeGlobalShortcuts, stripGlobalDuplicates, paginateRow, getFooterShortcuts } from './footer.js';
+import type { FooterOptions, Shortcut } from './footer.js';
+
+export interface AppShellProps {
+    columns: number;
+    rows: number;
+    currentView: View;
+    viewStackLength: number;
+    activeAgents?: number;
+    maxAgents?: number;
+    unreadCount?: number;
+    threadInfo?: { inThread: boolean };
+    children: (
+        setFooterOptions: (opts: FooterOptions) => void,
+        setFooterShortcuts: (shortcuts: readonly Shortcut[]) => void,
+        terminal: TerminalProps,
+        layout: LayoutProps,
+        setHeaderSubtitleOverride: (s: string | undefined) => void,
+    ) => React.ReactNode;
+}
+
+export const AppShell: React.FC<AppShellProps> = (props: AppShellProps) => {
+    const [footerOptions, setFooterOptions] = useState<FooterOptions>({});
+    const [footerShortcuts, setFooterShortcuts] = useState<readonly Shortcut[] | undefined>(undefined);
+    const [headerSubtitleOverride, setHeaderSubtitleOverride] = useState<string | undefined>(undefined);
+    const [contextualPage, setContextualPage] = useState(0);
+
+    const wrappedSetFooterShortcuts = useCallback((shortcuts: readonly Shortcut[]) => {
+        setFooterShortcuts(shortcuts);
+        setContextualPage(0);
+    }, []);
+
+    const viewType = props.currentView.type;
+    const currentViewIsModal = isModalView(props.currentView);
+
+    // Global shortcuts with disabled state based on view/stack
+    const globals = computeGlobalShortcuts(viewType, props.viewStackLength);
+
+    // Contextual shortcuts: strip global duplicates, paginate
+    const rawContextual = footerShortcuts ?? getFooterShortcuts(viewType, footerOptions);
+    const contextual = stripGlobalDuplicates(rawContextual);
+    const pages = paginateRow(contextual, props.columns);
+    const pageCount = pages.length;
+    const clampedPage = Math.min(contextualPage, Math.max(0, pageCount - 1));
+    const currentPageShortcuts = pages[clampedPage] ?? [];
+
+    // Pagination input: > and < keys
+    useInput((input) => {
+        if (currentViewIsModal) return;
+        if (pageCount <= 1) return;
+        if (input === '>' && clampedPage < pageCount - 1) {
+            setContextualPage(clampedPage + 1);
+        } else if (input === '<' && clampedPage > 0) {
+            setContextualPage(clampedPage - 1);
+        }
+    });
+
+    // Modal view: hide header and footer, full terminal height for content
+    if (currentViewIsModal) {
+        return (
+            <Box flexDirection="column" height={props.rows}>
+                {props.children(
+                    setFooterOptions,
+                    wrappedSetFooterShortcuts,
+                    { columns: props.columns, rows: props.rows },
+                    { headerLines: 0, footerLines: 0 },
+                    setHeaderSubtitleOverride,
+                )}
+            </Box>
+        );
+    }
+
+    const contentHeight = Math.max(0, props.rows - HEADER_LINES - FOOTER_HEIGHT);
+
+    return (
+        <Box flexDirection="column" height={props.rows}>
+            <Header
+                currentView={props.currentView}
+                columns={props.columns}
+                activeAgents={props.activeAgents}
+                maxAgents={props.maxAgents}
+                unreadCount={props.unreadCount}
+                threadInfo={props.threadInfo}
+                subtitleOverride={headerSubtitleOverride}
+            />
+            <Box flexDirection="column" height={contentHeight} flexGrow={1}>
+                {props.children(
+                    setFooterOptions,
+                    wrappedSetFooterShortcuts,
+                    { columns: props.columns, rows: props.rows },
+                    { headerLines: HEADER_LINES, footerLines: FOOTER_HEIGHT },
+                    setHeaderSubtitleOverride,
+                )}
+            </Box>
+            <Footer
+                viewType={viewType}
+                globalShortcuts={globals}
+                contextualShortcuts={currentPageShortcuts}
+                contextualPage={clampedPage}
+                contextualPageCount={pageCount}
+                columns={props.columns}
+            />
+        </Box>
+    );
+};
+
+```
+
+---
+
+### EDIT: src/tui/app-shell.test.tsx
+
+**Old:**
+```
+<AppShell columns={cols} rows={rows} currentView={homeView}>
+```
+
+**New:**
+```
+<AppShell columns={cols} rows={rows} currentView={homeView} viewStackLength={1}>
+```
+
+---
+
+### EDIT: src/tui/app-shell.test.tsx
+
+**Old:**
+```
+<AppShell columns={cols} rows={testRows} currentView={homeView}>
+```
+
+**New:**
+```
+<AppShell columns={cols} rows={testRows} currentView={homeView} viewStackLength={1}>
+```
+
+---
+
+### EDIT: src/tui/app-shell.test.tsx
+
+**Old:**
+```
+<AppShell columns={testCols} rows={testRows} currentView={homeView}>
+```
+
+**New:**
+```
+<AppShell columns={testCols} rows={testRows} currentView={homeView} viewStackLength={1}>
+```
+
+---
+
+### EDIT: src/tui/app-shell.test.tsx
+
+**Old:**
+```
+<AppShell columns={80} rows={24} currentView={homeView}>
+```
+
+**New:**
+```
+<AppShell columns={80} rows={24} currentView={homeView} viewStackLength={1}>
+```
+
+---
+
+### EDIT: src/tui/app-shell.test.tsx
+
+**Old:**
+```
+<AppShell columns={120} rows={30} currentView={homeView}>
+```
+
+**New:**
+```
+<AppShell columns={120} rows={30} currentView={homeView} viewStackLength={1}>
+```
+
+---
+
+### EDIT: src/tui/app-shell.test.tsx
+
+**Old:**
+```
+                currentView={{ type: ViewType.Detail, inum: 1 }}
+            >
+```
+
+**New:**
+```
+                currentView={{ type: ViewType.Detail, inum: 1 }}
+                viewStackLength={2}
+            >
+```
+
+---
+
+### EDIT: src/tui/app-shell.test.tsx
+
+**Old:**
+```
+import { computeFooterLines, getFooterShortcuts } from './footer.js';
+import type { FooterOptions } from './footer.js';
+```
+
+**New:**
+```
+import { FOOTER_HEIGHT, computeFooterLines, getFooterShortcuts } from './footer.js';
+import type { FooterOptions } from './footer.js';
+```
+
+---
+
+### EDIT: src/tui/app-shell.test.tsx
+
+**Old:**
+```
+        const testCols = 200;
+        const testRows = 12;
+        const footerLines = computeFooterLines(
+            getFooterShortcuts(ViewType.Home),
+            testCols,
+        );
+        const expectedContentHeight = testRows - HEADER_LINES - footerLines;
+```
+
+**New:**
+```
+        const testCols = 200;
+        const testRows = 12;
+        const expectedContentHeight = testRows - HEADER_LINES - FOOTER_HEIGHT;
+```
+
+---
+
+### EDIT: src/tui/app-shell.test.tsx
+
+**Old:**
+```
+        expect(expectedContentHeight).toBe(testRows - HEADER_LINES - footerLines);
+```
+
+**New:**
+```
+        expect(expectedContentHeight).toBe(testRows - HEADER_LINES - FOOTER_HEIGHT);
+```
+
+---
+
+### EDIT: src/tui/run.tsx
+
+**Old:**
+```
+        <AppShell
+            columns={dims.columns}
+            rows={dims.rows}
+            currentView={currentView}
+            maxAgents={mockStoreWithUpdater.mockDataStore.maxAgents}
+            unreadCount={mockStoreWithUpdater.mockDataStore.unreadInums.size}
+            threadInfo={threadInfo}
+        >
+```
+
+**New:**
+```
+        <AppShell
+            columns={dims.columns}
+            rows={dims.rows}
+            currentView={currentView}
+            viewStackLength={viewStack.length}
+            maxAgents={mockStoreWithUpdater.mockDataStore.maxAgents}
+            unreadCount={mockStoreWithUpdater.mockDataStore.unreadInums.size}
+            threadInfo={threadInfo}
+        >
+```
+
+---
+
+### EDIT: src/tui/run.tsx
+
+**Old:**
+```
+        if (currentView.type === ViewType.IssuePicker) {
+            return <Text>Issue Picker (placeholder) — press Esc to go back</Text>;
+        }
+
+        return null;
+    };
+```
+
+**New:**
+```
+        if (currentView.type === ViewType.IssuePicker) {
+            return <Text>Issue Picker (placeholder) — press Esc to go back</Text>;
+        }
+
+        if (currentView.type === ViewType.ConfirmModal) {
+            return (
+                <ConfirmModal
+                    view={currentView}
+                    columns={dims.columns}
+                    rows={dims.rows}
+                />
+            );
+        }
+
+        return null;
+    };
+```
+
+---
+
+### EDIT: src/tui/run.tsx
+
+**Old:**
+```
+const [
+    { default: React, useState, useEffect, useCallback },
+    { render, useStdout, useInput, useApp, Text },
+    { AppShell },
+    { ViewType },
+    { HomeView },
+    { TrashView },
+    { useMockStore },
+    { DetailView },
+    { handleGlobalKey },
+] = await Promise.all([
+    import('react'),
+    import('ink'),
+    import('./app-shell.js'),
+    import('./views.js'),
+    import('./home-view.js'),
+    import('./trash-view.js'),
+    import('./use-mock-store.js'),
+    import('./detail.js'),
+    import('./global-keys.js'),
+]);
+```
+
+**New:**
+```
+const [
+    { default: React, useState, useEffect, useCallback },
+    { render, useStdout, useInput, useApp, Text },
+    { AppShell },
+    { ViewType },
+    { HomeView },
+    { TrashView },
+    { useMockStore },
+    { DetailView },
+    { handleGlobalKey },
+    { ConfirmModal },
+] = await Promise.all([
+    import('react'),
+    import('ink'),
+    import('./app-shell.js'),
+    import('./views.js'),
+    import('./home-view.js'),
+    import('./trash-view.js'),
+    import('./use-mock-store.js'),
+    import('./detail.js'),
+    import('./global-keys.js'),
+    import('./confirm-modal.js'),
+]);
+```
+
+---
+
+### EDIT: src/tui/run.tsx
+
+**Old:**
+```
+        if (currentView.type === ViewType.Detail || currentView.type === ViewType.Trash) return;
+```
+
+**New:**
+```
+        if (currentView.type === ViewType.Detail || currentView.type === ViewType.Trash || currentView.type === ViewType.ConfirmModal) return;
+```
+
+---
+
+### EDIT: src/tui/run.tsx
+
+**Old:**
+```
+                <HomeView
+                    issues={mockStoreWithUpdater.mockDataStore.issues.filter(i => i.status !== IssueStatus.Trashed)}
+                    unreadInums={mockStoreWithUpdater.mockDataStore.unreadInums}
+                    maxAgents={mockStoreWithUpdater.mockDataStore.maxAgents}
+                    terminalProps={terminal}
+                    layoutProps={layout}
+                    setFooterShortcuts={setFooterShortcuts}
+                    setHeaderSubtitleOverride={setHeaderSubtitleOverride}
+                    onStatusHotkeyPressed={mockStoreWithUpdater.updateIssueStatusCallback}
+                    onTrashIssue={mockStoreWithUpdater.trashIssueCallback}
+                    onSelect={(inum) => navigateToView({ type: ViewType.Detail, inum })}
+                />
+```
+
+**New:**
+```
+                <HomeView
+                    issues={mockStoreWithUpdater.mockDataStore.issues.filter(i => i.status !== IssueStatus.Trashed)}
+                    unreadInums={mockStoreWithUpdater.mockDataStore.unreadInums}
+                    maxAgents={mockStoreWithUpdater.mockDataStore.maxAgents}
+                    terminalProps={terminal}
+                    layoutProps={layout}
+                    setFooterShortcuts={setFooterShortcuts}
+                    setHeaderSubtitleOverride={setHeaderSubtitleOverride}
+                    onStatusHotkeyPressed={mockStoreWithUpdater.updateIssueStatusCallback}
+                    onTrashIssue={mockStoreWithUpdater.trashIssueCallback}
+                    onSelect={(inum) => navigateToView({ type: ViewType.Detail, inum })}
+                    onNavigate={navigateToView}
+                    onBack={goBack}
+                />
+```
+
+---
+
+### EDIT: src/tui/run.tsx
+
+**Old:**
+```
+                <TrashView
+                    issues={trashedIssues}
+                    terminalProps={terminal}
+                    layoutProps={layout}
+                    setFooterShortcuts={setFooterShortcuts}
+                    setHeaderSubtitleOverride={setHeaderSubtitleOverride}
+                    onRestoreIssue={mockStoreWithUpdater.restoreIssueCallback}
+                    onPermanentDelete={mockStoreWithUpdater.permanentDeleteCallback}
+                    onEmptyTrash={mockStoreWithUpdater.emptyTrashCallback}
+                    onBack={goBack}
+                />
+```
+
+**New:**
+```
+                <TrashView
+                    issues={trashedIssues}
+                    terminalProps={terminal}
+                    layoutProps={layout}
+                    setFooterShortcuts={setFooterShortcuts}
+                    setHeaderSubtitleOverride={setHeaderSubtitleOverride}
+                    onRestoreIssue={mockStoreWithUpdater.restoreIssueCallback}
+                    onPermanentDelete={mockStoreWithUpdater.permanentDeleteCallback}
+                    onEmptyTrash={mockStoreWithUpdater.emptyTrashCallback}
+                    onBack={goBack}
+                    onNavigate={navigateToView}
+                />
+```
+
+---
+
+### EDIT: src/tui/header.tsx
+
+**Old:**
+```
+        case ViewType.Trash:
+            return 'Trashed issues pending deletion';
+        default:
+            return assertNever(view);
+```
+
+**New:**
+```
+        case ViewType.Trash:
+            return 'Trashed issues pending deletion';
+        case ViewType.ConfirmModal:
+            return '';
+        default:
+            return assertNever(view);
+```
+
+---
+
+### EDIT: src/tui/home-view.tsx
+
+**Old:**
+```
+export interface HomeViewProps {
+    issues: Issue[];
+    unreadInums: Set<number>;
+    maxAgents: number;
+    terminalProps: TerminalProps;
+    layoutProps: LayoutProps;
+    onStatusHotkeyPressed?: (changedStatusProps: ChangedStatusProps) => void;
+    setFooterShortcuts?: (shortcuts: readonly Shortcut[]) => void;
+    onTrashIssue?: (inum: number) => void;
+    onSelect?: (inum: number) => void;
+    setHeaderSubtitleOverride?: (s: string | undefined) => void;
+}
+```
+
+**New:**
+```
+export interface HomeViewProps {
+    issues: Issue[];
+    unreadInums: Set<number>;
+    maxAgents: number;
+    terminalProps: TerminalProps;
+    layoutProps: LayoutProps;
+    onStatusHotkeyPressed?: (changedStatusProps: ChangedStatusProps) => void;
+    setFooterShortcuts?: (shortcuts: readonly Shortcut[]) => void;
+    onTrashIssue?: (inum: number) => void;
+    onSelect?: (inum: number) => void;
+    setHeaderSubtitleOverride?: (s: string | undefined) => void;
+    onNavigate?: (view: View) => void;
+    onBack?: () => void;
+}
+```
+
+---
+
+### EDIT: src/tui/home-view.tsx
+
+**Old:**
+```
+import type { TerminalProps, LayoutProps } from './views.js';
+```
+
+**New:**
+```
+import type { View, TerminalProps, LayoutProps } from './views.js';
+import { ViewType } from './views.js';
+```
+
+---
+
+### EDIT: src/tui/trash-view.tsx
+
+**Old:**
+```
+    onBack?: () => void;
+}
+
+export const TrashView
+```
+
+**New:**
+```
+    onBack?: () => void;
+    onNavigate?: (view: View) => void;
+}
+
+export const TrashView
+```
+
+---
+
+### EDIT: src/tui/trash-view.tsx
+
+**Old:**
+```
+import type { TerminalProps, LayoutProps } from './views.js';
+```
+
+**New:**
+```
+import type { View, TerminalProps, LayoutProps } from './views.js';
+```
+
+---
+
+### EDIT: src/tui/trash-view.tsx
+
+**Old:**
+```
+    onBack?: () => void;
+}
+
+export const TrashView
+```
+
+**New:**
+```
+    onBack?: () => void;
+    onNavigate?: (view: View) => void;
+}
+
+export const TrashView
+```
+
+---
+
+### EDIT: src/tui/home-view.tsx
+
+**Old:**
+```
+import type { Shortcut } from './footer.js';
+import { STATUS_SHORTCUTS, CONFIRM_TRASH_SHORTCUTS } from './footer.js';
+```
+
+**New:**
+```
+import type { Shortcut } from './footer.js';
+import { HOME_ACTION_SHORTCUTS, HOME_ALWAYS_CONTEXTUAL } from './footer.js';
+```
+
+---
+
+### EDIT: src/tui/home-view.tsx
+
+**Old:**
+```
+    const [confirmTrashInum, setConfirmTrashInum] = useState<number | null>(null);
+    const [dimUnrelated, setDimUnrelated] = useState(false);
+```
+
+**New:**
+```
+    const [dimUnrelated, setDimUnrelated] = useState(false);
+```
+
+---
+
+### EDIT: src/tui/home-view.tsx
+
+**Old:**
+```
+    useEffect(() => {
+        if (!homeViewProps.setFooterShortcuts) return;
+        if (confirmTrashInum !== null) {
+            homeViewProps.setFooterShortcuts(CONFIRM_TRASH_SHORTCUTS);
+        } else if (selectedIssueStatus !== undefined) {
+            homeViewProps.setFooterShortcuts(STATUS_SHORTCUTS[selectedIssueStatus]);
+        }
+    }, [selectedIssueStatus, confirmTrashInum]);
+```
+
+**New:**
+```
+    useEffect(() => {
+        if (!homeViewProps.setFooterShortcuts) return;
+        if (selectedIssueStatus !== undefined) {
+            const combined = [...HOME_ACTION_SHORTCUTS[selectedIssueStatus], ...HOME_ALWAYS_CONTEXTUAL];
+            homeViewProps.setFooterShortcuts(combined);
+        }
+    }, [selectedIssueStatus]);
+```
+
+---
+
+### EDIT: src/tui/home-view.tsx
+
+**Old:**
+```
+    useEffect(() => {
+        if (!homeViewProps.setHeaderSubtitleOverride) return;
+        homeViewProps.setHeaderSubtitleOverride(
+            confirmTrashInum !== null
+                ? "Confirm delete with 'x', Esc to cancel"
+                : "Info: (*) unread, (i) needs input"
+        );
+        return () => homeViewProps.setHeaderSubtitleOverride?.(undefined);
+    }, [confirmTrashInum]);
+```
+
+**New:**
+```
+    useEffect(() => {
+        if (!homeViewProps.setHeaderSubtitleOverride) return;
+        homeViewProps.setHeaderSubtitleOverride("Info: (*) unread, (i) needs input");
+        return () => homeViewProps.setHeaderSubtitleOverride?.(undefined);
+    }, []);
+```
+
+---
+
+### EDIT: src/tui/home-view.tsx
+
+**Old:**
+```
+    useInput((input, key) => {
+        // process.stderr.write(`input=${JSON.stringify(input)} key=${JSON.stringify(key)}\n`); 
+        // Confirmation state machine for trash
+        if (confirmTrashInum !== null) {
+            if (input === 'x') {
+                homeViewProps.onTrashIssue?.(confirmTrashInum);
+                setConfirmTrashInum(null);
+            } else if (key.escape) {
+                setConfirmTrashInum(null);
+            }
+            return;
+        }
+        if (input === 'x' && homeViewProps.issues.length > 0) {
+            const idx = Math.min(cursorRef.current, Math.max(0, homeViewProps.issues.length - 1));
+            setConfirmTrashInum(homeViewProps.issues[idx].inum);
+            return;
+        }
+```
+
+**New:**
+```
+    useInput((input, key) => {
+        // process.stderr.write(`input=${JSON.stringify(input)} key=${JSON.stringify(key)}\n`);
+        if (input === 'x' && homeViewProps.issues.length > 0 && homeViewProps.onNavigate && homeViewProps.onBack) {
+            const idx = Math.min(cursorRef.current, Math.max(0, homeViewProps.issues.length - 1));
+            const issue = homeViewProps.issues[idx];
+            const trashCb = homeViewProps.onTrashIssue;
+            const backCb = homeViewProps.onBack;
+            homeViewProps.onNavigate({
+                type: ViewType.ConfirmModal,
+                message: `I-${issue.inum} ${issue.title}\nConfirm trash?`,
+                hotKeys: [
+                    { key: 'x', label: 'Yes', handler: () => { trashCb?.(issue.inum); backCb(); } },
+                    { key: 'Esc', label: 'Cancel', handler: () => { backCb(); } },
+                ],
+            });
+            return;
+        }
+```
+
+---
+
+### EDIT: src/tui/home-view.tsx
+
+**Old:**
+```
+                const isConfirmTarget = confirmTrashInum === issue.inum;
+                const unread = homeViewProps.unreadInums.has(issue.inum);
+```
+
+**New:**
+```
+                const unread = homeViewProps.unreadInums.has(issue.inum);
+```
+
+---
+
+### EDIT: src/tui/home-view.tsx
+
+**Old:**
+```
+                const flashColor = isConfirmTarget ? 'red' : undefined;
+                const statusLabel = IssueStatusStringsMap.get(issue.status) ?? '';
+                const statusColor = isConfirmTarget ? 'red' : statusToColor(issue.status);
+```
+
+**New:**
+```
+                const flashColor = undefined;
+                const statusLabel = IssueStatusStringsMap.get(issue.status) ?? '';
+                const statusColor = statusToColor(issue.status);
+```
+
+---
+
+### EDIT: src/tui/trash-view.tsx
+
+**Old:**
+```
+    const [confirmDeleteInum, setConfirmDeleteInum] = useState<number | null>(null);
+    const [emptyTrashTyped, setEmptyTrashTyped] = useState<string | null>(null);
+    const confirmEmptyTrash = emptyTrashTyped !== null;
+```
+
+**New:**
+```
+    const [emptyTrashTyped, setEmptyTrashTyped] = useState<string | null>(null);
+    const confirmEmptyTrash = emptyTrashTyped !== null;
+```
+
+---
+
+### EDIT: src/tui/trash-view.tsx
+
+**Old:**
+```
+    // Footer shortcuts effect
+    useEffect(() => {
+        if (!props.setFooterShortcuts) return;
+        const shortcuts = (() => {
+            if (confirmDeleteInum !== null || confirmEmptyTrash)
+                return [];
+            return VIEW_SHORTCUTS[ViewType.Trash].filter(
+                s => props.issues.length > 0 || s.key === 'Esc' || s.key === 'q'
+            );
+        })();
+        props.setFooterShortcuts(shortcuts);
+    }, [confirmDeleteInum, confirmEmptyTrash, props.issues.length]);
+
+    // Header subtitle override effect — modal handles prompts now
+    useEffect(() => {
+        props.setHeaderSubtitleOverride?.(undefined);
+    }, [confirmDeleteInum, confirmEmptyTrash]);
+```
+
+**New:**
+```
+    // Footer shortcuts effect
+    useEffect(() => {
+        if (!props.setFooterShortcuts) return;
+        const shortcuts = (() => {
+            if (confirmEmptyTrash) return [];
+            return VIEW_SHORTCUTS[ViewType.Trash].filter(
+                s => props.issues.length > 0 || s.key === 'Esc' || s.key === 'q'
+            );
+        })();
+        props.setFooterShortcuts(shortcuts);
+    }, [confirmEmptyTrash, props.issues.length]);
+```
+
+---
+
+### EDIT: src/tui/trash-view.tsx
+
+**Old:**
+```
+    useInput((input, key) => {
+        // Delete confirmation state machine
+        if (confirmDeleteInum !== null) {
+            if (input === 'd') {
+                props.onPermanentDelete?.(confirmDeleteInum);
+                setConfirmDeleteInum(null);
+            } else if (key.escape) {
+                setConfirmDeleteInum(null);
+            }
+            return;
+        }
+
+        // Empty trash confirmation state machine
+```
+
+**New:**
+```
+    useInput((input, key) => {
+        // Empty trash confirmation state machine
+```
+
+---
+
+### EDIT: src/tui/trash-view.tsx
+
+**Old:**
+```
+        } else if (input === 'd' && props.issues.length > 0) {
+            const idx = Math.min(cursorRef.current, Math.max(0, props.issues.length - 1));
+            setConfirmDeleteInum(props.issues[idx].inum);
+```
+
+**New:**
+```
+        } else if (input === 'd' && props.issues.length > 0 && props.onNavigate && props.onBack) {
+            const idx = Math.min(cursorRef.current, Math.max(0, props.issues.length - 1));
+            const issue = props.issues[idx];
+            const deleteCb = props.onPermanentDelete;
+            const backCb = props.onBack;
+            props.onNavigate({
+                type: ViewType.ConfirmModal,
+                message: `I-${issue.inum} ${issue.title}\nPermanently delete?`,
+                hotKeys: [
+                    { key: 'd', label: 'Delete', handler: () => { deleteCb?.(issue.inum); backCb(); } },
+                    { key: 'Esc', label: 'Cancel', handler: () => { backCb(); } },
+                ],
+            });
+```
+
+---
+
+### EDIT: src/tui/trash-view.tsx
+
+**Old:**
+```
+    if (confirmDeleteInum !== null) {
+        return (
+            <Box flexDirection="column">
+                <ConfirmModal
+                    prompt={`Really delete I-${confirmDeleteInum}?`}
+                    shortcuts={CONFIRM_DELETE_SHORTCUTS}
+                    columns={props.terminalProps.columns}
+                    rows={contentRows}
+                />
+            </Box>
+        );
+    }
+    if (emptyTrashTyped !== null) {
+```
+
+**New:**
+```
+    if (emptyTrashTyped !== null) {
+```
+
+---
+
+### EDIT: src/tui/trash-view.tsx
+
+**Old:**
+```
+import { VIEW_SHORTCUTS, CONFIRM_DELETE_SHORTCUTS } from './footer.js';
+```
+
+**New:**
+```
+import { VIEW_SHORTCUTS } from './footer.js';
+```
+
+---
+
+### EDIT: src/tui/trash-view.tsx
+
+**Old:**
+```
+interface ConfirmModalProps {
+    prompt: string;
+    shortcuts: readonly Shortcut[];
+    columns: number;
+    rows: number;
+}
+
+function ConfirmModal(props: ConfirmModalProps): React.ReactElement {
+    return (
+        <Box justifyContent="center" alignItems="center" width={props.columns} height={props.rows}>
+            <Box flexDirection="column" alignItems="center" borderStyle="single" paddingLeft={1} paddingRight={1}>
+                <Text> </Text>
+                <Text bold color='red'>  {props.prompt}  </Text>
+                <Text> </Text>
+                <Box gap={2} justifyContent="center">
+                    {props.shortcuts.map(s => (
+                        <Text key={s.key}>
+                            <Text>[</Text>
+                            <Text color="cyan" bold>{s.key}</Text>
+                            <Text>] {s.label}</Text>
+                        </Text>
+                    ))}
+                </Box>
+                <Text> </Text>
+            </Box>
+        </Box>
+    );
+}
+
+interface TypeToConfirmModalProps {
+```
+
+**New:**
+```
+interface TypeToConfirmModalProps {
+```
+
+---
+
+## From session: 127572aa-b1cc-411e-a4f3-60a211d99e6f.jsonl
+
+### WRITE: /Users/matkatmusicllc/.claude/plans/concurrent-pondering-sedgewick.md
+
+```typescript
+# Fix Footer Jumps in Home View
+
+## Context
+
+When scrolling through issues in the home view, the Global Footer shortcuts change based on the selected issue's status. Different statuses have different shortcut sets with different total widths (50-111 chars). When the footer wraps to a different number of lines, `contentHeight` changes, causing the entire layout to reflow and the screen to jump.
+
+Two bugs:
+1. **Dynamic footer height causes jumps**: Footer line count changes per-status, contentHeight recalculates, layout reflows
+2. **computeFooterLines is inaccurate**: Uses `Math.ceil(totalWidth / columns)` but actual rendering uses greedy bin-packing via `computeRows()`. These can disagree (e.g. estimate says 1 line, actual renders 2).
+
+## Fix
+
+### 1. Fix `computeFooterLines` accuracy (`src/tui/footer.tsx:148-155`)
+
+Replace the approximation with the actual bin-packing result:
+```typescript
+export function computeFooterLines(shortcuts: readonly Shortcut[], columns: number): number {
+    return Math.max(1, computeRows(shortcuts, columns).length);
+}
+```
+
+### 2. Add `computeMaxHomeFooterLines` (`src/tui/footer.tsx`, new export after line 155)
+
+Iterates all `STATUS_SHORTCUTS` + `CONFIRM_TRASH_SHORTCUTS`, returns the max line count for a given column width. This gives the stable height to reserve.
+
+### 3. Add `minLines` prop to Footer (`src/tui/footer.tsx:181-224`)
+
+Add optional `minLines?: number` to `FooterProps`. After rendering shortcut rows, pad with empty `<Box height={1} />` elements up to `minLines`. This ensures the Footer always occupies exactly the reserved height, preventing `flexGrow={1}` on the content Box from reclaiming slack space.
+
+### 4. Use stable footer height in AppShell for Home view (`src/tui/app-shell.tsx`)
+
+- Import `computeMaxHomeFooterLines` and `ViewType`
+- When `viewType === ViewType.Home`: use `computeMaxHomeFooterLines(columns)` for `footerLines` and pass it as `minLines` to Footer
+- Other views: unchanged behavior
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/tui/footer.tsx` | Fix computeFooterLines, add computeMaxHomeFooterLines, add minLines prop |
+| `src/tui/app-shell.tsx` | Import new function + ViewType, use max footer lines for Home view |
+| `src/tui/app-shell.test.tsx` | Update test 3 to use computeMaxHomeFooterLines for Home view expected height |
+| `src/tui/footer.test.tsx` | Add tests for computeMaxHomeFooterLines, update computeFooterLines tests if needed |
+
+## Verification
+
+1. `npx vitest run src/tui/footer.test.tsx src/tui/app-shell.test.tsx` -- all tests pass
+2. Run the TUI, scroll through issues with different statuses at ~80 columns. Footer content changes but the screen should NOT jump. The content area height stays constant.
+3. Resize terminal width -- layout should reflow once on resize (acceptable), then stay stable during scrolling again.
+
+```
+
+---
+
+### WRITE: /Users/matkatmusicllc/.claude/plans/concurrent-pondering-sedgewick.md
+
+```typescript
+# Fix Footer Jumps in Home View
+
+## Context
+
+Scrolling through issues in home view changes the Global Footer shortcuts per-status. Different statuses have different shortcut widths (50-111 chars), causing different footer line counts at many terminal widths.
+
+## Confirmed Evidence
+
+Capture-pane analysis at 70x32 pane:
+- All non-Trashed statuses produce 2 footer lines at 70 cols (no height jump at this width)
+- But computed row counts at other widths show clear mismatches:
+  - 90 cols: Blocked=1 line, InQueue=2 lines
+  - 95 cols: Active/Blocked/Deferred=1, InQueue/Resolved/Inactive=2
+  - 100 cols: InQueue=2, all others=1
+- Double-render confirmed: "Defer" rendered 4x vs "Force active" 1x for 2 keystrokes. The useEffect footer update lags the cursor move by 1 frame.
+
+## Three Bugs
+
+1. **Dynamic footer height causes jumps**: Footer line count varies per-status. contentHeight recalculates, layout reflows.
+2. **computeFooterLines is inaccurate**: Uses `Math.ceil(totalWidth / columns)` but rendering uses greedy bin-packing via `computeRows()`. These can disagree.
+3. **Double-render from useEffect**: `home-view.tsx:308-315` updates footer via useEffect (fires AFTER render), causing cursor to move one frame before footer updates. At widths where line counts differ, this creates a visible intermediate state with wrong layout height.
+
+## Fix
+
+### 1. Fix computeFooterLines accuracy (footer.tsx:148-155)
+
+Replace approximation with bin-packing result:
+```typescript
+export function computeFooterLines(shortcuts: readonly Shortcut[], columns: number): number {
+    return Math.max(1, computeRows(shortcuts, columns).length);
+}
+```
+
+### 2. Add computeMaxHomeFooterLines (footer.tsx, new export)
+
+Iterate all STATUS_SHORTCUTS + CONFIRM_TRASH_SHORTCUTS, return max line count for given column width. Gives stable height to reserve.
+
+### 3. Add minLines prop to Footer (footer.tsx:181-224)
+
+Optional `minLines?: number` on FooterProps. Pad with empty `<Box height={1} />` elements to fill reserved space. Prevents `flexGrow={1}` on content Box from reclaiming slack when actual footer is shorter than reserved height.
+
+### 4. Use stable footer height in AppShell for Home view (app-shell.tsx)
+
+- Import computeMaxHomeFooterLines and ViewType
+- When `viewType === ViewType.Home`: use computeMaxHomeFooterLines(columns) for footerLines, pass as minLines to Footer
+- Other views: unchanged
+
+### 5. Eliminate double-render (home-view.tsx:308-315, 354-436)
+
+Move `setFooterShortcuts` call from the useEffect into the input handlers directly (alongside setCursor). React 18 batches state updates in the same event handler, so cursor + footer update in a single render cycle. Remove the useEffect dependency on `selectedIssueStatus`.
+
+Keep the `confirmTrashInum` useEffect for trash confirmation (that transition is intentionally modal, not cursor-driven).
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/tui/footer.tsx` | Fix computeFooterLines, add computeMaxHomeFooterLines, add minLines prop |
+| `src/tui/app-shell.tsx` | Import new function + ViewType, use max footer lines for Home view, pass minLines |
+| `src/tui/home-view.tsx` | Move setFooterShortcuts from useEffect to input handlers |
+| `src/tui/app-shell.test.tsx` | Update test 3 expected height for Home view |
+| `src/tui/footer.test.tsx` | Add computeMaxHomeFooterLines tests |
+
+## Verification
+
+1. `npx vitest run src/tui/footer.test.tsx src/tui/app-shell.test.tsx src/tui/home-view.test.tsx`
+2. Run TUI at ~95 columns. Scroll Active->InQueue->Blocked->Deferred->Resolved. Footer content changes but screen must NOT jump. Content height stays constant.
+3. Confirm with capture-pane: footer line position (line number in pane) stays fixed during scrolling.
+4. Resize terminal -- layout reflows once (acceptable), then stays stable during further scrolling.
+
+```
+
+---
+
+### WRITE: /Users/matkatmusicllc/.claude/plans/concurrent-pondering-sedgewick.md
+
+```typescript
+# Fix Footer Jumps in Home View
+
+## Context
+
+Scrolling through issues changes footer shortcuts per-status (50-111 chars total). At many terminal widths, different statuses produce different footer line counts, causing contentHeight to change and the layout to jump. Additionally, useEffect-based footer updates lag the cursor by one frame.
+
+## Root Cause (confirmed via capture-pane)
+
+- Footer line count varies per-status at most terminal widths (e.g. at 95 cols: Active=1 line, InQueue=2 lines)
+- useEffect double-render: cursor moves one frame before footer updates (confirmed: "Defer" rendered 4x vs "Force active" 1x for 2 keystrokes)
+- computeFooterLines uses inaccurate estimate vs actual greedy bin-packing
+
+## Fix: Split Global vs Per-Status Shortcuts Into Fixed Rows
+
+Restructure the home view footer into 2 explicit rows:
+
+Row 1 (per-status): changes based on selected issue's status
+Row 2 (global): always [t] Trash view, [D] Dim unrelated issues, [q] Quit
+
+Width analysis confirms both rows always fit on 1 line at 60+ columns:
+- Per-status max width: 59 chars (InQueue: d, r, f, x)
+- Global row width: 50 chars (t, D, q)
+
+### Step 1: Restructure STATUS_SHORTCUTS (footer.tsx)
+
+Split current STATUS_SHORTCUTS into:
+- HOME_GLOBAL_SHORTCUTS: [t, D, q] -- constant array
+- HOME_STATUS_SHORTCUTS: per-status arrays WITHOUT t, D, q entries:
+  - Active: [d] Defer, [r] Resolve, [x] Move to Trash
+  - InQueue: [d] Defer, [r] Resolve, [f] Force active, [x] Move to Trash
+  - Blocked: [b] Show blockers, [x] Move to Trash
+  - Deferred: [e] Enqueue, [r] Resolve, [x] Move to Trash
+  - Resolved: [e] Add comment to re-enqueue, [x] Move to Trash
+  - Trashed: [] (empty -- global row still shows)
+  - Inactive: [f] Activate, [e] Enqueue, [x] Move to Trash
+
+Keep existing STATUS_SHORTCUTS for non-home uses (getFooterShortcuts fallback).
+
+### Step 2: Render two explicit rows in Footer (footer.tsx)
+
+Add optional `globalShortcuts?: readonly Shortcut[]` prop to FooterProps. When provided:
+- Render per-status shortcuts on row 1 (using computeRows for wrapping)
+- Render globalShortcuts on row 2 (always its own row, never merged with row 1)
+
+When not provided: existing single-list behavior unchanged (detail view, trash view).
+
+### Step 3: Pass split shortcuts from AppShell (app-shell.tsx)
+
+When viewType === ViewType.Home:
+- footerLines = always 2 (1 per-status + 1 global)
+- Pass globalShortcuts={HOME_GLOBAL_SHORTCUTS} to Footer
+- Pass per-status shortcuts as the main shortcuts prop
+
+### Step 4: Move setFooterShortcuts from useEffect to input handlers (home-view.tsx)
+
+Move `setFooterShortcuts(HOME_STATUS_SHORTCUTS[status])` into the cursor movement handlers alongside setCursor. React 18 batches both state updates into one render. Remove the useEffect dependency on selectedIssueStatus.
+
+Keep confirmTrashInum useEffect (that transition is modal, not cursor-driven).
+
+### Step 5: Fix computeFooterLines accuracy (footer.tsx:148-155)
+
+Replace Math.ceil approximation with computeRows-based count. Benefits all views.
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| src/tui/footer.tsx | Split shortcuts, add globalShortcuts prop, fix computeFooterLines |
+| src/tui/app-shell.tsx | Import ViewType + new exports, use fixed 2-row footer for Home |
+| src/tui/home-view.tsx | Move setFooterShortcuts from useEffect to input handlers |
+| src/tui/footer.test.tsx | Update tests for new exports and computeFooterLines fix |
+| src/tui/app-shell.test.tsx | Update test 3 expected height for Home view (fixed 2 rows) |
+
+## Verification
+
+1. `npx vitest run src/tui/footer.test.tsx src/tui/app-shell.test.tsx`
+2. Run TUI. Scroll through all issue statuses. Footer row 2 (t, D, q) stays constant. Row 1 changes content but not line count. No screen jump.
+3. capture-pane: footer position (line number in pane) is fixed during scrolling.
+4. Resize terminal: layout reflows once, then stable during further scrolling.
+
+```
+
+---
+
+## From session: 603ac856-dabc-4813-977b-fee881d86587.jsonl
+
+### WRITE: /Users/matkatmusicllc/.claude/plans/dynamic-exploring-sloth.md
+
+```typescript
+# Plan: Make Footer 3 Rows Tall (2 Contextual Rows)
+
+## Context
+The footer currently has 2 rows: 1 global shortcuts row + 1 contextual shortcuts row. User wants the contextual area to be 2 rows, making the footer 3 rows total. This gives more visible shortcuts without pagination.
+
+## Changes
+
+### 1. `src/tui/footer.tsx`
+
+**a) Line 8:** `FOOTER_HEIGHT = 2` -> `FOOTER_HEIGHT = 3`
+
+**b) New function `paginateMultiRow`** (after `paginateRow`, ~line 207):
+- Takes `(shortcuts, columns, maxRows)`.
+- Calls existing `computeRows(shortcuts, columns)` to split into visual rows.
+- Groups rows into chunks of `maxRows` (2). Each chunk is flattened back to `Shortcut[]`.
+- Returns `Shortcut[][]` (same shape as `paginateRow`).
+
+**c) Footer render (lines 300-325, the `globalShortcuts` branch):**
+- Call `computeRows(contextual, columns)` to get row arrays.
+- Render each row with `renderShortcutRow`.
+- Page indicator on last contextual row only.
+- Pad with empty `<Text> </Text>` if fewer than 2 contextual rows, ensuring fixed 3-row height.
+
+### 2. `src/tui/app-shell.tsx`
+
+**Line 5:** Import `paginateMultiRow` instead of `paginateRow`.
+**Line 46:** `paginateRow(contextual, props.columns)` -> `paginateMultiRow(contextual, props.columns, 2)`.
+
+### 3. `src/tui/home-view.test.tsx`
+
+All `footerLines: 1` -> `footerLines: 3` (lines 43, 50, 60, 70, 84, 96, 108, 129, 137, 144, 155, 165, 177, 199).
+
+### 4. `src/tui/trash-view.test.tsx`
+
+**Line 37:** `footerLines: 1` -> `footerLines: 3`.
+
+## Verification
+
+1. `npx vitest run src/tui/footer.test.tsx` -- all footer tests pass
+2. `npx vitest run src/tui/app-shell.test.tsx` -- layout height tests pass with new constant
+3. `npx vitest run src/tui/home-view.test.tsx` -- updated footerLines values
+4. `npx vitest run src/tui/trash-view.test.tsx` -- updated footerLines values
+5. Manual: run the TUI, confirm footer is 3 rows (1 global + 2 contextual), content area shrinks by 1 row
+
+```
+
+---
+
+### EDIT: src/tui/footer.tsx
+
+**Old:**
+```
+export const FOOTER_HEIGHT = 2;
+```
+
+**New:**
+```
+export const FOOTER_HEIGHT = 3;
+```
+
+---
+
+### EDIT: src/tui/footer.tsx
+
+**Old:**
+```
+const THREAD_SHORTCUTS: readonly Shortcut[] = [
+```
+
+**New:**
+```
+export function paginateMultiRow(shortcuts: readonly Shortcut[], columns: number, maxRows: number): Shortcut[][] {
+    if (shortcuts.length === 0) return [[]];
+    const rows = computeRows(shortcuts, columns);
+    if (rows.length <= maxRows) return [shortcuts.slice()];
+
+    const pages: Shortcut[][] = [];
+    for (let i = 0; i < rows.length; i += maxRows) {
+        const chunk: Shortcut[] = [];
+        const end = Math.min(i + maxRows, rows.length);
+        for (let r = i; r < end; r++) {
+            for (let c = 0; c < rows[r].length; c++) {
+                chunk.push(rows[r][c]);
+            }
+        }
+        pages.push(chunk);
+    }
+    return pages;
+}
+
+const THREAD_SHORTCUTS: readonly Shortcut[] = [
+```
+
+---
+
+### EDIT: src/tui/footer.tsx
+
+**Old:**
+```
+    // 2-row mode: globalShortcuts provided
+    if (footerProps.globalShortcuts) {
+        const contextual = footerProps.contextualShortcuts ?? [];
+        const pageCount = footerProps.contextualPageCount ?? 1;
+        const page = footerProps.contextualPage ?? 0;
+
+        return (
+            <Box flexDirection="column">
+                {renderShortcutRow(footerProps.globalShortcuts, [], null)}
+                <Box>
+                    {contextual.length > 0
+                        ? renderShortcutRow(contextual, [], null)
+                        : <Text> </Text>}
+                    {pageCount > 1 && (
+                        <Box marginLeft={2}>
+                            {page > 0
+                                ? <Text bold color="cyan">{'<'}</Text>
+                                : <Text dimColor>{'<'}</Text>}
+                            <Text dimColor> ({page + 1}/{pageCount}) </Text>
+                            {page < pageCount - 1
+                                ? <Text bold color="cyan">{'>'}</Text>
+                                : <Text dimColor>{'>'}</Text>}
+                        </Box>
+                    )}
+                </Box>
+            </Box>
+        );
+    }
+```
+
+**New:**
+```
+    // 3-row mode: globalShortcuts provided (1 global + 2 contextual)
+    if (footerProps.globalShortcuts) {
+        const contextual = footerProps.contextualShortcuts ?? [];
+        const pageCount = footerProps.contextualPageCount ?? 1;
+        const page = footerProps.contextualPage ?? 0;
+        const contextualRows = contextual.length > 0 ? computeRows(contextual, columns) : [];
+        const maxContextualRows = 2;
+
+        const pageIndicator = pageCount > 1 ? (
+            <Box marginLeft={2}>
+                {page > 0
+                    ? <Text bold color="cyan">{'<'}</Text>
+                    : <Text dimColor>{'<'}</Text>}
+                <Text dimColor> ({page + 1}/{pageCount}) </Text>
+                {page < pageCount - 1
+                    ? <Text bold color="cyan">{'>'}</Text>
+                    : <Text dimColor>{'>'}</Text>}
+            </Box>
+        ) : null;
+
+        return (
+            <Box flexDirection="column">
+                {renderShortcutRow(footerProps.globalShortcuts, [], null)}
+                {contextualRows.map((row, idx) => (
+                    <Box key={idx}>
+                        {renderShortcutRow(row, [], null)}
+                        {idx === contextualRows.length - 1 && pageIndicator}
+                    </Box>
+                ))}
+                {Array.from({ length: maxContextualRows - contextualRows.length }, (_, i) => (
+                    <Text key={`pad-${i}`}> </Text>
+                ))}
+            </Box>
+        );
+    }
+```
+
+---
+
+### EDIT: src/tui/app-shell.tsx
+
+**Old:**
+```
+import { Footer, FOOTER_HEIGHT, computeGlobalShortcuts, stripGlobalDuplicates, paginateRow, getFooterShortcuts } from './footer.js';
+```
+
+**New:**
+```
+import { Footer, FOOTER_HEIGHT, computeGlobalShortcuts, stripGlobalDuplicates, paginateMultiRow, getFooterShortcuts } from './footer.js';
+```
+
+---
+
+### EDIT: src/tui/app-shell.tsx
+
+**Old:**
+```
+    const pages = paginateRow(contextual, props.columns);
+```
+
+**New:**
+```
+    const pages = paginateMultiRow(contextual, props.columns, 2);
+```
+
+---
+
+### EDIT: src/tui/home-view.test.tsx
+
+**Old:**
+```
+footerLines: 1
+```
+
+**New:**
+```
+footerLines: 3
+```
+
+---
+
+### EDIT: src/tui/home-view.test.tsx
+
+**Old:**
+```
+footerLines: 1
+```
+
+**New:**
+```
+footerLines: 3
+```
+
+---
+
+### EDIT: src/tui/trash-view.test.tsx
+
+**Old:**
+```
+const LP: LayoutProps = { headerLines: 3, footerLines: 1 };
+```
+
+**New:**
+```
+const LP: LayoutProps = { headerLines: 3, footerLines: 3 };
+```
+
+---
+
+### EDIT: src/tui/footer.tsx
+
+**Old:**
+```
+    // 3-row mode: globalShortcuts provided (1 global + 2 contextual)
+    if (footerProps.globalShortcuts) {
+        const contextual = footerProps.contextualShortcuts ?? [];
+        const pageCount = footerProps.contextualPageCount ?? 1;
+        const page = footerProps.contextualPage ?? 0;
+        const contextualRows = contextual.length > 0 ? computeRows(contextual, columns) : [];
+        const maxContextualRows = 2;
+
+        const pageIndicator = pageCount > 1 ? (
+            <Box marginLeft={2}>
+                {page > 0
+                    ? <Text bold color="cyan">{'<'}</Text>
+                    : <Text dimColor>{'<'}</Text>}
+                <Text dimColor> ({page + 1}/{pageCount}) </Text>
+                {page < pageCount - 1
+                    ? <Text bold color="cyan">{'>'}</Text>
+                    : <Text dimColor>{'>'}</Text>}
+            </Box>
+        ) : null;
+
+        return (
+            <Box flexDirection="column">
+                {renderShortcutRow(footerProps.globalShortcuts, [], null)}
+                {contextualRows.map((row, idx) => (
+                    <Box key={idx}>
+                        {renderShortcutRow(row, [], null)}
+                        {idx === contextualRows.length - 1 && pageIndicator}
+                    </Box>
+                ))}
+                {Array.from({ length: maxContextualRows - contextualRows.length }, (_, i) => (
+                    <Text key={`pad-${i}`}> </Text>
+                ))}
+            </Box>
+        );
+    }
+```
+
+**New:**
+```
+    // 3-row mode: globalShortcuts provided (1 global + 2 contextual)
+    if (footerProps.globalShortcuts) {
+        const contextual = footerProps.contextualShortcuts ?? [];
+        const pageCount = footerProps.contextualPageCount ?? 1;
+        const page = footerProps.contextualPage ?? 0;
+        const hasPagination = pageCount > 1;
+        const contextualRows = contextual.length > 0 ? computeRows(contextual, columns) : [];
+        const maxContextualRows = 2;
+
+        const pageIndicator = hasPagination ? (
+            <Box>
+                {page > 0
+                    ? <Text bold color="cyan">{'<'}</Text>
+                    : <Text dimColor>{'<'}</Text>}
+                <Text dimColor> ({page + 1}/{pageCount}) </Text>
+                {page < pageCount - 1
+                    ? <Text bold color="cyan">{'>'}</Text>
+                    : <Text dimColor>{'>'}</Text>}
+            </Box>
+        ) : null;
+
+        return (
+            <Box flexDirection="column" height={FOOTER_HEIGHT}>
+                {renderShortcutRow(footerProps.globalShortcuts, [], null)}
+                {contextualRows.length > 0
+                    ? renderShortcutRow(contextualRows[0], [], null)
+                    : <Text> </Text>}
+                {contextualRows.length > 1
+                    ? <Box>{renderShortcutRow(contextualRows[1], [], null)}{hasPagination && <Box marginLeft={2}>{pageIndicator}</Box>}</Box>
+                    : <Box>{hasPagination ? pageIndicator : <Text> </Text>}</Box>}
+            </Box>
+        );
+    }
+```
+
+---
+
+### EDIT: src/tui/footer.tsx
+
+**Old:**
+```
+export function paginateMultiRow(shortcuts: readonly Shortcut[], columns: number, maxRows: number): Shortcut[][] {
+    if (shortcuts.length === 0) return [[]];
+    const rows = computeRows(shortcuts, columns);
+    if (rows.length <= maxRows) return [shortcuts.slice()];
+
+    const pages: Shortcut[][] = [];
+    for (let i = 0; i < rows.length; i += maxRows) {
+        const chunk: Shortcut[] = [];
+        const end = Math.min(i + maxRows, rows.length);
+        for (let r = i; r < end; r++) {
+            for (let c = 0; c < rows[r].length; c++) {
+                chunk.push(rows[r][c]);
+            }
+        }
+        pages.push(chunk);
+    }
+    return pages;
+}
+```
+
+**New:**
+```
+export function paginateMultiRow(shortcuts: readonly Shortcut[], columns: number, maxRows: number): Shortcut[][] {
+    if (shortcuts.length === 0) return [[]];
+
+    // First pass: check if everything fits without pagination
+    const allRows = computeRows(shortcuts, columns);
+    if (allRows.length <= maxRows) return [shortcuts.slice()];
+
+    // Multi-page: build pages row-by-row, reserving indicator space on the last row of each page
+    const indicatorSpace = 14; // " < (N/M) > " with marginLeft
+    const pages: Shortcut[][] = [];
+    let remaining = shortcuts.slice();
+
+    while (remaining.length > 0) {
+        const page: Shortcut[] = [];
+        for (let rowNum = 0; rowNum < maxRows && remaining.length > 0; rowNum++) {
+            const isLastRow = rowNum === maxRows - 1;
+            const rowCols = isLastRow ? Math.max(20, columns - indicatorSpace) : columns;
+            let rowWidth = 0;
+            const gap = 2;
+
+            while (remaining.length > 0) {
+                const w = itemWidth(remaining[0]);
+                const needed = page.length > 0 && rowWidth > 0 ? gap + w : (rowWidth > 0 ? gap + w : w);
+                if (rowWidth + needed > rowCols && rowWidth > 0) break;
+                page.push(remaining[0]);
+                rowWidth += needed;
+                remaining = remaining.slice(1);
+            }
+        }
+        pages.push(page);
+    }
+    return pages;
+}
+```
+
+---
+
+### EDIT: src/tui/footer.tsx
+
+**Old:**
+```
+                const needed = page.length > 0 && rowWidth > 0 ? gap + w : (rowWidth > 0 ? gap + w : w);
+```
+
+**New:**
+```
+                const needed = rowWidth > 0 ? gap + w : w;
+```
+
+---
+
+### EDIT: src/tui/home-view.tsx
+
+**Old:**
+```
+        process.stderr.write(`[hotkey] input=${JSON.stringify(input)} status=${status} inum=${selectedIssue.inum}\n`);
+```
+
+**New:**
+```
+
+```
+
+---
+
+### WRITE: Plans/PLAYTEST_fix_footer_jumps.md
+
+```typescript
+Playtest checklist — fix_footer_jumps branch
+
+Footer 3-row layout
+  [ ] Footer shows exactly 3 rows on Home view
+  [ ] Row 1 = global shortcuts (Alt+H Home, Esc Back, q Quit, ? Help)
+  [ ] Row 2-3 = contextual shortcuts for current issue status
+  [ ] Footer stays 3 rows when cursor moves between issues of different statuses
+  [ ] Footer stays 3 rows on Trash view
+  [ ] Footer stays 3 rows on Detail view (if reachable)
+  [ ] Content area not clipped — all issues visible on a 24-row terminal
+
+Pagination (only fires if shortcuts overflow 2 contextual rows)
+  [ ] '>' advances to next page when indicator shows
+  [ ] '<' goes to previous page
+  [ ] Page indicator (e.g. "< (1/2) >") appears on last contextual row
+  [ ] Page indicator does not cause line wrapping or extra row
+
+Screen jump fix
+  [ ] Pressing '<' does NOT print debug text to the terminal
+  [ ] Pressing any other key does NOT print "[hotkey] input=..." to stderr
+  [ ] No visible screen jumps on any keypress
+
+Modal behavior
+  [ ] 'x' then confirm: modal takes full screen, footer hidden
+  [ ] Esc from modal: footer returns to 3 rows immediately
+  [ ] 'd' confirm in Trash view: same full-screen modal behavior
+  [ ] 'e' empty-trash modal: same full-screen modal behavior
+
+```
+
+---
+
+### EDIT: src/tui/footer.tsx
+
+**Old:**
+```
+export const FOOTER_HEIGHT = 3;
+```
+
+**New:**
+```
+export const FOOTER_HEIGHT = 4;
+```
+
+---
+
+### EDIT: src/tui/footer.tsx
+
+**Old:**
+```
+const FooterComponent: React.FC<FooterProps> = (footerProps: FooterProps) => {
+```
+
+**New:**
+```
+function centeredRule(label: string, width: number): string {
+    const padded = ` ${label} `;
+    const dashCount = Math.max(0, width - padded.length);
+    const left = Math.floor(dashCount / 2);
+    const right = dashCount - left;
+    return '\u2500'.repeat(left) + padded + '\u2500'.repeat(right);
+}
+
+const FooterComponent: React.FC<FooterProps> = (footerProps: FooterProps) => {
+```
+
+---
+
+### EDIT: src/tui/footer.tsx
+
+**Old:**
+```
+        return (
+            <Box flexDirection="column" height={FOOTER_HEIGHT}>
+                {renderShortcutRow(footerProps.globalShortcuts, [], null)}
+```
+
+**New:**
+```
+        return (
+            <Box flexDirection="column" height={FOOTER_HEIGHT}>
+                <Text bold wrap="truncate">{centeredRule('Hotkeys', columns)}</Text>
+                {renderShortcutRow(footerProps.globalShortcuts, [], null)}
+```
+
+---
+
+### EDIT: src/tui/home-view.test.tsx
+
+**Old:**
+```
+footerLines: 3
+```
+
+**New:**
+```
+footerLines: 4
+```
+
+---
+
+### EDIT: src/tui/home-view.test.tsx
+
+**Old:**
+```
+footerLines: 3
+```
+
+**New:**
+```
+footerLines: 4
+```
+
+---
+
+### EDIT: src/tui/trash-view.test.tsx
+
+**Old:**
+```
+footerLines: 3
+```
+
+**New:**
+```
+footerLines: 4
+```
+
+---
+
+### EDIT: Plans/TUI_PLAYTEST_TRACKER.md
+
+**Old:**
+```
+## Issue: Trash View's global hot keys 'Alt-h' and 'q' don't work.
+
+**What the user wants:** 
+These hot keys should work.
+
+**Why:** I was testing out the views and these hot keys didn't work.  They should either be disabled(dimmed) and implementation of functionality deferred until later, or enabled now if the handlers already exist. 
+
+**AUDIT.md reference:** [item number and current status]
+
+**Prerequisites:** [what must be done first]
+
+**Specific implementation items:** [concrete tasks]
+```
+
+**New:**
+```
+## Issue 8: Trash View's global hot keys 'Alt-h' and 'q' don't work.
+
+**What the user wants:** 
+These hot keys should work.
+
+**Why:** I was testing out the views and these hot keys didn't work.  They should either be disabled(dimmed) and implementation of functionality deferred until later, or enabled now if the handlers already exist. 
+
+**AUDIT.md reference:** Line 35 — "global shortcuts (s/b/g/q) not wired per view". Line 147 — "global shortcuts s/b/g/q work from all views — (FAILS: not wired)".
+
+**Root cause:** `run.tsx` ~line 162 has a guard that suppresses `handleGlobalKey` for Trash view (added for Issue 2 Esc double-fire fix). This blocks ALL global keys including 'q' (quit). Additionally, Alt-h is not implemented in `global-keys.tsx` at all — only single-char keys (s/b/g/n/t/q) and Esc are handled.
+
+**Prerequisites:** None — handlers exist for 'q', just need unblocking. Alt-h needs a new handler in global-keys.tsx.
+
+**Specific implementation items:**
+- `src/tui/run.tsx` ~line 162: Narrow the Trash guard to only suppress Esc (not all keys), or add 'q' and Alt-h handling directly in trash-view.tsx's useInput (matching the pattern used for Esc/onBack)
+- `src/tui/global-keys.tsx`: Add Alt-h handler that calls `callbacks.onNavigate({ type: ViewType.Home })`
+- `src/tui/trash-view.tsx`: Add 'q' handler calling a new `onQuit` prop, add Alt-h handler calling `onNavigate` to Home
+```
+
+---
+
+### EDIT: Plans/TUI_PLAYTEST_TRACKER.md
+
+**Old:**
+```
+## Issue: the 'delete' modal in the Trash View needs a border, and to be centered in the screen. 
+
+**What the user wants:** Improved visuals, using same modal format for all modals.
+
+**Why:** It looks different from the 'empty' modal and that modal looks correct.
+
+**AUDIT.md reference:** [item number and current status]
+
+**Prerequisites:** [what must be done first]
+
+**Specific implementation items:** [concrete tasks]
+```
+
+**New:**
+```
+## Issue 9: the 'delete' modal in the Trash View needs a border, and to be centered in the screen. 
+
+**What the user wants:** Improved visuals, using same modal format for all modals.
+
+**Why:** It looks different from the 'empty' modal and that modal looks correct.
+
+**AUDIT.md reference:** Not in AUDIT.md — UX consistency enhancement.
+
+**Current state:** The delete modal navigates to `ViewType.ConfirmModal` and is rendered by `confirm-modal.tsx`, which positions content at top-left with `paddingLeft={2}` and `paddingTop={1}` — no border, no centering. The empty-trash modal uses `TypeToConfirmModal` in `trash-view.tsx` which uses `justifyContent="center"`, `alignItems="center"`, and `borderStyle="single"`.
+
+**Prerequisites:** None.
+
+**Specific implementation items:**
+- `src/tui/confirm-modal.tsx`: Add `justifyContent="center"` and `alignItems="center"` to the outer Box, add `borderStyle="single"` and padding to the inner content Box — matching the `TypeToConfirmModal` pattern in trash-view.tsx
+- Alternatively: refactor both modals to share a single centered+bordered modal wrapper component
+```
+
+---
+
+### EDIT: Plans/TUI_PLAYTEST_TRACKER.md
+
+**Old:**
+```
+## Issue: the 'empty' modal in the Trash View should not show the hotkeys footer
+
+**What the user wants:** modals don't show any hot keys
+
+**Why:** eliminate user's perceived choices of available hotkeys.  Only the modal defines what hotkeys are usable when the modal is displayed.
+
+**Prerequisites:** [what must be done first]
+
+**Specific implementation items:** [concrete tasks]
+```
+
+**New:**
+```
+## Issue 10: the 'empty' modal in the Trash View should not show the hotkeys footer
+
+**What the user wants:** modals don't show any hot keys
+
+**Why:** eliminate user's perceived choices of available hotkeys.  Only the modal defines what hotkeys are usable when the modal is displayed.
+
+**Current state:** The empty-trash modal renders inside TrashView (not via ConfirmModal navigation), so the AppShell's `isModalView` check doesn't fire and the footer remains visible. The delete modal navigates to `ViewType.ConfirmModal`, which triggers `isModalView` in app-shell.tsx and correctly hides header+footer. The empty-trash modal calls `props.setFooterShortcuts([])` to clear shortcuts, but the footer frame (separator + empty rows) still renders.
+
+**Prerequisites:** None.
+
+**Specific implementation items:**
+- Option A (quick): Have the empty-trash modal navigate to `ViewType.ConfirmModal` like the delete modal does, so `isModalView` hides header+footer automatically
+- Option B: Add a `hideFooter` flag to AppShell state that views can set, and have the empty-trash modal set it when active
+- Option A is preferred for consistency — both trash modals would use the same ConfirmModal routing path
+```
+
+---
+
