@@ -6,7 +6,8 @@ import { HomeView } from './home-view.js';
 import type { Issue } from '../types.js';
 import { IssueStatus } from '../types.js';
 import { LayoutProps, TerminalProps } from './views.js';
-import { STATUS_SHORTCUTS, CONFIRM_TRASH_SHORTCUTS } from './footer.js';
+import { STATUS_SHORTCUTS } from './footer.js';
+import { ViewType } from './views.js';
 
 function makeIssue(overrides: Partial<Issue> & { inum: number; title: string }): Issue {
     return {
@@ -40,14 +41,14 @@ const MAX_AGENTS = 3;
 describe('HomeView (Phase 1 — render only)', () => {
     it('renders without crashing', () => {
         const { lastFrame } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 1 }} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 4 }} />
         );
         expect(lastFrame()).toBeDefined();
     });
 
     it('renders issue titles in the list', () => {
         const { lastFrame } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 1 }} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 4 }} />
         );
         const plain = stripAnsi(lastFrame()!);
         expect(plain).toContain('migrate_ServerDerivedFields');
@@ -57,7 +58,7 @@ describe('HomeView (Phase 1 — render only)', () => {
 
     it('renders inum identifiers (I-N format)', () => {
         const { lastFrame } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 1 }} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 4 }} />
         );
         const plain = stripAnsi(lastFrame()!);
         expect(plain).toContain('I-1');
@@ -67,7 +68,7 @@ describe('HomeView (Phase 1 — render only)', () => {
 
     it('renders status text for each issue', () => {
         const { lastFrame } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 1 }} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 4 }} />
         );
         const plain = stripAnsi(lastFrame()!);
         const lines = plain.split('\n');
@@ -81,7 +82,7 @@ describe('HomeView (Phase 1 — render only)', () => {
 
     it('renders unread marker for unread issues', () => {
         const { lastFrame } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 1 }} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 4 }} />
         );
         const plain = stripAnsi(lastFrame()!);
         const lines = plain.split('\n');
@@ -93,7 +94,7 @@ describe('HomeView (Phase 1 — render only)', () => {
 
     it('does not render unread marker for read issues', () => {
         const { lastFrame } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 1 }} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 4 }} />
         );
         const plain = stripAnsi(lastFrame()!);
         const lines = plain.split('\n');
@@ -105,7 +106,7 @@ describe('HomeView (Phase 1 — render only)', () => {
 
     it('renders empty state when no issues', () => {
         const { lastFrame } = render(
-            <HomeView issues={[]} unreadInums={new Set()} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 1 }} />
+            <HomeView issues={[]} unreadInums={new Set()} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 4 }} />
         );
         const plain = stripAnsi(lastFrame()!);
         expect(plain.toLowerCase()).toMatch(/no issues/);
@@ -126,7 +127,7 @@ function nonCursorIssueLines(frame: string): string[] {
 describe('HomeView — cursor navigation', () => {
     it('selected row shows > indicator', () => {
         const { lastFrame } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 1 }} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 4 }} />
         );
         const frame = lastFrame()!;
         expect(cursorLine(frame)).toBeDefined();
@@ -134,14 +135,14 @@ describe('HomeView — cursor navigation', () => {
 
     it('selected row inum matches first issue on initial render', () => {
         const { lastFrame } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 1 }} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 4 }} />
         );
         expect(cursorLine(lastFrame()!)).toContain('I-1');
     });
 
     it('non-selected rows show spaces instead of >', () => {
         const { lastFrame } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 1 }} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 4 }} />
         );
         const others = nonCursorIssueLines(lastFrame()!);
         expect(others.length).toBe(MOCK_ISSUES.length - 1);
@@ -152,7 +153,7 @@ describe('HomeView — cursor navigation', () => {
 
     it('down arrow moves cursor to next item', async () => {
         const { lastFrame, stdin } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 1 }} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 4 }} />
         );
         await tick();
         stdin.write('\x1b[B');
@@ -162,7 +163,7 @@ describe('HomeView — cursor navigation', () => {
 
     it('up arrow moves cursor to previous item', async () => {
         const { lastFrame, stdin } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 1 }} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 4 }} />
         );
         await tick();
         stdin.write('\x1b[B');
@@ -174,7 +175,7 @@ describe('HomeView — cursor navigation', () => {
 
     it('cursor does not go above first item', async () => {
         const { lastFrame, stdin } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 1 }} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 4 }} />
         );
         await tick();
         stdin.write('\x1b[A');
@@ -184,7 +185,7 @@ describe('HomeView — cursor navigation', () => {
 
     it('cursor does not go below last item', async () => {
         const { lastFrame, stdin } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 1 }} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={{ columns: 80, rows: 24 }} layoutProps={{ headerLines: 3, footerLines: 4 }} />
         );
         await tick();
         for (let i = 0; i < 20; i++) {
@@ -196,7 +197,7 @@ describe('HomeView — cursor navigation', () => {
 });
 
 const TP : TerminalProps = { columns: 80, rows: 24 };
-const LP : LayoutProps = { headerLines: 3, footerLines: 1 };
+const LP : LayoutProps = { headerLines: 3, footerLines: 4 };
 
 describe('HomeView — status change hotkeys', () => {
     it('"d" on Active calls handler with Deferred', async () => {
@@ -625,130 +626,63 @@ describe('HomeView — no-op hotkey guards', () => {
     });
 });
 
-describe('HomeView — trash confirmation', () => {
-    it('"x" once enters confirmation state (footer changes to confirm shortcuts)', async () => {
-        const footerSpy = vi.fn();
+describe('HomeView — trash confirmation via ConfirmModal navigation', () => {
+    it('"x" calls onNavigate with ConfirmModal view for selected issue', async () => {
+        const navSpy = vi.fn();
         const trashSpy = vi.fn();
         const { stdin } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} setFooterShortcuts={footerSpy} onTrashIssue={trashSpy} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} onTrashIssue={trashSpy} onNavigate={navSpy} onBack={() => {}} />
         );
         await settle();
-        footerSpy.mockClear();
         stdin.write('x');
         await settle();
-        expect(footerSpy).toHaveBeenCalledWith(CONFIRM_TRASH_SHORTCUTS);
+        expect(navSpy).toHaveBeenCalledTimes(1);
+        const view = navSpy.mock.calls[0][0];
+        expect(view.type).toBe(ViewType.ConfirmModal);
+        expect(view.message).toContain('I-1');
+        expect(view.message).toContain('Confirm trash');
+        expect(view.hotKeys[0].key).toBe('x');
         expect(trashSpy).not.toHaveBeenCalled();
     });
 
-    it('"x" "x" calls onTrashIssue with selected issue inum', async () => {
+    it('"x" does nothing without onNavigate prop', async () => {
         const trashSpy = vi.fn();
         const { stdin } = render(
             <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} onTrashIssue={trashSpy} />
         );
-        await tick();
-        stdin.write('x');
         await settle();
         stdin.write('x');
-        await settle();
-        expect(trashSpy).toHaveBeenCalledWith(1);
-    });
-
-    it('"x" then Esc cancels (restores normal footer)', async () => {
-        const footerSpy = vi.fn();
-        const trashSpy = vi.fn();
-        const { stdin } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} setFooterShortcuts={footerSpy} onTrashIssue={trashSpy} />
-        );
-        await settle();
-        footerSpy.mockClear();
-        stdin.write('x');
-        await settle();
-        expect(footerSpy).toHaveBeenCalledWith(CONFIRM_TRASH_SHORTCUTS);
-        footerSpy.mockClear();
-        stdin.write('\x1b');
-        await settle();
-        expect(footerSpy).toHaveBeenCalledWith(STATUS_SHORTCUTS[IssueStatus.Active]);
-        expect(trashSpy).not.toHaveBeenCalled();
-    });
-
-    it('"x" then other key (e.g. "a") stays in confirm state (ignored)', async () => {
-        const trashSpy = vi.fn();
-        const footerSpy = vi.fn();
-        const { stdin } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} setFooterShortcuts={footerSpy} onTrashIssue={trashSpy} />
-        );
-        await settle();
-        stdin.write('x');
-        await settle();
-        footerSpy.mockClear();
-        stdin.write('a');
         await settle();
         expect(trashSpy).not.toHaveBeenCalled();
-        // Still in confirm state -- footer should NOT have been reset
-        expect(footerSpy).not.toHaveBeenCalled();
-    });
-
-    it('"x" then arrow key stays in confirm state (ignored)', async () => {
-        const trashSpy = vi.fn();
-        const footerSpy = vi.fn();
-        const { stdin } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} setFooterShortcuts={footerSpy} onTrashIssue={trashSpy} />
-        );
-        await settle();
-        stdin.write('x');
-        await settle();
-        footerSpy.mockClear();
-        stdin.write('\x1b[B');
-        await settle();
-        expect(trashSpy).not.toHaveBeenCalled();
-        // Still in confirm state -- footer should NOT have been reset
-        expect(footerSpy).not.toHaveBeenCalled();
     });
 
     it('"x" available from all statuses', async () => {
         const statuses = [IssueStatus.Active, IssueStatus.InQueue, IssueStatus.Blocked, IssueStatus.Deferred, IssueStatus.Resolved];
         for (const status of statuses) {
-            const footerSpy = vi.fn();
+            const navSpy = vi.fn();
             const issues = [makeIssue({ inum: 99, title: 'test_issue', status })];
             const { stdin } = render(
-                <HomeView issues={issues} unreadInums={new Set()} maxAgents={3} terminalProps={TP} layoutProps={LP} setFooterShortcuts={footerSpy} />
+                <HomeView issues={issues} unreadInums={new Set()} maxAgents={3} terminalProps={TP} layoutProps={LP} onNavigate={navSpy} onBack={() => {}} />
             );
             await settle();
-            footerSpy.mockClear();
             stdin.write('x');
             await settle();
-            expect(footerSpy, `status ${IssueStatus[status]}`).toHaveBeenCalledWith(CONFIRM_TRASH_SHORTCUTS);
+            expect(navSpy, `status ${IssueStatus[status]}`).toHaveBeenCalledTimes(1);
+            expect(navSpy.mock.calls[0][0].type).toBe(ViewType.ConfirmModal);
         }
     });
 
-    it('confirm state highlights selected row red', async () => {
-        const { lastFrame, stdin } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} />
-        );
-        await tick();
-        stdin.write('x');
-        await tick();
-        const frame = lastFrame()!;
-        // The frame should contain red ANSI codes on the I-1 row
-        const lines = frame.split('\n');
-        const i1Line = lines.find(l => stripAnsi(l).includes('I-1'));
-        expect(i1Line).toBeDefined();
-        // Red ANSI escape: \x1b[31m
-        expect(i1Line).toContain('\x1b[31m');
-    });
-
-    it('"x" "x" on navigated issue trashes the correct inum', async () => {
-        const trashSpy = vi.fn();
+    it('"x" on navigated issue targets the correct inum', async () => {
+        const navSpy = vi.fn();
         const { stdin } = render(
-            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} onTrashIssue={trashSpy} />
+            <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} onNavigate={navSpy} onBack={() => {}} />
         );
         await tick();
-        // Navigate to I-3 (index 2)
         stdin.write('\x1b[B'); await tick();
         stdin.write('\x1b[B'); await tick();
         stdin.write('x'); await settle();
-        stdin.write('x'); await settle();
-        expect(trashSpy).toHaveBeenCalledWith(3);
+        expect(navSpy).toHaveBeenCalledTimes(1);
+        expect(navSpy.mock.calls[0][0].message).toContain('I-3');
     });
 });
 
@@ -1024,23 +958,16 @@ describe('HomeView — Shift+D dim toggle', () => {
         expect(i1Line, 'I-1 should be dimmed').toContain('\x1b[2m');
     });
 
-    it('Shift+D during trash confirmation is ignored', async () => {
-        const footerSpy = vi.fn();
-        const { lastFrame, stdin } = render(
-            <HomeView issues={MOCK_ISSUES_WITH_BLOCKERS} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} setFooterShortcuts={footerSpy} />
+    it('Shift+D then x navigates to ConfirmModal (dim state preserved)', async () => {
+        const navSpy = vi.fn();
+        const { stdin } = render(
+            <HomeView issues={MOCK_ISSUES_WITH_BLOCKERS} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} onNavigate={navSpy} onBack={() => {}} />
         );
         await settle();
-        // Enter trash confirmation
-        stdin.write('x'); await settle();
-        expect(footerSpy).toHaveBeenCalledWith(CONFIRM_TRASH_SHORTCUTS);
-        footerSpy.mockClear();
-        // Try Shift+D — should be ignored (still in confirm state)
         stdin.write('D'); await settle();
-        // Footer should not have changed (still in confirmation)
-        expect(footerSpy).not.toHaveBeenCalled();
-        // Esc should still cancel confirmation normally
-        stdin.write('\x1b'); await settle();
-        expect(footerSpy).toHaveBeenCalledWith(STATUS_SHORTCUTS[IssueStatus.Active]);
+        stdin.write('x'); await settle();
+        expect(navSpy).toHaveBeenCalledTimes(1);
+        expect(navSpy.mock.calls[0][0].type).toBe(ViewType.ConfirmModal);
     });
 });
 
@@ -1106,21 +1033,12 @@ describe('HomeView — manual flash interaction', () => {
 });
 
 describe('HomeView — header subtitle', () => {
-    it('header subtitle changes during trash confirmation and reverts', async () => {
+    it('header subtitle is set on mount', async () => {
         const subtitleSpy = vi.fn();
-        const { stdin } = render(
+        render(
             <HomeView issues={MOCK_ISSUES} unreadInums={UNREAD_INUMS} maxAgents={MAX_AGENTS} terminalProps={TP} layoutProps={LP} setHeaderSubtitleOverride={subtitleSpy} />
         );
         await settle();
-        // Default subtitle
-        expect(subtitleSpy).toHaveBeenCalledWith("Info: (*) unread, (i) needs input");
-        subtitleSpy.mockClear();
-        // Enter trash confirmation
-        stdin.write('x'); await settle();
-        expect(subtitleSpy).toHaveBeenCalledWith("Confirm delete with 'x', Esc to cancel");
-        subtitleSpy.mockClear();
-        // Cancel with Esc
-        stdin.write('\x1b'); await settle();
         expect(subtitleSpy).toHaveBeenCalledWith("Info: (*) unread, (i) needs input");
     });
 

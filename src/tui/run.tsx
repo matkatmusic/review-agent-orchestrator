@@ -34,6 +34,7 @@ const [
     { useMockStore },
     { DetailView },
     { handleGlobalKey },
+    { ConfirmModalView },
 ] = await Promise.all([
     import('react'),
     import('ink'),
@@ -44,6 +45,7 @@ const [
     import('./use-mock-store.js'),
     import('./detail.js'),
     import('./global-keys.js'),
+    import('./confirm-modal.js'),
 ]);
 
 import type { View } from './views.js';
@@ -99,7 +101,7 @@ export function AppWrapper() {
 
     // Global key handling — suppressed for Detail which has its own useInput
     useInput((input, key) => {
-        if (currentView.type === ViewType.Detail || currentView.type === ViewType.Trash) return;
+        if (currentView.type === ViewType.Detail || currentView.type === ViewType.Trash || currentView.type === ViewType.ConfirmModal) return;
         handleGlobalKey(input, key, currentView.type, {
             onBack: goBack,
             onQuit: () => exit(),
@@ -127,6 +129,15 @@ export function AppWrapper() {
         layout: any,
         setHeaderSubtitleOverride: any,
     ) => {
+        if (currentView.type === ViewType.ConfirmModal) {
+            return (
+                <ConfirmModalView
+                    view={currentView}
+                    terminalProps={terminal}
+                />
+            );
+        }
+
         if (currentView.type === ViewType.Home) {
             return (
                 <HomeView
@@ -140,6 +151,8 @@ export function AppWrapper() {
                     onStatusHotkeyPressed={mockStoreWithUpdater.updateIssueStatusCallback}
                     onTrashIssue={mockStoreWithUpdater.trashIssueCallback}
                     onSelect={(inum) => navigateToView({ type: ViewType.Detail, inum })}
+                    onNavigate={navigateToView}
+                    onBack={goBack}
                 />
             );
         }
@@ -194,6 +207,7 @@ export function AppWrapper() {
                     onPermanentDelete={mockStoreWithUpdater.permanentDeleteCallback}
                     onEmptyTrash={mockStoreWithUpdater.emptyTrashCallback}
                     onBack={goBack}
+                    onNavigate={navigateToView}
                 />
             );
         }

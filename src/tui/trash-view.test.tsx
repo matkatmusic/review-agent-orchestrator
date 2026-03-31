@@ -6,8 +6,8 @@ import { TrashView } from './trash-view.js';
 import type { Issue } from '../types.js';
 import { IssueStatus } from '../types.js';
 import type { TerminalProps, LayoutProps } from './views.js';
-import { VIEW_SHORTCUTS } from './footer.js';
 import { ViewType } from './views.js';
+import { VIEW_SHORTCUTS } from './footer.js';
 
 
 function makeTrashedIssue(overrides: Partial<Issue> & { inum: number; title: string; trashed_at: string }): Issue {
@@ -34,7 +34,7 @@ const TRASHED_ISSUES: Issue[] = [
 ];
 
 const TP: TerminalProps = { columns: 80, rows: 24 };
-const LP: LayoutProps = { headerLines: 3, footerLines: 1 };
+const LP: LayoutProps = { headerLines: 3, footerLines: 4 };
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = () => new Promise(r => setTimeout(r, 50));
@@ -188,16 +188,19 @@ describe('TrashView -- setFooterShortcuts', () => {
         expect(handler).toHaveBeenCalledWith(VIEW_SHORTCUTS[ViewType.Trash]);
     });
 
-    it('hides footer shortcuts when d pressed (delete modal)', async () => {
+    it('footer shortcuts unchanged when d pressed (navigates to ConfirmModal)', async () => {
         const handler = vi.fn();
+        const navSpy = vi.fn();
         const { stdin } = render(
-            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} setFooterShortcuts={handler} />
+            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} setFooterShortcuts={handler} onNavigate={navSpy} onBack={() => {}} />
         );
         await settle();
         handler.mockClear();
         stdin.write('d');
         await settle();
-        expect(handler).toHaveBeenCalledWith([]);
+        // Footer not cleared — delete navigates to ConfirmModal instead
+        expect(handler).not.toHaveBeenCalledWith([]);
+        expect(navSpy).toHaveBeenCalledTimes(1);
     });
 
     it('hides footer shortcuts when e pressed (empty trash modal)', async () => {
@@ -212,16 +215,14 @@ describe('TrashView -- setFooterShortcuts', () => {
         expect(handler).toHaveBeenCalledWith([]);
     });
 
-    it('restores Trash view shortcuts after Esc cancels', async () => {
-        const handler = vi.fn();
+    it('Esc without active modal calls onBack', async () => {
+        const backSpy = vi.fn();
         const { stdin } = render(
-            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} setFooterShortcuts={handler} />
+            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} onBack={backSpy} />
         );
         await settle();
-        stdin.write('d'); await settle();
-        handler.mockClear();
         stdin.write('\x1b'); await settle();
-        expect(handler).toHaveBeenCalledWith(VIEW_SHORTCUTS[ViewType.Trash]);
+        expect(backSpy).toHaveBeenCalledTimes(1);
     });
 });
 
@@ -270,73 +271,43 @@ describe('TrashView -- permanent delete hotkey [d]', () => {
     beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(FIXED_NOW); });
     afterEach(() => { vi.restoreAllMocks(); });
 
-    it('d once enters confirm state (does not call onPermanentDelete)', async () => {
-        const handler = vi.fn();
+    it('d calls onNavigate with ConfirmModal view (does not call onPermanentDelete)', async () => {
+        const deleteSpy = vi.fn();
+        const navSpy = vi.fn();
         const { stdin } = render(
-            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} onPermanentDelete={handler} />
+            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} onPermanentDelete={deleteSpy} onNavigate={navSpy} onBack={() => {}} />
         );
         await tick();
         stdin.write('d'); await settle();
-        expect(handler).not.toHaveBeenCalled();
+        expect(deleteSpy).not.toHaveBeenCalled();
+        expect(navSpy).toHaveBeenCalledTimes(1);
+        const view = navSpy.mock.calls[0][0];
+        expect(view.type).toBe(ViewType.ConfirmModal);
+        expect(view.message).toContain('Really delete I-9?');
+        expect(view.hotKeys[0].key).toBe('d');
+        expect(view.hotKeys[0].label).toBe('Confirm delete');
     });
 
-    it('d d calls onPermanentDelete with selected inum', async () => {
-        const handler = vi.fn();
+    it('d does nothing without onNavigate prop', async () => {
+        const deleteSpy = vi.fn();
         const { stdin } = render(
-            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} onPermanentDelete={handler} />
+            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} onPermanentDelete={deleteSpy} />
         );
         await tick();
         stdin.write('d'); await settle();
-        stdin.write('d'); await settle();
-        expect(handler).toHaveBeenCalledWith(9);
+        expect(deleteSpy).not.toHaveBeenCalled();
     });
 
-    it('d then Esc cancels', async () => {
-        const handler = vi.fn();
-        const footerSpy = vi.fn();
+    it('d on navigated issue targets the correct inum', async () => {
+        const navSpy = vi.fn();
         const { stdin } = render(
-            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} onPermanentDelete={handler} setFooterShortcuts={footerSpy} />
+            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} onNavigate={navSpy} onBack={() => {}} />
         );
-        await settle();
+        await tick();
+        stdin.write('\x1b[B'); await tick();
         stdin.write('d'); await settle();
-        stdin.write('\x1b'); await settle();
-        expect(handler).not.toHaveBeenCalled();
-    });
-
-    it('d shows confirmation modal with issue number', async () => {
-        const { lastFrame, stdin } = render(
-            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} />
-        );
-        await tick();
-        stdin.write('d'); await tick();
-        const plain = stripAnsi(lastFrame()!);
-        expect(plain).toContain('Really delete I-9?');
-        expect(plain).toContain('Confirm delete');
-        expect(plain).toContain('Cancel');
-    });
-
-    it('modal replaces issue list (titles not visible during confirm)', async () => {
-        const { lastFrame, stdin } = render(
-            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} />
-        );
-        await tick();
-        stdin.write('d'); await tick();
-        const plain = stripAnsi(lastFrame()!);
-        expect(plain).not.toContain('trashed_blocked_by_five');
-        expect(plain).not.toContain('trashed_blocks_four');
-        expect(plain).not.toContain('trashed_standalone');
-    });
-
-    it('modal disappears after Esc (issue list returns)', async () => {
-        const { lastFrame, stdin } = render(
-            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} />
-        );
-        await tick();
-        stdin.write('d'); await tick();
-        stdin.write('\x1b'); await tick();
-        const plain = stripAnsi(lastFrame()!);
-        expect(plain).not.toContain('Really delete');
-        expect(plain).toContain('trashed_blocked_by_five');
+        expect(navSpy).toHaveBeenCalledTimes(1);
+        expect(navSpy.mock.calls[0][0].message).toContain('I-10');
     });
 });
 
@@ -475,16 +446,17 @@ describe('TrashView -- header subtitle override', () => {
     beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(FIXED_NOW); });
     afterEach(() => { vi.restoreAllMocks(); });
 
-    it('does not set subtitle override during delete confirmation (modal handles it)', async () => {
+    it('d navigates to ConfirmModal instead of setting subtitle', async () => {
         const handler = vi.fn();
+        const navSpy = vi.fn();
         const { stdin } = render(
-            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} setHeaderSubtitleOverride={handler} />
+            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} setHeaderSubtitleOverride={handler} onNavigate={navSpy} onBack={() => {}} />
         );
         await settle();
         handler.mockClear();
         stdin.write('d'); await settle();
-        // Should always clear (undefined), never set a string
-        expect(handler).toHaveBeenCalledWith(undefined);
+        // Subtitle not changed — delete navigates away
+        expect(navSpy).toHaveBeenCalledTimes(1);
     });
 
     it('does not set subtitle override during empty trash confirmation (modal handles it)', async () => {
@@ -498,15 +470,14 @@ describe('TrashView -- header subtitle override', () => {
         expect(handler).toHaveBeenCalledWith(undefined);
     });
 
-    it('clears subtitle override after cancellation', async () => {
+    it('clears subtitle override during empty trash confirmation', async () => {
         const handler = vi.fn();
         const { stdin } = render(
             <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} setHeaderSubtitleOverride={handler} />
         );
         await settle();
-        stdin.write('d'); await settle();
         handler.mockClear();
-        stdin.write('\x1b'); await settle();
+        stdin.write('e'); await settle();
         expect(handler).toHaveBeenCalledWith(undefined);
     });
 });
@@ -517,17 +488,15 @@ describe('TrashView -- confirmation state isolation', () => {
     beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(FIXED_NOW); });
     afterEach(() => { vi.restoreAllMocks(); });
 
-    it('while in d confirm state, r is ignored', async () => {
+    it('d navigates to ConfirmModal (subsequent keys handled there)', async () => {
+        const navSpy = vi.fn();
         const restoreSpy = vi.fn();
-        const deleteSpy = vi.fn();
         const { stdin } = render(
-            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} onRestoreIssue={restoreSpy} onPermanentDelete={deleteSpy} />
+            <TrashView issues={TRASHED_ISSUES} terminalProps={TP} layoutProps={LP} onRestoreIssue={restoreSpy} onNavigate={navSpy} onBack={() => {}} />
         );
         await tick();
         stdin.write('d'); await settle();
-        stdin.write('r'); await settle();
-        expect(restoreSpy).not.toHaveBeenCalled();
-        expect(deleteSpy).not.toHaveBeenCalled();
+        expect(navSpy).toHaveBeenCalledTimes(1);
     });
 
     it('while in e confirm state, d is ignored', async () => {

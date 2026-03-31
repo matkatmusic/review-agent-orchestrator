@@ -46,6 +46,8 @@ function getSubtitle(view: View, threadInfo?: { inThread: boolean }): string {
             return view.mode === 'blockedBy' ? 'Select blocking issues' : 'Select blocked issues';
         case ViewType.Trash:
             return 'Trashed issues pending deletion';
+        case ViewType.ConfirmModal:
+            return '';
         default:
             return assertNever(view);
     }

@@ -4,8 +4,10 @@ import type { Issue, ChangedStatusProps } from '../types.js';
 import { IssueStatus, IssueStatusStringsMap } from '../types.js';
 import { statusToColor } from './status-color.js';
 import type { TerminalProps, LayoutProps } from './views.js';
+import { ViewType } from './views.js';
+import type { View } from './views.js';
 import type { Shortcut } from './footer.js';
-import { STATUS_SHORTCUTS, CONFIRM_TRASH_SHORTCUTS } from './footer.js';
+import { STATUS_SHORTCUTS } from './footer.js';
 import { KeyCombinations, matchesKeyCombination } from './hotkeys.js';
 import { Header } from './header.js';
 import { text } from 'stream/consumers';
@@ -262,6 +264,8 @@ export interface HomeViewProps {
     onTrashIssue?: (inum: number) => void;
     onSelect?: (inum: number) => void;
     setHeaderSubtitleOverride?: (s: string | undefined) => void;
+    onNavigate?: (view: View) => void;
+    onBack?: () => void;
 }
 
 /*
@@ -279,7 +283,6 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
     const [flashingBlockerInums, setFlashingBlockerInums] = useState<Set<number>>(new Set());
     const [manualBlockerFlash, setManualBlockerFlash] = useState(false);
     const [flashBold, setFlashBold] = useState(true);
-    const [confirmTrashInum, setConfirmTrashInum] = useState<number | null>(null);
     const [dimUnrelated, setDimUnrelated] = useState(false);
 
     const clampedCursor = homeViewProps.issues.length > 0
@@ -307,22 +310,16 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
 
     useEffect(() => {
         if (!homeViewProps.setFooterShortcuts) return;
-        if (confirmTrashInum !== null) {
-            homeViewProps.setFooterShortcuts(CONFIRM_TRASH_SHORTCUTS);
-        } else if (selectedIssueStatus !== undefined) {
+        if (selectedIssueStatus !== undefined) {
             homeViewProps.setFooterShortcuts(STATUS_SHORTCUTS[selectedIssueStatus]);
         }
-    }, [selectedIssueStatus, confirmTrashInum]);
+    }, [selectedIssueStatus]);
 
     useEffect(() => {
         if (!homeViewProps.setHeaderSubtitleOverride) return;
-        homeViewProps.setHeaderSubtitleOverride(
-            confirmTrashInum !== null
-                ? "Confirm delete with 'x', Esc to cancel"
-                : "Info: (*) unread, (i) needs input"
-        );
+        homeViewProps.setHeaderSubtitleOverride("Info: (*) unread, (i) needs input");
         return () => homeViewProps.setHeaderSubtitleOverride?.(undefined);
-    }, [confirmTrashInum]);
+    }, []);
 
     function flashBlockers(inum: number) {
         const issue = homeViewProps.issues.find(i => i.inum === inum);
@@ -352,20 +349,16 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
     }
 
     useInput((input, key) => {
-        // process.stderr.write(`input=${JSON.stringify(input)} key=${JSON.stringify(key)}\n`); 
-        // Confirmation state machine for trash
-        if (confirmTrashInum !== null) {
-            if (input === 'x') {
-                homeViewProps.onTrashIssue?.(confirmTrashInum);
-                setConfirmTrashInum(null);
-            } else if (key.escape) {
-                setConfirmTrashInum(null);
-            }
-            return;
-        }
-        if (input === 'x' && homeViewProps.issues.length > 0) {
+        if (input === 'x' && homeViewProps.issues.length > 0 && homeViewProps.onNavigate) {
             const idx = Math.min(cursorRef.current, Math.max(0, homeViewProps.issues.length - 1));
-            setConfirmTrashInum(homeViewProps.issues[idx].inum);
+            const issue = homeViewProps.issues[idx];
+            homeViewProps.onNavigate({
+                type: ViewType.ConfirmModal,
+                message: `I-${issue.inum} ${issue.title}\nConfirm trash?`,
+                hotKeys: [{ key: 'x', label: 'Confirm trash' }, { key: 'Esc', label: 'Cancel' }],
+                onConfirm: () => { homeViewProps.onTrashIssue?.(issue.inum); homeViewProps.onBack?.(); },
+                onCancel: () => { homeViewProps.onBack?.(); },
+            });
             return;
         }
 
@@ -454,7 +447,7 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
             {/* issue rows */}
             {homeViewProps.issues.map((issue, i) => {
                 const selected = i === clampedCursor;
-                const isConfirmTarget = confirmTrashInum === issue.inum;
+                const isConfirmTarget = false;
                 const unread = homeViewProps.unreadInums.has(issue.inum);
                 const isBlocker = flashingBlockerInums.has(issue.inum);
                 const isBlockedBySelected = blockedByCurrentIssue.has(issue.inum);

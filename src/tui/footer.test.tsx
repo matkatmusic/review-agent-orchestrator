@@ -7,7 +7,7 @@ import stripAnsi from 'strip-ansi';
 import {
     Footer,
     VIEW_SHORTCUTS,
-    FOOTER_LINES,
+    FOOTER_HEIGHT,
     getFooterShortcuts,
     getFocusableShortcuts,
     computeFooterLines,
@@ -35,8 +35,8 @@ const INVERSE_OPEN = chalk.inverse(' ').split(' ')[0];
 // ---- Exported constants ----
 
 describe('Footer — constants', () => {
-    it('FOOTER_LINES is defined', () => {
-        expect(FOOTER_LINES).toBeDefined();
+    it('FOOTER_HEIGHT is defined', () => {
+        expect(FOOTER_HEIGHT).toBeDefined();
     });
 });
 

@@ -1,47 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { Issue } from '../types.js';
-import type { TerminalProps, LayoutProps } from './views.js';
+import type { View, TerminalProps, LayoutProps } from './views.js';
 import { ViewType } from './views.js';
 import type { Shortcut } from './footer.js';
-import { VIEW_SHORTCUTS, CONFIRM_DELETE_SHORTCUTS } from './footer.js';
+import { VIEW_SHORTCUTS } from './footer.js';
 
 const COL = {
     cursor: 2,
     id:     5,
     days:   8,
 } as const;
-
-// ---- Confirmation modal ----
-
-interface ConfirmModalProps {
-    prompt: string;
-    shortcuts: readonly Shortcut[];
-    columns: number;
-    rows: number;
-}
-
-function ConfirmModal(props: ConfirmModalProps): React.ReactElement {
-    return (
-        <Box justifyContent="center" alignItems="center" width={props.columns} height={props.rows}>
-            <Box flexDirection="column" alignItems="center" borderStyle="single" paddingLeft={1} paddingRight={1}>
-                <Text> </Text>
-                <Text bold color='red'>  {props.prompt}  </Text>
-                <Text> </Text>
-                <Box gap={2} justifyContent="center">
-                    {props.shortcuts.map(s => (
-                        <Text key={s.key}>
-                            <Text>[</Text>
-                            <Text color="cyan" bold>{s.key}</Text>
-                            <Text>] {s.label}</Text>
-                        </Text>
-                    ))}
-                </Box>
-                <Text> </Text>
-            </Box>
-        </Box>
-    );
-}
 
 interface TypeToConfirmModalProps {
     prompt: string;
@@ -143,6 +112,7 @@ export interface TrashViewProps {
     onPermanentDelete?: (inum: number) => void;
     onEmptyTrash?: () => void;
     onBack?: () => void;
+    onNavigate?: (view: View) => void;
 }
 
 export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashViewProps) => {
@@ -150,7 +120,6 @@ export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashV
     const cursorRef = useRef(cursor);
     cursorRef.current = cursor;
 
-    const [confirmDeleteInum, setConfirmDeleteInum] = useState<number | null>(null);
     const [emptyTrashTyped, setEmptyTrashTyped] = useState<string | null>(null);
     const confirmEmptyTrash = emptyTrashTyped !== null;
 
@@ -162,32 +131,21 @@ export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashV
     useEffect(() => {
         if (!props.setFooterShortcuts) return;
         const shortcuts = (() => {
-            if (confirmDeleteInum !== null || confirmEmptyTrash)
+            if (confirmEmptyTrash)
                 return [];
             return VIEW_SHORTCUTS[ViewType.Trash].filter(
                 s => props.issues.length > 0 || s.key === 'Esc' || s.key === 'q'
             );
         })();
         props.setFooterShortcuts(shortcuts);
-    }, [confirmDeleteInum, confirmEmptyTrash, props.issues.length]);
+    }, [confirmEmptyTrash, props.issues.length]);
 
-    // Header subtitle override effect — modal handles prompts now
+    // Header subtitle override effect
     useEffect(() => {
         props.setHeaderSubtitleOverride?.(undefined);
-    }, [confirmDeleteInum, confirmEmptyTrash]);
+    }, [confirmEmptyTrash]);
 
     useInput((input, key) => {
-        // Delete confirmation state machine
-        if (confirmDeleteInum !== null) {
-            if (input === 'd') {
-                props.onPermanentDelete?.(confirmDeleteInum);
-                setConfirmDeleteInum(null);
-            } else if (key.escape) {
-                setConfirmDeleteInum(null);
-            }
-            return;
-        }
-
         // Empty trash confirmation state machine
         if (emptyTrashTyped !== null) {
             if (key.escape) {
@@ -215,9 +173,16 @@ export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashV
         } else if (input === 'r' && props.issues.length > 0) {
             const idx = Math.min(cursorRef.current, Math.max(0, props.issues.length - 1));
             props.onRestoreIssue?.(props.issues[idx].inum);
-        } else if (input === 'd' && props.issues.length > 0) {
+        } else if (input === 'd' && props.issues.length > 0 && props.onNavigate) {
             const idx = Math.min(cursorRef.current, Math.max(0, props.issues.length - 1));
-            setConfirmDeleteInum(props.issues[idx].inum);
+            const issue = props.issues[idx];
+            props.onNavigate({
+                type: ViewType.ConfirmModal,
+                message: `Really delete I-${issue.inum}?`,
+                hotKeys: [{ key: 'd', label: 'Confirm delete' }, { key: 'Esc', label: 'Cancel' }],
+                onConfirm: () => { props.onPermanentDelete?.(issue.inum); props.onBack?.(); },
+                onCancel: () => { props.onBack?.(); },
+            });
         } else if (input === 'e' && props.issues.length > 0) {
             setEmptyTrashTyped('');
         } else if (key.escape) {
@@ -241,18 +206,6 @@ export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashV
     const headerColumns = `|${center('ID', COL.id)}|${center('Title', titleWidth)}|${center('Days', COL.days)}|`;
 
 
-    if (confirmDeleteInum !== null) {
-        return (
-            <Box flexDirection="column">
-                <ConfirmModal
-                    prompt={`Really delete I-${confirmDeleteInum}?`}
-                    shortcuts={CONFIRM_DELETE_SHORTCUTS}
-                    columns={props.terminalProps.columns}
-                    rows={contentRows}
-                />
-            </Box>
-        );
-    }
     if (emptyTrashTyped !== null) {
         return (
             <Box flexDirection="column">

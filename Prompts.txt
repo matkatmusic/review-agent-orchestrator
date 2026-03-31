@@ -1,16 +1,2 @@
-2026-03-25 — enqueue_hotkey session
-
-User prompt: "tackle @Plans/TUI_PLAYTEST_TRACKER.md issue 4"
-
-Issue 4: Enqueue hotkey ('e') doesn't work for deferred issues.
-Root cause: 'e' handler in home-view.tsx had no case for IssueStatus.Inactive. Restoring from trash sets Inactive status; footer shows [e] Enqueue but keypress fell through silently.
-Fix: Added Inactive branch to 'e' and 'f' handlers. Added stderr debug logging.
-
-2026-03-25 — Session: trash
-
-Prompt 1: "tackle @Plans/TUI_PLAYTEST_TRACKER.md Issue 2"
-- Fixed Esc double-fire bug in Trash view (modal dismiss + goBack firing simultaneously)
-- Applied DetailView's onBack pattern: suppressed global handler for Trash, added onBack prop
-
-Prompt 2: "add to @Plans/TUI_PLAYTEST_TRACKER.md: the 'home' global hotkeys are displayed inside the detail view, and selecting a response with replies and pressing enter doesn't display those replies; the reply thread is instead resolved."
-- Documented Issue 6 (footer shortcuts persist across views) and Issue 7 (Enter resolves thread instead of entering it)
+2026-03-31 16:40 — Review fix_footer_jumps_convo.md, identify lost code changes, create plan for generalized ConfirmModal that every view uses for confirmation popups. Restore code changes lost when worktree was deleted.
+2026-03-31 16:50 — Implement the plan: generalized ConfirmModal view, 4-row footer with separator, refactor home-view and trash-view to navigate to ConfirmModal instead of inline state.

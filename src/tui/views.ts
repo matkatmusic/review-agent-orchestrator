@@ -7,6 +7,7 @@ export enum ViewType {
     GroupView,
     IssuePicker,
     Trash,
+    ConfirmModal,
 }
 
 export const ViewTypeStringsMap = new Map<ViewType, string>([
@@ -18,6 +19,7 @@ export const ViewTypeStringsMap = new Map<ViewType, string>([
     [ViewType.GroupView, "Group View"],
     [ViewType.IssuePicker, "Issue Picker"],
     [ViewType.Trash, "Trash"],
+    [ViewType.ConfirmModal, "Confirm"],
 ]);
 
 export type View =
@@ -28,7 +30,8 @@ export type View =
     | { type: ViewType.BlockingMap }
     | { type: ViewType.GroupView }
     | { type: ViewType.IssuePicker; mode: 'blockedBy' | 'blocks'; inum: number }
-    | { type: ViewType.Trash };
+    | { type: ViewType.Trash }
+    | { type: ViewType.ConfirmModal; message: string; hotKeys: Array<{ key: string; label: string }>; onConfirm: () => void; onCancel: () => void };
 
 export interface TerminalProps {
     columns: number;

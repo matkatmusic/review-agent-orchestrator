@@ -4,7 +4,7 @@ import { ViewType } from './views.js';
 import { IssueStatus } from '../types.js';
 import { Ink_keyofKeys_Choices, InkKeyOfKeysStringMap, KeyCombinations, getHotKeyLabel } from './hotkeys.js';
 
-export const FOOTER_LINES = 1; // deprecated — use computeFooterLines()
+export const FOOTER_HEIGHT = 4;
 
 export interface Shortcut {
     readonly key: string;
@@ -28,6 +28,10 @@ export interface FooterProps extends FooterOptions {
     readonly focusedIndex?: number | null;
     readonly columns?: number;
     readonly shortcutOverrides?: readonly Shortcut[];
+    readonly globalShortcuts?: readonly Shortcut[];
+    readonly contextualShortcuts?: readonly Shortcut[];
+    readonly contextualPageCount?: number;
+    readonly contextualPage?: number;
 }
 
 const inkKey = (k: Ink_keyofKeys_Choices) => InkKeyOfKeysStringMap.get(k)!;
@@ -87,6 +91,7 @@ export const VIEW_SHORTCUTS: Record<ViewType, readonly Shortcut[]> = {
         { key: 'Esc', label: 'Back' },
         { key: 'q', label: 'Quit' },
     ],
+    [ViewType.ConfirmModal]: [],
 };
 
 const dimShortcut: Shortcut = { key: comboKey(KeyCombinations.SHIFT_D), label: 'Dim unrelated issues' };
@@ -116,6 +121,25 @@ export const CONFIRM_EMPTY_SHORTCUTS: readonly Shortcut[] = [
     { key: 'Esc', label: 'Cancel' },
 ];
 
+export function paginateMultiRow(shortcuts: readonly Shortcut[], columns: number, maxRows: number): Shortcut[][] {
+    if (shortcuts.length === 0) return [[]];
+    const rows = computeRows(shortcuts, columns);
+    if (rows.length <= maxRows) return [shortcuts.slice()];
+
+    const pages: Shortcut[][] = [];
+    for (let i = 0; i < rows.length; i += maxRows) {
+        const chunk: Shortcut[] = [];
+        const end = Math.min(i + maxRows, rows.length);
+        for (let r = i; r < end; r++) {
+            for (let c = 0; c < rows[r].length; c++) {
+                chunk.push(rows[r][c]);
+            }
+        }
+        pages.push(chunk);
+    }
+    return pages;
+}
+
 const THREAD_SHORTCUTS: readonly Shortcut[] = [
     { key: inkKey(Ink_keyofKeys_Choices.RETURN), label: 'Send' },
     { key: comboKey(KeyCombinations.SCROLL_UP_DOWN), label: 'Scroll' },
@@ -137,6 +161,14 @@ export function getFocusableShortcuts(viewType: ViewType, options?: FooterOption
     return getFooterShortcuts(viewType, options).filter(
         s => s.action !== undefined && !s.disabled,
     );
+}
+
+function centeredRule(label: string, columns: number): string {
+    const text = ` ${label} `;
+    const remaining = columns - text.length;
+    const left = Math.floor(remaining / 2);
+    const right = remaining - left;
+    return '─'.repeat(left) + text + '─'.repeat(right);
 }
 
 /** Measure the display width of a shortcut item: "[key] label" */
@@ -178,8 +210,72 @@ function computeRows(shortcuts: readonly Shortcut[], columns: number): Shortcut[
     return rows;
 }
 
+function renderShortcutRow(shortcuts: readonly Shortcut[], focusable: Shortcut[], focusedIndex: number | null | undefined): React.ReactElement {
+    return (
+        <Box>
+            {shortcuts.map((s, i) => {
+                const focusIdx = focusable.indexOf(s);
+                const isFocused = focusedIndex != null && focusIdx !== -1 && focusIdx === focusedIndex;
+                const label = `[${s.key}] ${s.label}`;
+                const marginRight = i < shortcuts.length - 1 ? 2 : 0;
+
+                const content = isFocused
+                    ? <Text>{[...label].map((ch, ci) => <Text key={ci} inverse bold>{ch}</Text>)}</Text>
+                    : s.disabled
+                    ? <Text dimColor>{label}</Text>
+                    : <Text><Text bold color="cyan">[{s.key}]</Text> {s.label}</Text>;
+
+                return (
+                    <Box key={i} marginRight={marginRight}>
+                        {content}
+                    </Box>
+                );
+            })}
+        </Box>
+    );
+}
+
 const FooterComponent: React.FC<FooterProps> = (footerProps: FooterProps) => {
     const columns = footerProps.columns ?? 80;
+
+    // 4-row mode: globalShortcuts provided (1 separator + 1 global + 2 contextual)
+    if (footerProps.globalShortcuts) {
+        const contextual = footerProps.contextualShortcuts ?? [];
+        const pageCount = footerProps.contextualPageCount ?? 1;
+        const page = footerProps.contextualPage ?? 0;
+        const contextualRows = contextual.length > 0 ? computeRows(contextual, columns) : [];
+        const maxContextualRows = 2;
+
+        const pageIndicator = pageCount > 1 ? (
+            <Box marginLeft={2}>
+                {page > 0
+                    ? <Text bold color="cyan">{'<'}</Text>
+                    : <Text dimColor>{'<'}</Text>}
+                <Text dimColor> ({page + 1}/{pageCount}) </Text>
+                {page < pageCount - 1
+                    ? <Text bold color="cyan">{'>'}</Text>
+                    : <Text dimColor>{'>'}</Text>}
+            </Box>
+        ) : null;
+
+        return (
+            <Box flexDirection="column" height={FOOTER_HEIGHT}>
+                <Text bold wrap="truncate">{centeredRule('Hotkeys', columns)}</Text>
+                {renderShortcutRow(footerProps.globalShortcuts, [], null)}
+                {contextualRows.map((row, idx) => (
+                    <Box key={idx}>
+                        {renderShortcutRow(row, [], null)}
+                        {idx === contextualRows.length - 1 && pageIndicator}
+                    </Box>
+                ))}
+                {Array.from({ length: maxContextualRows - contextualRows.length }, (_, i) => (
+                    <Text key={`pad-${i}`}> </Text>
+                ))}
+            </Box>
+        );
+    }
+
+    // Legacy single-list mode
     const options: FooterOptions = {
         inThread: footerProps.inThread,
         responseSelected: footerProps.responseSelected,
@@ -189,7 +285,6 @@ const FooterComponent: React.FC<FooterProps> = (footerProps: FooterProps) => {
         inputFocused: footerProps.inputFocused,
     };
     const shortcuts = footerProps.shortcutOverrides ?? getFooterShortcuts(footerProps.viewType, options);
-
     const focusable = getFocusableShortcuts(footerProps.viewType, options);
     const rows = computeRows(shortcuts, columns);
 
@@ -197,24 +292,7 @@ const FooterComponent: React.FC<FooterProps> = (footerProps: FooterProps) => {
         <Box flexDirection="column">
             {rows.map((row, rowIdx) => (
                 <Box key={rowIdx}>
-                    {row.map((s, i) => {
-                        const focusIdx = focusable.indexOf(s);
-                        const isFocused = footerProps.focusedIndex != null && focusIdx !== -1 && focusIdx === footerProps.focusedIndex;
-                        const label = `[${s.key}] ${s.label}`;
-                        const marginRight = i < row.length - 1 ? 2 : 0;
-
-                        const content = isFocused
-                            ? <Text>{[...label].map((ch, ci) => <Text key={ci} inverse bold>{ch}</Text>)}</Text>
-                            : s.disabled
-                            ? <Text dimColor>{label}</Text>
-                            : <Text><Text bold color="cyan">[{s.key}]</Text> {s.label}</Text>;
-
-                        return (
-                            <Box key={i} marginRight={marginRight}>
-                                {content}
-                            </Box>
-                        );
-                    })}
+                    {renderShortcutRow(row, focusable, footerProps.focusedIndex)}
                 </Box>
             ))}
         </Box>
