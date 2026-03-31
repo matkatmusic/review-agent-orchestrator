@@ -12,3 +12,4 @@ package-lock.json
 .worktree-daemon.log
 .claude/skills/
 .worktrees
+node-compile-cache
