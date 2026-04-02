@@ -13,7 +13,7 @@
          --heartbeat-timeout=<ms>: cleanup delay after last heartbeat (default 15000)
          --check-interval=<ms>: how often daemon checks for expired worktrees (default 5000)
       */
-      "command": "npm run build && node dist/cli/pick-repo.js ${input:worktreeName}",
+      "command": "npm run build && node dist/cli/pick-repo.js \"${input:worktreeName}\" \"${input:grillMePrompt}\"",
       "options": {
         "cwd": "${workspaceFolder}/worktree-spawn-util"
       },
@@ -32,6 +32,11 @@
       "id": "worktreeName",
       "type": "promptString",
       "description": "Worktree name"
+    },
+    {
+      "id": "grillMePrompt",
+      "type": "promptString",
+      "description": "Describe what this worktree is focused on"
     }
   ]
 }
