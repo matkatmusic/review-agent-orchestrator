@@ -1,2 +1,2 @@
-2026-03-31 16:40 — Review fix_footer_jumps_convo.md, identify lost code changes, create plan for generalized ConfirmModal that every view uses for confirmation popups. Restore code changes lost when worktree was deleted.
-2026-03-31 16:50 — Implement the plan: generalized ConfirmModal view, 4-row footer with separator, refactor home-view and trash-view to navigate to ConfirmModal instead of inline state.
+2026-03-31 — /grill-me session on ConfirmModal design, then implement split layout with issue preview.
+Decisions: TypeToConfirmModal stays separate; split layout (confirm box top, preview bottom); preview as React.ReactNode on View type; header row 1 only (origin view name), no footer; both home-view and trash-view pass IssuePreview.

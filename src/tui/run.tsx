@@ -81,6 +81,10 @@ export function AppWrapper() {
         setViewStack(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
     }, []);
 
+    const dismissModal = useCallback(() => {
+        setViewStack(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
+    }, []);
+
     const goHome = useCallback(() => {
         setViewStack([{ type: ViewType.Home }]);
     }, []);
@@ -153,6 +157,7 @@ export function AppWrapper() {
                     onSelect={(inum) => navigateToView({ type: ViewType.Detail, inum })}
                     onNavigate={navigateToView}
                     onBack={goBack}
+                    dismissModal={dismissModal}
                 />
             );
         }
@@ -208,6 +213,7 @@ export function AppWrapper() {
                     onEmptyTrash={mockStoreWithUpdater.emptyTrashCallback}
                     onBack={goBack}
                     onNavigate={navigateToView}
+                    dismissModal={dismissModal}
                 />
             );
         }

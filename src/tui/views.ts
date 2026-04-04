@@ -1,3 +1,5 @@
+import type React from 'react';
+
 export enum ViewType {
     Home,
     Detail,
@@ -31,7 +33,7 @@ export type View =
     | { type: ViewType.GroupView }
     | { type: ViewType.IssuePicker; mode: 'blockedBy' | 'blocks'; inum: number }
     | { type: ViewType.Trash }
-    | { type: ViewType.ConfirmModal; message: string; hotKeys: Array<{ key: string; label: string }>; onConfirm: () => void; onCancel: () => void };
+    | { type: ViewType.ConfirmModal; message: string; hotKeys: Array<{ key: string; label: string; action: () => void }>; onCancel: () => void; originViewType: ViewType; preview?: React.ReactNode };
 
 export interface TerminalProps {
     columns: number;

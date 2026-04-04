@@ -5,6 +5,7 @@ import type { View, TerminalProps, LayoutProps } from './views.js';
 import { ViewType } from './views.js';
 import type { Shortcut } from './footer.js';
 import { VIEW_SHORTCUTS } from './footer.js';
+import { IssuePreview } from './confirm-modal.js';
 
 const COL = {
     cursor: 2,
@@ -113,6 +114,7 @@ export interface TrashViewProps {
     onEmptyTrash?: () => void;
     onBack?: () => void;
     onNavigate?: (view: View) => void;
+    dismissModal?: () => void;
 }
 
 export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashViewProps) => {
@@ -179,9 +181,14 @@ export const TrashView: React.FunctionComponent<TrashViewProps> = (props: TrashV
             props.onNavigate({
                 type: ViewType.ConfirmModal,
                 message: `Really delete I-${issue.inum}?`,
-                hotKeys: [{ key: 'd', label: 'Confirm delete' }, { key: 'Esc', label: 'Cancel' }],
-                onConfirm: () => { props.onPermanentDelete?.(issue.inum); props.onBack?.(); },
-                onCancel: () => { props.onBack?.(); },
+                hotKeys: [
+                    { key: 'd', label: 'Confirm delete', action: () => { props.onPermanentDelete?.(issue.inum); props.dismissModal?.(); } },
+                    { key: 'r', label: 'Restore', action: () => { props.onRestoreIssue?.(issue.inum); props.dismissModal?.(); } },
+                    { key: 'Esc', label: 'Cancel', action: () => { props.dismissModal?.(); } },
+                ],
+                onCancel: () => { props.dismissModal?.(); },
+                originViewType: ViewType.Trash,
+                preview: <IssuePreview issue={issue} columns={props.terminalProps.columns} />,
             });
         } else if (input === 'e' && props.issues.length > 0) {
             setEmptyTrashTyped('');

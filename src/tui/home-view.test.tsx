@@ -642,6 +642,9 @@ describe('HomeView — trash confirmation via ConfirmModal navigation', () => {
         expect(view.message).toContain('I-1');
         expect(view.message).toContain('Confirm trash');
         expect(view.hotKeys[0].key).toBe('x');
+        expect(typeof view.hotKeys[0].action).toBe('function');
+        expect(view.originViewType).toBe(ViewType.Home);
+        expect(view.preview).toBeDefined();
         expect(trashSpy).not.toHaveBeenCalled();
     });
 

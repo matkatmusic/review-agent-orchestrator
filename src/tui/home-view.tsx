@@ -10,6 +10,7 @@ import type { Shortcut } from './footer.js';
 import { STATUS_SHORTCUTS } from './footer.js';
 import { KeyCombinations, matchesKeyCombination } from './hotkeys.js';
 import { Header } from './header.js';
+import { IssuePreview } from './confirm-modal.js';
 import { text } from 'stream/consumers';
 
 const COL = {
@@ -266,6 +267,7 @@ export interface HomeViewProps {
     setHeaderSubtitleOverride?: (s: string | undefined) => void;
     onNavigate?: (view: View) => void;
     onBack?: () => void;
+    dismissModal?: () => void;
 }
 
 /*
@@ -355,9 +357,13 @@ export const HomeView: React.FunctionComponent<HomeViewProps> = (homeViewProps: 
             homeViewProps.onNavigate({
                 type: ViewType.ConfirmModal,
                 message: `I-${issue.inum} ${issue.title}\nConfirm trash?`,
-                hotKeys: [{ key: 'x', label: 'Confirm trash' }, { key: 'Esc', label: 'Cancel' }],
-                onConfirm: () => { homeViewProps.onTrashIssue?.(issue.inum); homeViewProps.onBack?.(); },
-                onCancel: () => { homeViewProps.onBack?.(); },
+                hotKeys: [
+                    { key: 'x', label: 'Confirm trash', action: () => { homeViewProps.onTrashIssue?.(issue.inum); homeViewProps.dismissModal?.(); } },
+                    { key: 'Esc', label: 'Cancel', action: () => { homeViewProps.dismissModal?.(); } },
+                ],
+                onCancel: () => { homeViewProps.dismissModal?.(); },
+                originViewType: ViewType.Home,
+                preview: <IssuePreview issue={issue} columns={homeViewProps.terminalProps.columns} />,
             });
             return;
         }

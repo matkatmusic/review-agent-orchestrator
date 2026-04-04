@@ -284,8 +284,16 @@ describe('TrashView -- permanent delete hotkey [d]', () => {
         const view = navSpy.mock.calls[0][0];
         expect(view.type).toBe(ViewType.ConfirmModal);
         expect(view.message).toContain('Really delete I-9?');
+        expect(view.hotKeys).toHaveLength(3);
         expect(view.hotKeys[0].key).toBe('d');
         expect(view.hotKeys[0].label).toBe('Confirm delete');
+        expect(typeof view.hotKeys[0].action).toBe('function');
+        expect(view.hotKeys[1].key).toBe('r');
+        expect(view.hotKeys[1].label).toBe('Restore');
+        expect(typeof view.hotKeys[1].action).toBe('function');
+        expect(view.hotKeys[2].key).toBe('Esc');
+        expect(view.originViewType).toBe(ViewType.Trash);
+        expect(view.preview).toBeDefined();
     });
 
     it('d does nothing without onNavigate prop', async () => {

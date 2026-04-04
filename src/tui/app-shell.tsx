@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Box } from 'ink';
 import { type View, type TerminalProps, type LayoutProps, ViewType } from './views.js';
-import { Header, HEADER_LINES } from './header.js';
+import { Header, HEADER_LINES, HEADER_SINGLE_ROW_LINES } from './header.js';
 import { Footer, computeFooterLines, getFooterShortcuts, FOOTER_HEIGHT } from './footer.js';
 import type { FooterOptions, Shortcut } from './footer.js';
 
@@ -40,11 +40,16 @@ export const AppShell: React.FC<AppShellProps> = ({
     const isModalView = viewType === ViewType.ConfirmModal;
 
     if (isModalView) {
-        const contentHeight = rows;
+        const contentHeight = rows - HEADER_SINGLE_ROW_LINES;
         return (
             <Box flexDirection="column" height={rows}>
+                <Header
+                    currentView={currentView}
+                    columns={columns}
+                    singleRow={true}
+                />
                 <Box flexDirection="column" height={contentHeight} flexGrow={1}>
-                    {children(setFooterOptions, setFooterShortcuts, { columns, rows }, { headerLines: 0, footerLines: 0 }, setHeaderSubtitleOverride)}
+                    {children(setFooterOptions, setFooterShortcuts, { columns, rows }, { headerLines: HEADER_SINGLE_ROW_LINES, footerLines: 0 }, setHeaderSubtitleOverride)}
                 </Box>
             </Box>
         );
